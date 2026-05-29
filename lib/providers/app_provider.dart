@@ -1383,6 +1383,122 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ─── GIFTS DASHBOARD (نموذج الهديتين الثابتتين) ───────────────
+  /// id ثابت للهدية العامة في المخزن (slot = 0 أو 1)
+  String giftGlobalId(int slot) => 'gift_global_$slot';
+
+  /// الهدية العامة المخزّنة في المخزن (null لو مش متعرّفة)
+  Map<String, dynamic>? globalGift(int slot) {
+    final id = giftGlobalId(slot);
+    final idx = db.giftTypes.indexWhere((g) => g['id'] == id);
+    return idx >= 0 ? db.giftTypes[idx] : null;
+  }
+
+  /// تعريف/تعديل هدية المخزن (الاسم والسعر) — slot = 0 أو 1
+  void setGlobalGift(int slot, String name, double price) {
+    final id = giftGlobalId(slot);
+    final entry = {'id': id, 'name': name, 'price': price};
+    final idx = db.giftTypes.indexWhere((g) => g['id'] == id);
+    if (idx >= 0) {
+      db.giftTypes[idx] = entry;
+    } else {
+      db.giftTypes.add(entry);
+    }
+    // حدّث الاسم/السعر في الخطوط اللي معلّمة الهدية دي ولسه ماتباعتش
+    for (final g in db.groups) {
+      for (final e in g.gifts) {
+        if (e['giftTypeId'] == id && e['sold'] != true) {
+          e['name'] = name;
+          e['price'] = price;
+        }
+      }
+    }
+    save();
+    notifyListeners();
+  }
+
+  /// هل الخط معلّم إنه استلم هدية المخزن رقم slot؟
+  bool giftReceived(String gid, int slot) {
+    final g = db.groups.firstWhere((x) => x.id == gid,
+        orElse: () => Group(id: '', phone: ''));
+    return g.gifts.any((e) => e['giftTypeId'] == giftGlobalId(slot));
+  }
+
+  /// هل تم بيع هدايا الخط (نزل الكاش)؟
+  bool giftSold(String gid) {
+    final g = db.groups.firstWhere((x) => x.id == gid,
+        orElse: () => Group(id: '', phone: ''));
+    final received = g.gifts
+        .where((e) =>
+            e['giftTypeId'] == giftGlobalId(0) ||
+            e['giftTypeId'] == giftGlobalId(1))
+        .toList();
+    return received.isNotEmpty && received.every((e) => e['sold'] == true);
+  }
+
+  /// تبديل علامة استلام هدية المخزن (slot) لخط — مع تصحيح الربح لو كانت مباعة
+  void toggleGiftReceived(String gid, int slot) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    final g = db.groups[i];
+    final gt = globalGift(slot);
+    if (gt == null) return;
+    final id = gt['id'] as String;
+    final eIdx = g.gifts.indexWhere((e) => e['giftTypeId'] == id);
+    if (eIdx >= 0) {
+      // إزالة العلامة — لو كانت مباعة، اخصم ربحها
+      if (g.gifts[eIdx]['sold'] == true) {
+        g.giftProfit -= (g.gifts[eIdx]['price'] ?? 0).toDouble();
+        if (g.giftProfit < 0) g.giftProfit = 0;
+      }
+      g.gifts.removeAt(eIdx);
+    } else {
+      g.gifts.add({
+        'giftTypeId': id,
+        'name': gt['name'],
+        'price': gt['price'],
+        'date': _today(),
+        'sold': false,
+      });
+    }
+    save();
+    notifyListeners();
+  }
+
+  /// تبديل حالة "تم البيع" لكل هدايا الخط — يضيف/يخصم الربح أوتوماتيك
+  void toggleGiftSold(String gid) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    final g = db.groups[i];
+    final received = g.gifts
+        .where((e) =>
+            e['giftTypeId'] == giftGlobalId(0) ||
+            e['giftTypeId'] == giftGlobalId(1))
+        .toList();
+    if (received.isEmpty) return;
+    final currentlySold = received.every((e) => e['sold'] == true);
+    if (currentlySold) {
+      // إلغاء البيع — اخصم
+      for (final e in received) {
+        if (e['sold'] == true) {
+          g.giftProfit -= (e['price'] ?? 0).toDouble();
+          e['sold'] = false;
+        }
+      }
+      if (g.giftProfit < 0) g.giftProfit = 0;
+    } else {
+      // تأكيد البيع — أضف ربح اللي لسه ماتباعش
+      for (final e in received) {
+        if (e['sold'] != true) {
+          g.giftProfit += (e['price'] ?? 0).toDouble();
+          e['sold'] = true;
+        }
+      }
+    }
+    save();
+    notifyListeners();
+  }
+
   // ─── GUEST USERS ─────────────────────────────────────────────
   void addGuestUser(GuestUser g) {
     db.guestUsers.add(g);

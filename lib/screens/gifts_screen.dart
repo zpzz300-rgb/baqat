@@ -1,11 +1,14 @@
 // lib/screens/gifts_screen.dart
+// 🎁 لوحة الهدايا — جدول صف واحد لكل خط رئيسي.
+// المخزن فوق فيه هديتين ثابتتين (كل الخطوط بتاخد نفس الهدايا).
+// قدام كل خط: علامة صح لهدية ١، علامة صح لهدية ٢، وعلامة «تم البيع»
+// اللي بتضيف الكاش لربح المجموعة أوتوماتيك (group.giftProfit).
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
-import '../utils/phone_utils.dart';
 
 class GiftsScreen extends StatefulWidget {
   const GiftsScreen({super.key});
@@ -13,12 +16,10 @@ class GiftsScreen extends StatefulWidget {
   State<GiftsScreen> createState() => _GiftsScreenState();
 }
 
-class _GiftsScreenState extends State<GiftsScreen> with SingleTickerProviderStateMixin {
+class _GiftsScreenState extends State<GiftsScreen>
+    with SingleTickerProviderStateMixin {
   late TabController _tabs;
-  bool _warehouseExpanded = true;
   String _filterText = '';
-  final _nameCtrl  = TextEditingController();
-  final _priceCtrl = TextEditingController();
 
   @override
   void initState() {
@@ -29,8 +30,6 @@ class _GiftsScreenState extends State<GiftsScreen> with SingleTickerProviderStat
   @override
   void dispose() {
     _tabs.dispose();
-    _nameCtrl.dispose();
-    _priceCtrl.dispose();
     super.dispose();
   }
 
@@ -42,7 +41,8 @@ class _GiftsScreenState extends State<GiftsScreen> with SingleTickerProviderStat
           color: Colors.white,
           child: TabBar(
             controller: _tabs,
-            labelStyle: GoogleFonts.cairo(fontWeight: FontWeight.w700, fontSize: 13),
+            labelStyle:
+                GoogleFonts.cairo(fontWeight: FontWeight.w700, fontSize: 13),
             unselectedLabelStyle: GoogleFonts.cairo(fontSize: 13),
             labelColor: AppColors.blue2,
             unselectedLabelColor: AppColors.muted,
@@ -57,7 +57,7 @@ class _GiftsScreenState extends State<GiftsScreen> with SingleTickerProviderStat
           child: TabBarView(
             controller: _tabs,
             children: [
-              _buildDistributionTab(),
+              _buildDashboardTab(),
               _buildLogTab(),
             ],
           ),
@@ -66,246 +66,386 @@ class _GiftsScreenState extends State<GiftsScreen> with SingleTickerProviderStat
     );
   }
 
-  // ── TAB 1: DISTRIBUTION ────────────────────────────────────────
-  Widget _buildDistributionTab() {
+  // ── TAB 1: DASHBOARD ───────────────────────────────────────────
+  Widget _buildDashboardTab() {
     return Consumer<AppProvider>(builder: (ctx, p, _) {
+      final g1 = p.globalGift(0);
+      final g2 = p.globalGift(1);
+
       final groups = p.db.groups.where((g) {
         if (_filterText.isEmpty) return true;
         return g.phone.contains(_filterText) ||
             (g.ownerName?.contains(_filterText) ?? false);
       }).toList();
 
+      // إحصائيات
+      final soldCount = p.db.groups.where((g) => p.giftSold(g.id)).length;
+      final totalProfit =
+          p.db.groups.fold<double>(0, (s, g) => s + g.giftProfit);
+
       return Column(
         children: [
-          _buildWarehouseHeader(p),
-          _buildStatsAndFilter(p),
+          _buildStore(p, g1, g2),
+          // عدّاد + بحث
+          Container(
+            color: Colors.white,
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            child: Column(children: [
+              Row(children: [
+                _chip('👥 خطوط: ${p.db.groups.length}', AppColors.purple),
+                const SizedBox(width: 6),
+                _chip('✅ تم بيعها: $soldCount', AppColors.green2),
+                const SizedBox(width: 6),
+                _chip('💰 الأرباح: ${totalProfit.toStringAsFixed(0)}ج',
+                    AppColors.green),
+              ]),
+              const SizedBox(height: 8),
+              TextField(
+                onChanged: (v) => setState(() => _filterText = v),
+                style: GoogleFonts.cairo(fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: 'بحث بالرقم أو اسم المالك...',
+                  hintStyle:
+                      GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
+                  prefixIcon: const Icon(Icons.search,
+                      size: 18, color: AppColors.muted),
+                  filled: true,
+                  fillColor: const Color(0xFFf5f7fa),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                ),
+              ),
+            ]),
+          ),
+          // رأس الجدول
+          _tableHeader(g1, g2),
+          const Divider(height: 1),
           Expanded(
-            child: groups.isEmpty
+            child: (g1 == null && g2 == null)
                 ? Center(
-                    child: Text('لا توجد مجموعات',
-                        style: GoogleFonts.cairo(color: AppColors.muted)))
-                : ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(10, 10, 10, 20),
-                    itemCount: groups.length,
-                    itemBuilder: (ctx, i) => _GroupCard(
-                      key: ValueKey(groups[i].id),
-                      group: groups[i],
-                      giftTypes: p.db.giftTypes,
-                      onAssign: (gid, gt) => p.assignGiftToGroup(gid, gt),
-                      onRemove: (gid, idx, profit) =>
-                          p.removeGiftFromGroup(gid, idx, addProfit: profit),
-                      onUpdate: (gid, idx, gt) =>
-                          p.updateGiftInGroup(gid, idx, gt),
-                      onArchive: (gid) => p.archiveAndClearGroupGifts(gid),
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        '⬆️ عرّف هدايا المخزن من فوق الأول\nعشان تقدر تعلّم عليها قدام الخطوط',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.cairo(color: AppColors.muted),
+                      ),
                     ),
-                  ),
+                  )
+                : groups.isEmpty
+                    ? Center(
+                        child: Text('لا توجد مجموعات',
+                            style: GoogleFonts.cairo(color: AppColors.muted)))
+                    : ListView.separated(
+                        itemCount: groups.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (_, i) => _groupRow(p, groups[i], g1, g2),
+                      ),
           ),
         ],
       );
     });
   }
 
-  Widget _buildWarehouseHeader(AppProvider p) {
+  // ── المخزن (هديتين) ────────────────────────────────────────────
+  Widget _buildStore(
+      AppProvider p, Map<String, dynamic>? g1, Map<String, dynamic>? g2) {
     return Container(
       decoration: const BoxDecoration(
         color: Color(0xFFe8f4fd),
         border: Border(bottom: BorderSide(color: AppColors.blueMid)),
       ),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Toggle bar
-          InkWell(
-            onTap: () => setState(() => _warehouseExpanded = !_warehouseExpanded),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-              child: Row(
-                children: [
-                  const Text('🏪', style: TextStyle(fontSize: 15)),
-                  const SizedBox(width: 8),
-                  Text(
-                    'مخزن الهدايا (${p.db.giftTypes.length})',
-                    style: GoogleFonts.cairo(
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.blue2,
-                        fontSize: 13),
-                  ),
-                  const Spacer(),
-                  Icon(
-                    _warehouseExpanded ? Icons.expand_less : Icons.expand_more,
+          Row(children: [
+            const Text('🏪', style: TextStyle(fontSize: 15)),
+            const SizedBox(width: 6),
+            Text('مخزن الهدايا',
+                style: GoogleFonts.cairo(
+                    fontWeight: FontWeight.w900,
                     color: AppColors.blue2,
-                    size: 20,
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          if (_warehouseExpanded) ...[
-            // Add form
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-              child: Row(children: [
-                Expanded(
-                  flex: 3,
-                  child: TextField(
-                    controller: _nameCtrl,
-                    style: GoogleFonts.cairo(fontSize: 12),
-                    decoration: InputDecoration(
-                      hintText: 'اسم الهدية (مثلاً: كنساس)',
-                      hintStyle: GoogleFonts.cairo(
-                          fontSize: 12, color: AppColors.muted),
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide.none),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 8),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  flex: 2,
-                  child: TextField(
-                    controller: _priceCtrl,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [PhoneInputFormatter()],
-                    style: GoogleFonts.cairo(fontSize: 12),
-                    decoration: InputDecoration(
-                      hintText: 'السعر ج',
-                      hintStyle: GoogleFonts.cairo(
-                          fontSize: 12, color: AppColors.muted),
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide.none),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 8),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                ElevatedButton(
-                  onPressed: () => _addGiftType(p),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.blue2,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 10),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: Text('إضافة',
-                      style: GoogleFonts.cairo(
-                          fontWeight: FontWeight.w700, fontSize: 12)),
-                ),
-              ]),
-            ),
-
-            // Gift type chips
-            if (p.db.giftTypes.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: p.db.giftTypes.map((gt) {
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: AppColors.blueMid),
-                      ),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        const Text('🎁', style: TextStyle(fontSize: 12)),
-                        const SizedBox(width: 4),
-                        Text(gt['name'] as String,
-                            style: GoogleFonts.cairo(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 12,
-                                color: AppColors.blue2)),
-                        const SizedBox(width: 4),
-                        Text('${gt['price']}ج',
-                            style: GoogleFonts.cairo(
-                                fontSize: 11,
-                                color: AppColors.green,
-                                fontWeight: FontWeight.w700)),
-                        const SizedBox(width: 6),
-                        GestureDetector(
-                          onTap: () => _confirmDeleteGiftType(
-                              p, gt['id'] as String, gt['name'] as String),
-                          child: const Icon(Icons.close,
-                              size: 14, color: AppColors.muted),
-                        ),
-                      ]),
-                    );
-                  }).toList(),
-                ),
-              )
-            else
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                child: Text(
-                  'لا توجد هدايا في المخزن بعد — أضف من الأعلى',
-                  style: GoogleFonts.cairo(
-                      fontSize: 11, color: AppColors.muted),
-                ),
-              ),
-          ],
+                    fontSize: 13)),
+          ]),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: _storeSlot(p, 0, g1)),
+            const SizedBox(width: 8),
+            Expanded(child: _storeSlot(p, 1, g2)),
+          ]),
         ],
       ),
     );
   }
 
-  Widget _buildStatsAndFilter(AppProvider p) {
-    final totalGifts =
-        p.db.groups.fold(0, (s, g) => s + g.gifts.length);
-    final totalProfit =
-        p.db.groups.fold(0.0, (s, g) => s + g.giftProfit);
-    final totalGroups = p.db.groups.length;
-
-    return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      child: Column(children: [
-        TextField(
-          onChanged: (v) => setState(() => _filterText = v),
-          style: GoogleFonts.cairo(fontSize: 13),
-          decoration: InputDecoration(
-            hintText: 'بحث بالرقم أو اسم المالك...',
-            hintStyle:
-                GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
-            prefixIcon:
-                const Icon(Icons.search, size: 18, color: AppColors.muted),
-            filled: true,
-            fillColor: const Color(0xFFf5f7fa),
-            border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide.none),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          ),
+  Widget _storeSlot(AppProvider p, int slot, Map<String, dynamic>? gift) {
+    final defined = gift != null;
+    return InkWell(
+      onTap: () => _editStoreSlot(p, slot, gift),
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: defined ? AppColors.green.withValues(alpha: 0.5) : AppColors.border),
         ),
-        const SizedBox(height: 8),
-        Row(children: [
-          _chip('🎁 موزّع: $totalGifts', AppColors.blue2),
+        child: Row(children: [
+          Text('🎁 هدية ${slot + 1}',
+              style: GoogleFonts.cairo(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  color: AppColors.muted)),
           const SizedBox(width: 6),
-          _chip('👥 مجموعات: $totalGroups', AppColors.purple),
-          const SizedBox(width: 6),
-          _chip('💰 أرباح: ${totalProfit.toStringAsFixed(0)}ج',
-              AppColors.green),
+          Expanded(
+            child: defined
+                ? Text(
+                    '${gift['name']} • ${(gift['price'] as num).toStringAsFixed(0)}ج',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.cairo(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.blue2),
+                  )
+                : Text('اضغط للتعريف',
+                    style: GoogleFonts.cairo(
+                        fontSize: 11, color: AppColors.muted)),
+          ),
+          const Icon(Icons.edit, size: 14, color: AppColors.muted),
         ]),
+      ),
+    );
+  }
+
+  void _editStoreSlot(
+      AppProvider p, int slot, Map<String, dynamic>? gift) {
+    final nameCtrl =
+        TextEditingController(text: gift?['name'] as String? ?? '');
+    final priceCtrl = TextEditingController(
+        text: gift != null ? (gift['price'] as num).toStringAsFixed(0) : '');
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('🎁 هدية ${slot + 1}',
+            style: GoogleFonts.cairo(fontWeight: FontWeight.w900)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+            controller: nameCtrl,
+            style: GoogleFonts.cairo(),
+            decoration: InputDecoration(
+                labelText: 'اسم الهدية', labelStyle: GoogleFonts.cairo()),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: priceCtrl,
+            keyboardType: TextInputType.number,
+            textDirection: TextDirection.ltr,
+            style: GoogleFonts.cairo(),
+            decoration: InputDecoration(
+                labelText: 'السعر (ج)', labelStyle: GoogleFonts.cairo()),
+          ),
+        ]),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('إلغاء', style: GoogleFonts.cairo()),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final name = nameCtrl.text.trim();
+              final price = double.tryParse(priceCtrl.text.trim()) ?? 0;
+              if (name.isEmpty || price <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('⚠️ اكتب اسم وسعر الهدية',
+                        style: GoogleFonts.cairo())));
+                return;
+              }
+              p.setGlobalGift(slot, name, price);
+              Navigator.pop(context);
+            },
+            child: Text('حفظ',
+                style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── رأس الجدول ─────────────────────────────────────────────────
+  Widget _tableHeader(Map<String, dynamic>? g1, Map<String, dynamic>? g2) {
+    return Container(
+      color: const Color(0xFFf5f7fa),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(children: [
+        Expanded(flex: 4, child: _headCell('🔢 الخط الرئيسي')),
+        Expanded(
+            flex: 3,
+            child: _headCell('🎁 ${g1?['name'] ?? 'هدية ١'}',
+                center: true)),
+        Expanded(
+            flex: 3,
+            child: _headCell('🎁 ${g2?['name'] ?? 'هدية ٢'}',
+                center: true)),
+        Expanded(flex: 3, child: _headCell('💰 تم البيع', center: true)),
       ]),
     );
   }
 
-  // ── TAB 2: LOG ────────────────────────────────────────────────
+  Widget _headCell(String t, {bool center = false}) => Text(t,
+      textAlign: center ? TextAlign.center : TextAlign.start,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: GoogleFonts.cairo(
+          fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted));
+
+  // ── صف خط ──────────────────────────────────────────────────────
+  Widget _groupRow(AppProvider p, Group g, Map<String, dynamic>? g1,
+      Map<String, dynamic>? g2) {
+    final r1 = p.giftReceived(g.id, 0);
+    final r2 = p.giftReceived(g.id, 1);
+    final sold = p.giftSold(g.id);
+    final anyReceived = r1 || r2;
+
+    return Container(
+      color: sold ? AppColors.greenLight : Colors.transparent,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(children: [
+        // الخط الرئيسي
+        Expanded(
+          flex: 4,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(g.phone,
+                  textDirection: TextDirection.ltr,
+                  style: GoogleFonts.cairo(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 13,
+                      color: AppColors.text)),
+              if ((g.ownerName ?? '').isNotEmpty)
+                Text(g.ownerName!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.cairo(
+                        fontSize: 10, color: AppColors.muted)),
+              if (g.giftProfit > 0)
+                Text('ربح: ${g.giftProfit.toStringAsFixed(0)}ج',
+                    style: GoogleFonts.cairo(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.green)),
+            ],
+          ),
+        ),
+        // هدية ١
+        Expanded(
+          flex: 3,
+          child: _checkCell(
+            checked: r1,
+            enabled: g1 != null,
+            color: AppColors.green2,
+            onTap: () => p.toggleGiftReceived(g.id, 0),
+          ),
+        ),
+        // هدية ٢
+        Expanded(
+          flex: 3,
+          child: _checkCell(
+            checked: r2,
+            enabled: g2 != null,
+            color: AppColors.green2,
+            onTap: () => p.toggleGiftReceived(g.id, 1),
+          ),
+        ),
+        // تم البيع
+        Expanded(
+          flex: 3,
+          child: _checkCell(
+            checked: sold,
+            enabled: anyReceived,
+            color: AppColors.orange,
+            label: sold ? 'تم ✅' : null,
+            onTap: () {
+              if (!anyReceived) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('⚠️ علّم هدية الأول قبل تأكيد البيع',
+                        style: GoogleFonts.cairo())));
+                return;
+              }
+              p.toggleGiftSold(g.id);
+            },
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _checkCell({
+    required bool checked,
+    required bool enabled,
+    required Color color,
+    required VoidCallback onTap,
+    String? label,
+  }) {
+    return Center(
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          width: label != null ? null : 34,
+          height: 34,
+          padding: label != null
+              ? const EdgeInsets.symmetric(horizontal: 8)
+              : EdgeInsets.zero,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: checked
+                ? color
+                : (enabled ? Colors.white : const Color(0xFFf0f0f0)),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+                color: checked
+                    ? color
+                    : (enabled ? AppColors.border : const Color(0xFFe0e0e0)),
+                width: 1.5),
+          ),
+          child: label != null
+              ? Text(label,
+                  style: GoogleFonts.cairo(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.white))
+              : Icon(
+                  checked ? Icons.check : null,
+                  size: 20,
+                  color: Colors.white,
+                ),
+        ),
+      ),
+    );
+  }
+
+  Widget _chip(String label, Color color) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Text(label,
+            style: GoogleFonts.cairo(
+                fontWeight: FontWeight.w700, color: color, fontSize: 11)),
+      );
+
+  // ── TAB 2: LOG (كما هو) ────────────────────────────────────────
   Widget _buildLogTab() {
     return Consumer<AppProvider>(builder: (ctx, p, _) {
       final log = p.db.giftLog;
@@ -318,25 +458,19 @@ class _GiftsScreenState extends State<GiftsScreen> with SingleTickerProviderStat
               const Text('📋', style: TextStyle(fontSize: 48)),
               const SizedBox(height: 12),
               Text('لا يوجد سجل بعد',
-                  style: GoogleFonts.cairo(
-                      color: AppColors.muted, fontSize: 14)),
-              const SizedBox(height: 6),
-              Text('اضغط "🗂️ أرشفة" في أي مجموعة لحفظ الهدايا هنا',
-                  style: GoogleFonts.cairo(
-                      color: AppColors.muted, fontSize: 12)),
+                  style:
+                      GoogleFonts.cairo(color: AppColors.muted, fontSize: 14)),
             ],
           ),
         );
       }
 
-      // Group by month descending
       final Map<String, List<Map<String, dynamic>>> byMonth = {};
       for (final entry in log) {
         final month = entry['month'] as String? ?? 'غير معروف';
         byMonth.putIfAbsent(month, () => []).add(entry);
       }
-      final months = byMonth.keys.toList()
-        ..sort((a, b) => b.compareTo(a));
+      final months = byMonth.keys.toList()..sort((a, b) => b.compareTo(a));
 
       return ListView.builder(
         padding: const EdgeInsets.all(12),
@@ -353,24 +487,17 @@ class _GiftsScreenState extends State<GiftsScreen> with SingleTickerProviderStat
               color: Colors.white,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: AppColors.border),
-              boxShadow: [
-                BoxShadow(
-                    color: AppColors.blue2.withValues(alpha: 0.06),
-                    blurRadius: 10)
-              ],
             ),
             child: Column(children: [
-              // Month header
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
                       colors: [Color(0xFFe8f4fd), Color(0xFFdbeeff)]),
                   borderRadius:
                       BorderRadius.vertical(top: Radius.circular(14)),
-                  border:
-                      Border(bottom: BorderSide(color: AppColors.blueMid)),
+                  border: Border(bottom: BorderSide(color: AppColors.blueMid)),
                 ),
                 child: Row(children: [
                   Text('📅 $month',
@@ -379,24 +506,16 @@ class _GiftsScreenState extends State<GiftsScreen> with SingleTickerProviderStat
                           color: AppColors.blue2,
                           fontSize: 14)),
                   const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 3),
-                    decoration: BoxDecoration(
-                        color: AppColors.blueLight,
-                        borderRadius: BorderRadius.circular(8)),
-                    child: Text(
-                        '$totalGifts هدية  •  ${entries.length} مجموعة',
-                        style: GoogleFonts.cairo(
-                            fontSize: 11,
-                            color: AppColors.blue2,
-                            fontWeight: FontWeight.w700)),
-                  ),
+                  Text('$totalGifts هدية • ${entries.length} مجموعة',
+                      style: GoogleFonts.cairo(
+                          fontSize: 11,
+                          color: AppColors.blue2,
+                          fontWeight: FontWeight.w700)),
                 ]),
               ),
-              // Entries
               ...entries.map((e) {
-                final gifts = (e['gifts'] as List).cast<Map<String, dynamic>>();
+                final gifts =
+                    (e['gifts'] as List).cast<Map<String, dynamic>>();
                 return Padding(
                   padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
                   child: Row(
@@ -419,8 +538,7 @@ class _GiftsScreenState extends State<GiftsScreen> with SingleTickerProviderStat
                                         horizontal: 8, vertical: 3),
                                     decoration: BoxDecoration(
                                       color: AppColors.greenLight,
-                                      borderRadius:
-                                          BorderRadius.circular(8),
+                                      borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Text(
                                         '${g['name']} • ${g['price']}ج',
@@ -442,462 +560,5 @@ class _GiftsScreenState extends State<GiftsScreen> with SingleTickerProviderStat
         },
       );
     });
-  }
-
-  // ── HELPERS ───────────────────────────────────────────────────
-  void _addGiftType(AppProvider p) {
-    final name  = _nameCtrl.text.trim();
-    final price = double.tryParse(_priceCtrl.text.trim()) ?? 0;
-    if (name.isEmpty || price <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('⚠️ أدخل اسم وسعر الهدية',
-              style: GoogleFonts.cairo())));
-      return;
-    }
-    p.addGiftType({
-      'id': 'gt_${DateTime.now().millisecondsSinceEpoch}',
-      'name': name,
-      'price': price,
-    });
-    _nameCtrl.clear();
-    _priceCtrl.clear();
-  }
-
-  void _confirmDeleteGiftType(AppProvider p, String id, String name) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('حذف الهدية',
-            style: GoogleFonts.cairo(fontWeight: FontWeight.w900)),
-        content: Text('هل تريد حذف "$name" من المخزن؟',
-            style: GoogleFonts.cairo()),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('إلغاء', style: GoogleFonts.cairo())),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.red),
-            onPressed: () {
-              Navigator.pop(context);
-              p.deleteGiftType(id);
-            },
-            child: Text('حذف',
-                style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _chip(String label, Color color) => Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: color.withValues(alpha: 0.3)),
-        ),
-        child: Text(label,
-            style: GoogleFonts.cairo(
-                fontWeight: FontWeight.w700,
-                color: color,
-                fontSize: 11)),
-      );
-}
-
-// ── GROUP CARD ──────────────────────────────────────────────────
-class _GroupCard extends StatelessWidget {
-  final Group group;
-  final List<Map<String, dynamic>> giftTypes;
-  final void Function(String gid, Map<String, dynamic> gt) onAssign;
-  final void Function(String gid, int idx, bool profit) onRemove;
-  final void Function(String gid, int idx, Map<String, dynamic> gt) onUpdate;
-  final void Function(String gid) onArchive;
-
-  const _GroupCard({
-    super.key,
-    required this.group,
-    required this.giftTypes,
-    required this.onAssign,
-    required this.onRemove,
-    required this.onUpdate,
-    required this.onArchive,
-  });
-
-  void _editProfit(BuildContext context) {
-    final ctrl = TextEditingController(
-        text: group.giftProfit > 0 ? group.giftProfit.toStringAsFixed(0) : '');
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('✏️ تعديل ربح الهدايا',
-            style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 15)),
-        content: TextField(
-          controller: ctrl,
-          keyboardType: TextInputType.number,
-          textDirection: TextDirection.ltr,
-          autofocus: true,
-          decoration: InputDecoration(
-            labelText: 'الربح (ج)',
-            labelStyle: GoogleFonts.cairo(fontSize: 12),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('إلغاء', style: GoogleFonts.cairo())),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.green2, foregroundColor: Colors.white),
-            onPressed: () {
-              final val = double.tryParse(ctrl.text.trim()) ?? 0;
-              Navigator.pop(context);
-              context.read<AppProvider>().setGroupGiftProfit(group.id, val);
-            },
-            child: Text('حفظ', style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
-        boxShadow: [BoxShadow(color: AppColors.blue2.withValues(alpha: 0.07), blurRadius: 12)],
-      ),
-      child: Column(children: [
-        // Header
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(colors: [Color(0xFFe8f4fd), Color(0xFFdbeeff)]),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
-            border: Border(bottom: BorderSide(color: AppColors.blueMid, width: 1.5)),
-          ),
-          child: Row(children: [
-            Flexible(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(group.phone,
-                    style: GoogleFonts.cairo(
-                        fontWeight: FontWeight.w900, color: AppColors.blue2, fontSize: 14),
-                    textDirection: TextDirection.ltr,
-                    overflow: TextOverflow.ellipsis),
-                if (group.ownerName != null)
-                  Text(group.ownerName!,
-                      style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted),
-                      overflow: TextOverflow.ellipsis),
-              ]),
-            ),
-            const Spacer(),
-            // Profit badge — always visible + edit button
-            GestureDetector(
-              onTap: () => _editProfit(context),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: group.giftProfit > 0 ? AppColors.greenLight : const Color(0xFFf5f5f5),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                      color: group.giftProfit > 0
-                          ? AppColors.green.withValues(alpha: 0.4)
-                          : AppColors.border),
-                ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Text(
-                    group.giftProfit > 0
-                        ? '💰 ربح: ${group.giftProfit.toStringAsFixed(0)}ج'
-                        : '💰 ربح: 0ج',
-                    style: GoogleFonts.cairo(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: group.giftProfit > 0 ? AppColors.green : AppColors.muted),
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(Icons.edit, size: 11,
-                      color: group.giftProfit > 0 ? AppColors.green : AppColors.muted),
-                ]),
-              ),
-            ),
-            const SizedBox(width: 6),
-            if (group.gifts.isNotEmpty)
-              GestureDetector(
-                onTap: () => onArchive(group.id),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFfff8e1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFffcc80)),
-                  ),
-                  child: Text('🗂️ أرشفة',
-                      style: GoogleFonts.cairo(
-                          fontWeight: FontWeight.w700, fontSize: 11, color: AppColors.orange)),
-                ),
-              ),
-          ]),
-        ),
-
-        // 2 gift slots — VERTICAL
-        Padding(
-          padding: const EdgeInsets.all(10),
-          child: Column(children: [
-            _GiftSlot(
-              slotIndex: 0, group: group, giftTypes: giftTypes,
-              onAssign: onAssign, onRemove: onRemove, onUpdate: onUpdate,
-            ),
-            const SizedBox(height: 8),
-            _GiftSlot(
-              slotIndex: 1, group: group, giftTypes: giftTypes,
-              onAssign: onAssign, onRemove: onRemove, onUpdate: onUpdate,
-            ),
-          ]),
-        ),
-      ]),
-    );
-  }
-}
-
-// ── GIFT SLOT ──────────────────────────────────────────────────
-class _GiftSlot extends StatefulWidget {
-  final int slotIndex;
-  final Group group;
-  final List<Map<String, dynamic>> giftTypes;
-  final void Function(String gid, Map<String, dynamic> gt) onAssign;
-  final void Function(String gid, int idx, bool profit) onRemove;
-  final void Function(String gid, int idx, Map<String, dynamic> gt) onUpdate;
-
-  const _GiftSlot({
-    required this.slotIndex,
-    required this.group,
-    required this.giftTypes,
-    required this.onAssign,
-    required this.onRemove,
-    required this.onUpdate,
-  });
-
-  @override
-  State<_GiftSlot> createState() => _GiftSlotState();
-}
-
-class _GiftSlotState extends State<_GiftSlot> {
-  bool _editing = false;
-
-  static const _stepLabels = {
-    'branch': 'من الفرع',
-    'renter': 'من المستأجر',
-    'used':   'تم الاستخدام',
-  };
-  static const _stepIcons = {
-    'branch': '🏪',
-    'renter': '🏠',
-    'used':   '📱',
-  };
-  static const _stepColors = {
-    'branch': Color(0xFF1565C0),
-    'renter': Color(0xFF6A1B9A),
-    'used':   Color(0xFF2E7D32),
-  };
-
-  String _stepLabel(String? step) {
-    if (step == null || !_stepLabels.containsKey(step)) return 'لم تُسجل بعد';
-    return _stepLabels[step]!;
-  }
-
-  @override
-  void didUpdateWidget(_GiftSlot old) {
-    super.didUpdateWidget(old);
-    if (_editing && widget.slotIndex >= widget.group.gifts.length) {
-      _editing = false;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final gifts    = widget.group.gifts;
-    final assigned = widget.slotIndex < gifts.length ? gifts[widget.slotIndex] : null;
-    final label    = 'هدية ${widget.slotIndex + 1}';
-    final step     = assigned?['step'] as String?;
-
-    final otherIdx    = widget.slotIndex == 0 ? 1 : 0;
-    final otherTypeId = otherIdx < gifts.length ? gifts[otherIdx]['giftTypeId'] : null;
-    final available   = widget.giftTypes.where((gt) => gt['id'] != otherTypeId).toList();
-
-    // ── Header row ──────────────────────────────────────────────
-    final headerBg = assigned == null
-        ? const Color(0xFFf5f5f5)
-        : step == 'used'
-            ? const Color(0xFFE8F5E9)
-            : step == 'renter'
-                ? const Color(0xFFF3E5F5)
-                : const Color(0xFFE3F2FD);
-    final headerBorder = assigned == null
-        ? AppColors.border
-        : (step == 'used'
-            ? const Color(0xFFA5D6A7)
-            : step == 'renter'
-                ? const Color(0xFFCE93D8)
-                : AppColors.blueMid);
-
-    return Container(
-      decoration: BoxDecoration(
-        color: headerBg,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: headerBorder, width: 1.5),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // ── Header ──────────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
-          child: Row(children: [
-            Text('🎁 $label',
-                style: GoogleFonts.cairo(
-                    fontWeight: FontWeight.w900, fontSize: 13,
-                    color: assigned == null ? AppColors.muted : AppColors.blue2)),
-            const SizedBox(width: 6),
-            if (assigned != null) ...[
-              Expanded(
-                child: Text(assigned['name'] as String? ?? '',
-                    style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.blue2),
-                    overflow: TextOverflow.ellipsis),
-              ),
-              Text('${assigned['price']}ج',
-                  style: GoogleFonts.cairo(
-                      fontSize: 11, fontWeight: FontWeight.w900, color: AppColors.green)),
-            ] else
-              Expanded(
-                child: Text('لم تُسجل بعد',
-                    style: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted)),
-              ),
-            if (assigned != null) ...[
-              const SizedBox(width: 6),
-              // تغيير نوع الهدية
-              GestureDetector(
-                onTap: () => setState(() => _editing = !_editing),
-                child: const Icon(Icons.swap_horiz, size: 16, color: AppColors.muted),
-              ),
-              const SizedBox(width: 4),
-              // حذف
-              GestureDetector(
-                onTap: () => widget.onRemove(widget.group.id, widget.slotIndex, false),
-                child: const Icon(Icons.close, size: 16, color: AppColors.muted),
-              ),
-            ],
-          ]),
-        ),
-
-        // ── Step badge ──────────────────────────────────────────
-        if (assigned != null && step != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: (_stepColors[step] ?? AppColors.muted).withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                '${_stepIcons[step] ?? "📌"} ${_stepLabel(step)}',
-                style: GoogleFonts.cairo(
-                    fontSize: 11, fontWeight: FontWeight.w700,
-                    color: _stepColors[step] ?? AppColors.muted),
-              ),
-            ),
-          ),
-
-        // ── Assign dropdown (when no gift or editing) ────────────
-        if (assigned == null || _editing) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-            child: available.isEmpty
-                ? Text('لا توجد هدايا في المخزن',
-                    style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted))
-                : DropdownButtonFormField<String>(
-                    initialValue: null,
-                    decoration: InputDecoration(
-                      hintText: 'اختر هدية...',
-                      hintStyle: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
-                      filled: true, fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                      contentPadding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
-                    ),
-                    isExpanded: true,
-                    items: available.map((gt) => DropdownMenuItem<String>(
-                      value: gt['id'] as String,
-                      child: Row(children: [
-                        Flexible(child: Text(gt['name'] as String,
-                            style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w700),
-                            overflow: TextOverflow.ellipsis)),
-                        const SizedBox(width: 4),
-                        Text('${gt['price']}ج',
-                            style: GoogleFonts.cairo(fontSize: 11, color: AppColors.green)),
-                      ]),
-                    )).toList(),
-                    onChanged: (id) {
-                      if (id == null) return;
-                      final gt = widget.giftTypes.firstWhere((x) => x['id'] == id);
-                      if (assigned != null && _editing) {
-                        widget.onUpdate(widget.group.id, widget.slotIndex, gt);
-                      } else {
-                        widget.onAssign(widget.group.id, gt);
-                      }
-                      setState(() => _editing = false);
-                    },
-                  ),
-          ),
-        ],
-
-        // ── 3 step buttons ────────────────────────────────────────
-        if (assigned != null && !_editing)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
-            child: Row(children: [
-              _stepBtn(context, 'branch', step, '🏪 من الفرع'),
-              const SizedBox(width: 6),
-              _stepBtn(context, 'renter', step, '🏠 من المستأجر'),
-              const SizedBox(width: 6),
-              _stepBtn(context, 'used', step, '📱 تم الاستخدام'),
-            ]),
-          ),
-      ]),
-    );
-  }
-
-  Widget _stepBtn(BuildContext ctx, String thisStep, String? currentStep, String label) {
-    final active = currentStep == thisStep;
-    final color  = _stepColors[thisStep] ?? AppColors.muted;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => ctx.read<AppProvider>()
-            .updateGiftStep(widget.group.id, widget.slotIndex, thisStep),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color: active ? color : Colors.white,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: active ? color : AppColors.border, width: active ? 1.5 : 1),
-          ),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.cairo(
-                fontSize: 10, fontWeight: FontWeight.w700,
-                color: active ? Colors.white : AppColors.muted),
-          ),
-        ),
-      ),
-    );
   }
 }
