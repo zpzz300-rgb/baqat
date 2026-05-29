@@ -28,6 +28,7 @@ import 'flagged_members_screen.dart';
 import 'bills_screen.dart';
 import 'notes_screen.dart';
 import 'company_invoices_screen.dart';
+import 'assets_dashboard_screen.dart';
 import '../widgets/add_group_modal.dart';
 import '../widgets/add_member_modal.dart';
 import '../widgets/member_card.dart';
@@ -569,6 +570,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 }),
               ],
               const Divider(height: 16),
+              _drawerItem('📊 لوحة الأصول والإكسيبشن', () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const AssetsDashboardScreen()),
+                );
+              }),
               _drawerItem('⚙️ الإعدادات', () {
                 Navigator.pop(context);
                 showDialog(context: context, builder: (_) => const SettingsModal());
