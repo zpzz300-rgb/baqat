@@ -52,3 +52,6 @@ app.*.map.json
 
 # Build logs
 build_windows_log.txt
+
+# Supabase CLI (local binary - downloaded, do not commit)
+.tools/

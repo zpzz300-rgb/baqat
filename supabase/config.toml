@@ -1,0 +1,9 @@
+# Supabase CLI config
+# project_id = معرّف مشروعك (نفس الجزء من رابط Supabase: https://<project_id>.supabase.co)
+project_id = "dxgpugiloiroguegzxtk"
+
+# ─── إعدادات دالة بوت تليجرام ───────────────────────────────────────────────
+# verify_jwt = false ضروري جداً: تليجرام لا يرسل توكن مصادقة،
+# فلو تركناه true سترفض Supabase كل طلبات الويبهوك (401).
+[functions.telegram-bot]
+verify_jwt = false
