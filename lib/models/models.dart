@@ -1331,7 +1331,9 @@ class AppDB {
     // fixedBillAmount هو التكلفة الوحيدة المعتمدة في الربح
     final cost = g.fixedBillAmount;
     if (cost <= 0 && g.type != 'manual') return 0; // لا تكلفة محددة → لا ربح محسوب
-    final extraFee = g.type == 'manual' ? 0.0 : groupExtraLineFee(gid);
+    // سعر العميل الإضافي يُحسب حسب إعدادات الخط (الحد الأقصى + السعر)،
+    // مش حسب نوع 3800/1800 — groupExtraLineFee بيرجّع صفر لو مفيش إعدادات.
+    final extraFee = groupExtraLineFee(gid);
     // تكلفة الباقات الإضافية المؤقتة لهذا الشهر
     final now = DateTime.now();
     final month = '${now.year}-${now.month.toString().padLeft(2, '0')}';
