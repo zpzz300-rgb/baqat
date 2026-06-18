@@ -30,6 +30,8 @@ class _AddMemberModalState extends State<AddMemberModal> {
   final _addressCtrl = TextEditingController();
   final _guarantorNameCtrl = TextEditingController();
   final _guarantorPhoneCtrl = TextEditingController();
+  final _minutesCtrl = TextEditingController();
+  final _intlCtrl = TextEditingController();
 
   String? _selectedGroup;
   String _type = 'regular';
@@ -621,6 +623,26 @@ class _AddMemberModalState extends State<AddMemberModal> {
         ),
         const SizedBox(height: 12),
 
+        // ── الدقايق والدولي ──
+        Row(children: [
+          Expanded(
+            child: AppFormField(
+              label: 'الدقايق/شهر',
+              controller: _minutesCtrl,
+              keyboardType: TextInputType.number,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: AppFormField(
+              label: 'دقايق دولي/شهر',
+              controller: _intlCtrl,
+              keyboardType: TextInputType.number,
+            ),
+          ),
+        ]),
+        const SizedBox(height: 12),
+
         // ── Notes ──
         AppFormField(label: 'ملاحظات', controller: _notesCtrl),
         const SizedBox(height: 12),
@@ -819,6 +841,8 @@ class _AddMemberModalState extends State<AddMemberModal> {
           ? _guarantorPhoneCtrl.text.trim()
           : null,
       paymentFlag: _paymentFlag,
+      minutesAllocation: int.tryParse(_minutesCtrl.text.trim()) ?? 0,
+      internationalAllocation: int.tryParse(_intlCtrl.text.trim()) ?? 0,
     ));
     Navigator.pop(context);
     AppSnackbar.show(context, '✅ تمت إضافة $name');

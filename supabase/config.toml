@@ -7,3 +7,8 @@ project_id = "dxgpugiloiroguegzxtk"
 # فلو تركناه true سترفض Supabase كل طلبات الويبهوك (401).
 [functions.telegram-bot]
 verify_jwt = false
+
+# ─── مصادقة الموظفين ────────────────────────────────────────────────────────
+# verify_jwt = false لأن الموظف لسه مش مسجّل دخول وقت التسجيل/الدخول.
+[functions.employee-auth]
+verify_jwt = false

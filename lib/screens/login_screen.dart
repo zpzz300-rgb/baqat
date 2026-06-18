@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/supabase_service.dart';
+import 'employee_login_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -125,6 +126,23 @@ class _LoginScreenState extends State<LoginScreen> {
                       _isSignUp ? 'عندك حساب؟ سجّل دخول' : 'مفيش حساب؟ سجّل الآن',
                       style: GoogleFonts.cairo(color: const Color(0xFF0d47a1), fontSize: 13),
                     ),
+                  ),
+
+                  const Divider(height: 20),
+                  // دخول الموظفين
+                  OutlinedButton.icon(
+                    onPressed: _loading ? null : () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const EmployeeLoginScreen()),
+                        ),
+                    icon: const Icon(Icons.badge_outlined, size: 18),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF0d47a1),
+                      side: const BorderSide(color: Color(0xFF0d47a1)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    label: Text('دخول كموظف',
+                        style: GoogleFonts.cairo(fontSize: 14, fontWeight: FontWeight.w900)),
                   ),
                 ]),
               ),

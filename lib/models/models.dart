@@ -121,6 +121,10 @@ class Group {
   // ── بيانات مالية للمجموعة ─────────────────────────────────────
   String? groupInvoiceName; // اسم الفاتورة الرئيسي
   double fixedBillAmount; // المبلغ الثابت الشهري للفاتورة
+  // نظام الفوترة لمراجعة الفواتير فقط (لا علاقة له بحساب الأرباح):
+  //   'fixed'     = ثابت: تنزل فاتورة كل شهر
+  //   'bimonthly' = شهر وشهر: تنزل فاتورة شهر، والشهر اللي بعده ببلاش
+  String billingSystem; // 'fixed' | 'bimonthly'
   double voucherValue; // قيمة القسيمة
   String voucherPeriod; // '6m' / '1y'
   String? voucherStartDate; // تاريخ بدء القسيمة (YYYY-MM-DD)
@@ -159,6 +163,7 @@ class Group {
   String? contractPhotoPath;    // مسار صورة العقد
   int mainLineAllocationGb;     // حصة الخط الرئيسي من السعة (للشريط الذكي)
   int totalMinutes;             // إجمالي دقائق الخط (12000 / 10000 حسب الـ tier)
+  int totalInternational;       // إجمالي الدقائق الدولية للخط
   String tier;                  // 'tier1_4250' | 'tier2_smaller' | ''
 
   // Etisalat-specific
@@ -202,6 +207,7 @@ class Group {
     List<Map<String, dynamic>>? pointsRedemptions,
     this.groupInvoiceName,
     this.fixedBillAmount = 0,
+    this.billingSystem = 'fixed',
     this.voucherValue = 0,
     this.voucherPeriod = '6m',
     this.voucherStartDate,
@@ -230,6 +236,7 @@ class Group {
     this.contractPhotoPath,
     this.mainLineAllocationGb = 0,
     this.totalMinutes = 0,
+    this.totalInternational = 0,
     this.tier = '',
     this.monthOnMeToggle = false,
     this.fixedRateSystem = false,
@@ -271,6 +278,7 @@ class Group {
             List<Map<String, dynamic>>.from(j['pointsRedemptions'] ?? []),
         groupInvoiceName: j['groupInvoiceName'],
         fixedBillAmount: (j['fixedBillAmount'] ?? 0).toDouble(),
+        billingSystem: j['billingSystem'] ?? 'fixed',
         voucherValue: (j['voucherValue'] ?? 0).toDouble(),
         voucherPeriod: j['voucherPeriod'] ?? '6m',
         voucherStartDate: j['voucherStartDate'],
@@ -299,6 +307,7 @@ class Group {
         contractPhotoPath: j['contractPhotoPath'],
         mainLineAllocationGb: (j['mainLineAllocationGb'] ?? 0) as int,
         totalMinutes: (j['totalMinutes'] ?? 0) as int,
+        totalInternational: (j['totalInternational'] ?? 0) as int,
         tier: j['tier'] ?? '',
         monthOnMeToggle: j['monthOnMeToggle'] ?? false,
         fixedRateSystem: j['fixedRateSystem'] ?? false,
@@ -336,6 +345,7 @@ class Group {
         'pointsRedemptions': pointsRedemptions,
         'groupInvoiceName': groupInvoiceName,
         'fixedBillAmount': fixedBillAmount,
+        'billingSystem': billingSystem,
         'voucherValue': voucherValue,
         'voucherPeriod': voucherPeriod,
         'voucherStartDate': voucherStartDate,
@@ -364,6 +374,7 @@ class Group {
         'contractPhotoPath': contractPhotoPath,
         'mainLineAllocationGb': mainLineAllocationGb,
         'totalMinutes': totalMinutes,
+        'totalInternational': totalInternational,
         'tier': tier,
         'monthOnMeToggle': monthOnMeToggle,
         'fixedRateSystem': fixedRateSystem,
@@ -497,6 +508,9 @@ class Member {
   String? deferralNote; // سبب التأجيل
   // Phase 2 — توزيع الدقائق على العملاء
   int minutesAllocation; // الدقائق المخصصة لهذا العميل من إجمالي دقائق الخط
+  int internationalAllocation; // الدقائق الدولية المخصصة لهذا العميل
+  // سجل تذكيرات المديونية: كل عنصر {ts: epoch ms, ch: 'wa_debt'|'wa_statement'|'sms'|'manual'}
+  List<Map<String, dynamic>> reminderLog;
 
   Member({
     required this.id,
@@ -529,9 +543,12 @@ class Member {
     this.deferralDate,
     this.deferralNote,
     this.minutesAllocation = 0,
+    this.internationalAllocation = 0,
+    List<Map<String, dynamic>>? reminderLog,
   })  : log = log ?? [],
         files = files ?? [],
-        invoiceLog = invoiceLog ?? [];
+        invoiceLog = invoiceLog ?? [],
+        reminderLog = reminderLog ?? [];
 
   factory Member.fromJson(Map<String, dynamic> j) => Member(
         id: j['id'].toString(),
@@ -564,6 +581,8 @@ class Member {
         deferralDate: j['deferralDate'],
         deferralNote: j['deferralNote'],
         minutesAllocation: (j['minutesAllocation'] ?? 0) as int,
+        internationalAllocation: (j['internationalAllocation'] ?? 0) as int,
+        reminderLog: List<Map<String, dynamic>>.from(j['reminderLog'] ?? []),
       );
 
   Map<String, dynamic> toJson() => {
@@ -597,7 +616,20 @@ class Member {
         'deferralDate': deferralDate,
         'deferralNote': deferralNote,
         'minutesAllocation': minutesAllocation,
+        'internationalAllocation': internationalAllocation,
+        'reminderLog': reminderLog,
       };
+
+  /// عدد تذكيرات المديونية في الشهر الحالي (العداد بيتصفّر كل شهر)
+  int get reminderCountThisMonth {
+    final now = DateTime.now();
+    return reminderLog.where((e) {
+      final ts = (e['ts'] ?? 0) as int;
+      if (ts == 0) return false;
+      final d = DateTime.fromMillisecondsSinceEpoch(ts);
+      return d.year == now.year && d.month == now.month;
+    }).length;
+  }
 
   bool get hasDebt => balance < 0;
   bool get isClear => balance >= 0 && price > 0;
@@ -1082,6 +1114,10 @@ class AppDB {
   int gid;
   int mid;
 
+  /// آخر وقت اتعدّلت فيه الداتا (epoch ms) — يُستخدم لحسم المزامنة بالوقت
+  /// بدل العدد. أحدث نسخة زمنياً هي اللي تكسب.
+  int updatedAt;
+
   AppDB({
     List<Group>? groups,
     List<Member>? members,
@@ -1101,6 +1137,7 @@ class AppDB {
     Map<String, String>? billingLocks,
     this.gid = 1,
     this.mid = 1,
+    this.updatedAt = 0,
   })  : groups = groups ?? [],
         members = members ?? [],
         deleted = deleted ?? [],
@@ -1176,6 +1213,7 @@ class AppDB {
         billingLocks: Map<String, String>.from(j['billingLocks'] ?? {}),
         gid: j['gid'] ?? 1,
         mid: j['mid'] ?? 1,
+        updatedAt: j['updatedAt'] ?? 0,
       );
 
   Map<String, dynamic> toJson() => {
@@ -1198,6 +1236,7 @@ class AppDB {
         'billingLocks': billingLocks,
         'gid': gid,
         'mid': mid,
+        'updatedAt': updatedAt,
       };
 
   // ─── Stats ───────────────────────────────────────────────────
@@ -1366,4 +1405,8 @@ class AppDB {
   /// إجمالي الدقائق المستخدمة من قبل العملاء
   int groupUsedMinutes(String gid) =>
       membersOf(gid).fold<int>(0, (s, m) => s + m.minutesAllocation);
+
+  /// إجمالي الدقائق الدولية المستخدمة من قبل العملاء
+  int groupUsedInternational(String gid) =>
+      membersOf(gid).fold<int>(0, (s, m) => s + m.internationalAllocation);
 }

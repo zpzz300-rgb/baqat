@@ -2,6 +2,7 @@
 // مخزون أرقام العمل — مع فلاتر، تتبع آخر اتصال، وتذكيرات قبل التقفيل الجبري
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/app_provider.dart';
@@ -275,6 +276,11 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
                     const Color(0xFFF3E5F5), const Color(0xFF6A1B9A)),
             ]),
             const SizedBox(height: 8),
+
+            // ── عدّاد كبير: باقي كام يوم قبل التقفيل ──
+            if (remaining != null) _countdownBar(remaining, isOverdue, inWindow),
+
+            const SizedBox(height: 8),
             // Last contact + days + serial
             Row(children: [
               Expanded(
@@ -292,9 +298,6 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
                   ] else
                     Text('📞 لم يُسجَّل اتصال بعد',
                         style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted)),
-                  if (w.lastSerial != null && w.lastSerial!.isNotEmpty)
-                    Text('🔢 سيريال: ${w.lastSerial}',
-                        style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),
                   if (w.offerExpiryDate != null)
                     Text('🗓 ينتهي: ${w.offerExpiryDate}',
                         style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),
@@ -304,6 +307,12 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
                 ]),
               ),
             ]),
+
+            // ── السيريال في صندوق واضح مع زرار نسخ ──
+            if (w.lastSerial != null && w.lastSerial!.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              _serialBox(context, w.lastSerial!),
+            ],
             if (w.notes != null && w.notes!.isNotEmpty) ...[
               const SizedBox(height: 4),
               Text('📝 ${w.notes}',
@@ -338,6 +347,103 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
               ),
             ]),
           ]),
+        ),
+      ]),
+    );
+  }
+
+  // ── عدّاد كبير: باقي كام يوم قبل التقفيل الجبري ──
+  Widget _countdownBar(int remaining, bool isOverdue, bool inWindow) {
+    final Color c;
+    final String big;
+    final String sub;
+    if (isOverdue) {
+      c = AppColors.red2;
+      big = '${-remaining}';
+      sub = 'يوم بعد موعد التقفيل! اتصل فوراً 🚨';
+    } else if (inWindow) {
+      c = const Color(0xFFE65100);
+      big = '$remaining';
+      sub = 'يوم باقي قبل التقفيل ⚠️';
+    } else {
+      c = AppColors.green2;
+      big = '$remaining';
+      sub = 'يوم باقي — لسه في أمان ✅';
+    }
+    // نسبة شريط التقدّم (افتراض 90 يوم كحد)
+    final pct = ((remaining.clamp(0, 90)) / 90).toDouble();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: c.withValues(alpha: 0.3)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Text(big,
+              style: GoogleFonts.cairo(
+                  fontSize: 26, fontWeight: FontWeight.w900, color: c)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(sub,
+                style: GoogleFonts.cairo(
+                    fontSize: 11, fontWeight: FontWeight.w700, color: c)),
+          ),
+        ]),
+        const SizedBox(height: 6),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: isOverdue ? 1.0 : (1 - pct),
+            minHeight: 6,
+            backgroundColor: c.withValues(alpha: 0.12),
+            valueColor: AlwaysStoppedAnimation(c),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  // ── صندوق السيريال مع زرار نسخ ──
+  Widget _serialBox(BuildContext context, String serial) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3E5F5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFCE93D8)),
+      ),
+      child: Row(children: [
+        const Text('🔢', style: TextStyle(fontSize: 14)),
+        const SizedBox(width: 6),
+        Text('سيريال:',
+            style: GoogleFonts.cairo(
+                fontSize: 11, fontWeight: FontWeight.w700, color: const Color(0xFF6A1B9A))),
+        const SizedBox(width: 6),
+        Expanded(
+          child: SelectableText(serial,
+              textDirection: TextDirection.ltr,
+              style: GoogleFonts.cairo(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                  color: const Color(0xFF4A148C),
+                  letterSpacing: 0.5)),
+        ),
+        InkWell(
+          onTap: () {
+            Clipboard.setData(ClipboardData(text: serial));
+            AppSnackbar.show(context, '✅ تم نسخ السيريال');
+          },
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: const Color(0xFF6A1B9A),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.copy, size: 15, color: Colors.white),
+          ),
         ),
       ]),
     );
@@ -581,7 +687,41 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
             ),
             const SizedBox(height: 10),
 
-            AppFormField(label: 'الباقة / النظام (مثال: 3800)', controller: systemCtrl),
+            // System dropdown (مع خيار "أخرى" للكتابة اليدوية)
+            DropdownButtonFormField<String>(
+              initialValue: const ['3800', '4000', '1800', '1000', 'يدوي']
+                      .contains(systemCtrl.text.trim())
+                  ? systemCtrl.text.trim()
+                  : (systemCtrl.text.trim().isEmpty ? null : 'أخرى'),
+              isExpanded: true,
+              decoration: InputDecoration(
+                labelText: 'الباقة / النظام',
+                labelStyle: GoogleFonts.cairo(fontSize: 13),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+              items: [
+                for (final s in ['3800', '4000', '1800', '1000', 'يدوي'])
+                  DropdownMenuItem(
+                      value: s, child: Text(s, style: GoogleFonts.cairo(fontSize: 13))),
+                DropdownMenuItem(
+                    value: 'أخرى',
+                    child: Text('أخرى (اكتب يدوي)', style: GoogleFonts.cairo(fontSize: 13))),
+              ],
+              onChanged: (v) {
+                if (v == 'أخرى') {
+                  setS(() => systemCtrl.text = '');
+                } else {
+                  setS(() => systemCtrl.text = v ?? '');
+                }
+              },
+            ),
+            const SizedBox(height: 8),
+            // حقل يدوي يظهر دايماً لو عايز تعدّل النظام بحرية
+            AppFormField(
+                label: 'أو اكتب النظام يدوياً',
+                controller: systemCtrl,
+                textDirection: TextDirection.ltr),
             const SizedBox(height: 10),
 
             // Status

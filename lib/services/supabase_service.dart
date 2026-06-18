@@ -1,5 +1,7 @@
 // lib/services/supabase_service.dart
+import 'dart:math';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/main_line.dart';
 
@@ -35,30 +37,191 @@ class SupabaseService {
   // ── User Data Sync ────────────────────────────────────────────
   static String? get userId => client.auth.currentUser?.id;
 
-  static Future<void> saveUserData(Map<String, dynamic> data) async {
-    if (!SupabaseConfig.isConfigured) return;
-    final uid = userId;
-    if (uid == null) return;
-    try {
-      await client.from('user_data').upsert({
-        'user_id':    uid,
-        'data':       data,
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-    } catch (_) {}
+  // ── سياق الموظف (RBAC) ────────────────────────────────────────
+  // لو المستخدم موظف: بياناته الفعّالة هي بيانات المالك (ownerId)،
+  // مش بياناته هو. ده اللي بيخلّيه يشتغل على نفس داتا المحل.
+  static String? _employeeOwnerId; // = owner_id لو موظف، غير كده null
+  static String? employeeId;
+  static String? employeeName;
+
+  static bool get isEmployee => _employeeOwnerId != null;
+
+  /// هوية البيانات الفعّالة: للموظف = المالك، للمالك = نفسه
+  static String? get dataUserId => _employeeOwnerId ?? userId;
+
+  /// استرجاع سياق الموظف من التخزين المحلي عند فتح التطبيق
+  static Future<void> restoreEmployeeContext() async {
+    final prefs = await SharedPreferences.getInstance();
+    _employeeOwnerId = prefs.getString('emp_owner_id');
+    employeeId       = prefs.getString('emp_id');
+    employeeName     = prefs.getString('emp_name');
   }
 
-  static Future<Map<String, dynamic>?> loadUserData() async {
-    if (!SupabaseConfig.isConfigured) return null;
-    final uid = userId;
-    if (uid == null) return null;
+  static Future<void> _persistEmployeeContext() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_employeeOwnerId == null) {
+      await prefs.remove('emp_owner_id');
+      await prefs.remove('emp_id');
+      await prefs.remove('emp_name');
+    } else {
+      await prefs.setString('emp_owner_id', _employeeOwnerId!);
+      if (employeeId != null)   await prefs.setString('emp_id', employeeId!);
+      if (employeeName != null) await prefs.setString('emp_name', employeeName!);
+    }
+  }
+
+  static Future<void> _clearEmployeeContext() async {
+    _employeeOwnerId = null;
+    employeeId = null;
+    employeeName = null;
+    await _persistEmployeeContext();
+  }
+
+  /// نتيجة محاولة الحفظ المحمي ضد التضارب.
+  /// accepted=true: اتقبلت الكتابة، version = الإصدار الجديد.
+  /// stale=true: السيرفر أحدث، الكتابة اترفضت، serverData = نسخة السيرفر للسحب.
+  /// ok=false: فشل اتصال/صلاحية — منعمل حاجة (نحاول تاني بعدين).
+  static Future<({bool ok, bool accepted, bool stale, int version, Map<String, dynamic>? serverData})>
+      saveUserDataGuarded(Map<String, dynamic> data, int baseVersion) async {
+    if (!SupabaseConfig.isConfigured) {
+      return (ok: false, accepted: false, stale: false, version: baseVersion, serverData: null);
+    }
+    final uid = dataUserId;
+    if (uid == null) {
+      return (ok: false, accepted: false, stale: false, version: baseVersion, serverData: null);
+    }
     try {
-      final row = await client.from('user_data').select('data').eq('user_id', uid).maybeSingle();
-      if (row == null) return null;
+      final res = await client.rpc('save_user_data_guarded', params: {
+        'p_user_id':      uid,
+        'p_data':         data,
+        'p_base_version': baseVersion,
+      });
+      final m = res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
+      final accepted = m['accepted'] == true;
+      final stale    = m['stale'] == true;
+      final version  = (m['version'] as num?)?.toInt() ?? baseVersion;
+      final serverData = m['data'] is Map ? Map<String, dynamic>.from(m['data'] as Map) : null;
+      return (ok: true, accepted: accepted, stale: stale, version: version, serverData: serverData);
+    } catch (_) {
+      return (ok: false, accepted: false, stale: false, version: baseVersion, serverData: null);
+    }
+  }
+
+  /// تحميل بيانات المالك + رقم الإصدار الحالي على السيرفر.
+  static Future<({Map<String, dynamic>? data, int version})> loadUserData() async {
+    if (!SupabaseConfig.isConfigured) return (data: null, version: 0);
+    final uid = dataUserId;
+    if (uid == null) return (data: null, version: 0);
+    try {
+      final row = await client
+          .from('user_data')
+          .select('data, version')
+          .eq('user_id', uid)
+          .maybeSingle();
+      if (row == null) return (data: null, version: 0);
       final d = row['data'];
-      if (d is Map<String, dynamic>) return d;
-      return null;
-    } catch (_) { return null; }
+      final v = (row['version'] as num?)?.toInt() ?? 0;
+      return (data: d is Map<String, dynamic> ? d : null, version: v);
+    } catch (_) { return (data: null, version: 0); }
+  }
+
+  // ── Audit Log (الصندوق الأسود — جدول مستقل Append-Only) ────────
+  /// ترحيل دفعة من حركات السجل للسيرفر. يرجّع true لو نجح (عشان نمسحها من
+  /// الطابور المحلي). أي فشل → نسيبها في الطابور ونحاول تاني وقت يتوفر نت.
+  static Future<bool> pushAuditLogs(List<Map<String, dynamic>> rows) async {
+    if (!SupabaseConfig.isConfigured) return false;
+    if (rows.isEmpty) return true;
+    final uid = dataUserId; // المحل (المالك) — سواء كان الفاعل مالك أو موظف
+    if (uid == null) return false;
+    final actorUid = userId;
+    final userType = isEmployee ? 'موظف: ${employeeName ?? '—'}' : 'المالك';
+    try {
+      final payload = rows.map((r) => {
+            'owner_id':    uid,
+            'actor_uid':   actorUid,
+            'user_type':   userType,
+            'is_employee': isEmployee,
+            'action_type': r['type'],
+            'details':     r['desc'],
+            'target_id':   r['targetId'],
+            'target_type': r['targetType'],
+            'client_ts':   r['ts'],
+          }).toList();
+      await client.from('shop_audit_logs').insert(payload);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// قراءة السجل الرسمي من السيرفر (الأحدث أولاً).
+  static Future<List<Map<String, dynamic>>> fetchAuditLogs({int limit = 500}) async {
+    if (!SupabaseConfig.isConfigured) return [];
+    final uid = dataUserId;
+    if (uid == null) return [];
+    try {
+      final rows = await client
+          .from('shop_audit_logs')
+          .select('action_type, details, user_type, is_employee, target_id, target_type, client_ts, created_at')
+          .eq('owner_id', uid)
+          .order('created_at', ascending: false)
+          .limit(limit);
+      return (rows as List).map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // ── Line Invoice Audit (Phase 3 — أرشيف فواتير الخطوط Append-Only) ──
+  /// يضيف قيد تدقيق لفاتورة خط في الجدول الدائم (غير قابل للحذف).
+  static Future<bool> addLineInvoiceHistory({
+    required String groupId,
+    required String month,
+    double? expected,
+    required double actual,
+    bool hasOverage = false,
+    String? note,
+  }) async {
+    if (!SupabaseConfig.isConfigured) return false;
+    final uid = dataUserId;
+    if (uid == null) return false;
+    try {
+      await client.from('line_invoice_history').insert({
+        'owner_id':    uid,
+        'group_id':    groupId,
+        'month':       month,
+        'expected':    expected,
+        'actual':      actual,
+        'variance':    expected == null ? null : actual - expected,
+        'has_overage': hasOverage,
+        'note':        note,
+        'actor_uid':   userId,
+        'user_type':   isEmployee ? 'موظف: ${employeeName ?? '—'}' : 'المالك',
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// أرشيف فواتير خط معيّن (الأحدث أولاً).
+  static Future<List<Map<String, dynamic>>> fetchLineInvoiceHistory(
+      String groupId, {int limit = 100}) async {
+    if (!SupabaseConfig.isConfigured) return [];
+    final uid = dataUserId;
+    if (uid == null) return [];
+    try {
+      final rows = await client
+          .from('line_invoice_history')
+          .select('month, expected, actual, variance, has_overage, note, user_type, created_at')
+          .eq('owner_id', uid)
+          .eq('group_id', groupId)
+          .order('created_at', ascending: false)
+          .limit(limit);
+      return (rows as List).map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   // ── Telegram Bot Config (24/7 server bot) ─────────────────────
@@ -128,9 +291,247 @@ class SupabaseService {
 
   static Future<void> signOut() async {
     try { await client.auth.signOut(); } catch (_) {}
+    await _clearEmployeeContext();
   }
 
   static bool get isLoggedIn => client.auth.currentUser != null;
+
+  // ── Employee Auth (RBAC) ──────────────────────────────────────
+  /// تسجيل موظف جديد — يرجع: ok=نجح وبقى pending | error=رسالة الخطأ
+  static Future<({bool ok, String msg})> employeeRegister({
+    required String shopCode,
+    required String name,
+    required String pin,
+  }) async {
+    try {
+      final res = await client.functions.invoke('employee-auth', body: {
+        'action': 'register',
+        'shopCode': shopCode.trim(),
+        'name': name.trim(),
+        'pin': pin.trim(),
+      });
+      final data = res.data;
+      if (data is Map && data['status'] == 'pending') {
+        return (ok: true, msg: '');
+      }
+      final err = (data is Map ? data['error'] : null) ?? 'فشل التسجيل';
+      return (ok: false, msg: err.toString());
+    } catch (_) {
+      return (ok: false, msg: 'تعذّر الاتصال بالسيرفر');
+    }
+  }
+
+  /// دخول موظف — يرجع status: 'active' | 'pending' | 'disabled' | 'error'
+  static Future<({String status, String msg})> employeeLogin({
+    required String shopCode,
+    required String name,
+    required String pin,
+  }) async {
+    try {
+      final res = await client.functions.invoke('employee-auth', body: {
+        'action': 'login',
+        'shopCode': shopCode.trim(),
+        'name': name.trim(),
+        'pin': pin.trim(),
+      });
+      final data = res.data;
+      if (data is! Map) return (status: 'error', msg: 'رد غير متوقع');
+
+      final status = data['status']?.toString();
+      if (status == 'pending') return (status: 'pending', msg: '');
+      if (status == 'disabled') return (status: 'disabled', msg: '');
+      if (status == 'active') {
+        final session = data['session'];
+        final refresh = session is Map ? session['refresh_token']?.toString() : null;
+        if (refresh == null) return (status: 'error', msg: 'فشل تجهيز الجلسة');
+        await client.auth.setSession(refresh);
+        _employeeOwnerId = data['ownerId']?.toString();
+        employeeId       = data['employeeId']?.toString();
+        employeeName     = data['employeeName']?.toString() ?? name.trim();
+        await _persistEmployeeContext();
+        return (status: 'active', msg: '');
+      }
+      final err = data['error']?.toString() ?? 'فشل الدخول';
+      return (status: 'error', msg: err);
+    } catch (_) {
+      return (status: 'error', msg: 'تعذّر الاتصال بالسيرفر');
+    }
+  }
+
+  // ── Owner Profile (shop code) ─────────────────────────────────
+  static const String _shopCodeChars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+  static String _genShopCode() {
+    final r = Random.secure();
+    return List.generate(6, (_) => _shopCodeChars[r.nextInt(_shopCodeChars.length)]).join();
+  }
+
+  /// يتأكد إن المالك عنده ملف + كود محل، وينشئه لو مش موجود. يرجّع كود المحل.
+  static Future<String?> ensureOwnerProfile({String? shopName}) async {
+    if (!SupabaseConfig.isConfigured) return null;
+    final uid = userId;
+    if (uid == null) return null;
+    try {
+      final existing = await client
+          .from('owner_profiles')
+          .select('shop_code')
+          .eq('user_id', uid)
+          .maybeSingle();
+      if (existing != null && existing['shop_code'] != null) {
+        return existing['shop_code'].toString();
+      }
+      // إنشاء كود فريد (نعيد المحاولة لو حصل تضارب نادر)
+      for (var attempt = 0; attempt < 5; attempt++) {
+        final code = _genShopCode();
+        try {
+          await client.from('owner_profiles').insert({
+            'user_id': uid,
+            'shop_code': code,
+            if (shopName != null) 'shop_name': shopName,
+          });
+          return code;
+        } catch (_) {/* تضارب — جرّب كود تاني */}
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ── Employee Management (owner side) ──────────────────────────
+  static Future<List<Map<String, dynamic>>> fetchEmployees() async {
+    if (!SupabaseConfig.isConfigured) return [];
+    final uid = userId;
+    if (uid == null) return [];
+    try {
+      final rows = await client
+          .from('employees')
+          .select('id, name, status, created_at, approved_at')
+          .eq('owner_id', uid)
+          .order('created_at');
+      return (rows as List).map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<bool> setEmployeeStatus(String employeeId, String status) async {
+    if (!SupabaseConfig.isConfigured) return false;
+    try {
+      await client.from('employees').update({
+        'status': status,
+        if (status == 'active') 'approved_at': DateTime.now().toIso8601String(),
+      }).eq('id', employeeId);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> deleteEmployee(String employeeId) async {
+    if (!SupabaseConfig.isConfigured) return false;
+    try {
+      await client.from('employees').delete().eq('id', employeeId);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ── Line Assignments (Phase 4 — تقسيم المجموعات على الموظفين) ──
+  /// كل تعيينات المالك: [{group_id, employee_id}].
+  static Future<List<Map<String, dynamic>>> fetchAssignments() async {
+    if (!SupabaseConfig.isConfigured) return [];
+    final uid = userId; // المالك
+    if (uid == null) return [];
+    try {
+      final rows = await client
+          .from('line_assignments')
+          .select('group_id, employee_id')
+          .eq('owner_id', uid);
+      return (rows as List).map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// تعيين مجموعة لموظف (upsert على owner_id+group_id — كل مجموعة لموظف واحد).
+  static Future<bool> setAssignment(String groupId, String employeeId) async {
+    if (!SupabaseConfig.isConfigured) return false;
+    final uid = userId;
+    if (uid == null) return false;
+    try {
+      await client.from('line_assignments').upsert({
+        'owner_id': uid,
+        'group_id': groupId,
+        'employee_id': employeeId,
+      }, onConflict: 'owner_id,group_id');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// إلغاء تعيين مجموعة.
+  static Future<bool> removeAssignment(String groupId) async {
+    if (!SupabaseConfig.isConfigured) return false;
+    final uid = userId;
+    if (uid == null) return false;
+    try {
+      await client
+          .from('line_assignments')
+          .delete()
+          .eq('owner_id', uid)
+          .eq('group_id', groupId);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// مجموعات الموظف الحالي (الـ group_ids الموكلة له).
+  static Future<Set<String>> fetchMyAssignedGroupIds() async {
+    if (!SupabaseConfig.isConfigured) return {};
+    if (!isEmployee || employeeId == null) return {};
+    try {
+      final rows = await client
+          .from('line_assignments')
+          .select('group_id')
+          .eq('employee_id', employeeId!);
+      return (rows as List).map((e) => e['group_id'].toString()).toSet();
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// اشتراك لحظي على صف الموظف نفسه — بيستدعي [onChange] بالحالة الجديدة.
+  /// بيُستخدم لقفل التطبيق فوراً لو المالك فصل الموظف.
+  static RealtimeChannel? subscribeOwnEmployeeStatus(void Function(String status) onChange) {
+    if (!isEmployee || employeeId == null) return null;
+    final channel = client
+        .channel('emp_status_$employeeId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'employees',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: employeeId,
+          ),
+          callback: (payload) {
+            // الحذف = طرد كامل، نعامله زي الإيقاف
+            if (payload.eventType == PostgresChangeEvent.delete) {
+              onChange('deleted');
+              return;
+            }
+            final status = payload.newRecord['status']?.toString();
+            if (status != null) onChange(status);
+          },
+        )
+        .subscribe();
+    return channel;
+  }
 
   static String _arabicError(String msg) {
     if (msg.contains('Invalid login'))        return 'البريد أو كلمة السر غلط';

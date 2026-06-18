@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/supabase_service.dart';
 import '../widgets/common.dart';
 import '../widgets/pin_dialog.dart';
 
@@ -35,6 +36,25 @@ class DataIOScreen extends StatelessWidget {
             Text('صدّر كل بيانات البرنامج أو استورد نسخة احتياطية', style: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted)),
             const SizedBox(height: 20),
 
+            // Cloud sync section
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: AppColors.blueLight, borderRadius: BorderRadius.circular(12)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('☁️ المزامنة', style: GoogleFonts.cairo(fontWeight: FontWeight.w700, color: AppColors.blue2)),
+                  const SizedBox(height: 4),
+                  Text('البرنامج بيزامن تلقائياً. اضغط هنا لو عايز تتأكد إن أحدث نسخة نزلت على الجهاز ده.', style: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted)),
+                  const SizedBox(height: 12),
+                  _exportBtn(context, '🔄 مزامنة الآن', [const Color(0xFF0277bd), const Color(0xFF039be5)], () => _syncNow(context)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            // Export / Import / Delete — للمالك فقط (الموظف ممنوع ياخد نسخة)
+            if (!SupabaseService.isEmployee) ...[
             // Export section
             Container(
               padding: const EdgeInsets.all(16),
@@ -101,6 +121,15 @@ class DataIOScreen extends StatelessWidget {
                 ],
               ),
             ),
+            ] else ...[
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(color: AppColors.blueLight, borderRadius: BorderRadius.circular(12)),
+                child: Text('🔒 وضع الموظف: التصدير والاستيراد والحذف غير متاحة لحماية بيانات المحل.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.cairo(fontSize: 13, color: AppColors.muted, fontWeight: FontWeight.w700)),
+              ),
+            ],
           ],
         ),
       ),
@@ -123,6 +152,23 @@ class DataIOScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _syncNow(BuildContext context) async {
+    if (!SupabaseService.isLoggedIn) {
+      AppSnackbar.show(context, '⚠️ سجّل دخول لحسابك أولاً عشان تزامن');
+      return;
+    }
+    final prov = context.read<AppProvider>();
+    AppSnackbar.show(context, '🔄 جاري المزامنة...');
+    final result = await prov.loadFromCloud();
+    if (!context.mounted) return;
+    final msg = switch (result) {
+      'pulled' => '✅ تم تنزيل أحدث نسخة من السيرفر',
+      'pushed' => '✅ تم رفع نسختك للسيرفر',
+      _ => '✅ كل البيانات متزامنة بالفعل',
+    };
+    AppSnackbar.show(context, msg);
   }
 
   Future<void> _exportJSON(BuildContext context) async {
@@ -319,8 +365,18 @@ class DataIOScreen extends StatelessWidget {
               leading: const Icon(Icons.history, color: AppColors.blue),
               onTap: () {
                 Navigator.pop(context);
-                context.read<AppProvider>().clearActivityLog();
-                AppSnackbar.show(context, '✅ تم مسح سجل النشاط');
+                showDialog(
+                  context: context,
+                  builder: (_) => PinDialog(
+                    title: 'مسح سجل النشاط',
+                    onConfirm: () {
+                      final prov = context.read<AppProvider>();
+                      // ملاحظة: السجل الرسمي على السيرفر Append-Only ولا يُمسح.
+                      prov.clearActivityLog(prov.pin);
+                      AppSnackbar.show(context, '✅ تم مسح النسخة المحلية للسجل');
+                    },
+                  ),
+                );
               },
             ),
           ],

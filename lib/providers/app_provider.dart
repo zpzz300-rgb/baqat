@@ -2,6 +2,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_service.dart';
 import '../services/notification_service.dart';
 import '../services/telegram_service.dart';
@@ -13,6 +15,59 @@ import '../models/models.dart';
 class AppProvider extends ChangeNotifier {
   AppDB db = AppDB();
   bool _loading = true;
+
+  // ── حالة الاتصال (قراءة-فقط أوفلاين) + Realtime ──────────────────
+  bool _isOnline = true;
+  RealtimeChannel? _dataChannel;
+  StreamSubscription<List<ConnectivityResult>>? _connSub;
+
+  /// متصل بالنت؟ (لو لأ → التطبيق قراءة فقط، ممنوع أي تعديل)
+  bool get isOnline => _isOnline;
+
+  /// مسموح بالتعديل؟ = متصل بالنت. أي عملية كتابة بتتحقق منه.
+  bool get canEdit => _isOnline;
+
+  /// مجموعات الموظف الموكلة له (null = مالك/بدون قيد). للموظف: يشوف دول بس.
+  Set<String>? _assignedGroupIds;
+  Set<String>? get assignedGroupIds => _assignedGroupIds;
+
+  /// المجموعات الظاهرة للمستخدم الحالي — الموظف يشوف الموكلة له فقط.
+  List<Group> get visibleGroups {
+    if (!SupabaseService.isEmployee) return db.groups;
+    final ids = _assignedGroupIds;
+    if (ids == null) return const []; // لسه ماتحمّلتش — منعرضش (سرية)
+    return db.groups.where((g) => ids.contains(g.id)).toList();
+  }
+
+  /// هل المستخدم الحالي مسموح له يشوف المجموعة دي؟
+  bool canSeeGroup(String gid) =>
+      !SupabaseService.isEmployee || (_assignedGroupIds?.contains(gid) ?? false);
+
+  /// تحميل تعيينات الموظف الحالي من السيرفر (المجموعات الموكلة له).
+  Future<void> loadMyAssignments() async {
+    if (!SupabaseService.isEmployee) {
+      _assignedGroupIds = null;
+      return;
+    }
+    _assignedGroupIds = await SupabaseService.fetchMyAssignedGroupIds();
+    notifyListeners();
+  }
+
+  /// يُستدعى لما تتمنع كتابة بسبب عدم وجود نت (عشان نعرض رسالة حمرا للمستخدم).
+  /// بيتربط من الجذر (main.dart) عشان يعرض SnackBar أحمر فوق أي شاشة.
+  void Function()? onOfflineWriteBlocked;
+
+  /// لقطة آخر حالة سليمة (مُتزامنة) — تُستخدم للرجوع لو حصلت محاولة كتابة أوفلاين.
+  String? _lastGoodJson;
+
+  /// رقم إصدار البيانات على السيرفر (Optimistic Concurrency). الجهاز بيبعته
+  /// مع كل كتابة؛ لو السيرفر بقى أحدث، الكتابة تترفض ونسحب بدل ما نمسح.
+  int _dataVersion = 0;
+
+  /// طابور حركات السجل المستقل (الصندوق الأسود) المنتظرة الترحيل للسيرفر.
+  /// بيتحفظ محلياً عشان حتى لو قفل النت/التطبيق، الحركات تترحّل أول ما يرجع النت.
+  final List<Map<String, dynamic>> _pendingAudit = [];
+  bool _flushingAudit = false;
   String _pin = '123456';
   String _fontSize = 'medium'; // small, medium, large
   bool _darkMode = false;
@@ -116,7 +171,9 @@ class AppProvider extends ChangeNotifier {
   // ─── INIT ────────────────────────────────────────────────────
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('tcm_v3');
+    // وضع الموظف: ممنوع قراءة نسخة محلية من بيانات المحل — يبدأ فاضي
+    // ويحمّل من السيرفر لايف فقط (منع تسريب البيانات).
+    final raw = SupabaseService.isEmployee ? null : prefs.getString('tcm_v3');
     if (raw != null) {
       try {
         db = AppDB.fromJson(jsonDecode(raw));
@@ -157,7 +214,20 @@ class AppProvider extends ChangeNotifier {
     _telegramChatId     = prefs.getString('tcm_tg_chatid') ?? '974113917';
     _telegramEnabled    = prefs.getBool('tcm_tg_enabled')  ?? false;
     _telegramOffset     = prefs.getInt('tcm_tg_offset')    ?? 0;
+    _dataVersion        = prefs.getInt('tcm_data_version')  ?? 0;
+    // استرجاع طابور السجل المعلّق (الصندوق الأسود) — لو فيه حركات لسه ماترحّلتش
+    final pendRaw = prefs.getString('tcm_pending_audit');
+    if (pendRaw != null) {
+      try {
+        _pendingAudit.addAll((jsonDecode(pendRaw) as List)
+            .map((e) => Map<String, dynamic>.from(e as Map)));
+      } catch (_) {}
+    }
+    _lastGoodJson = jsonEncode(db.toJson());
     _loading = false;
+    _initConnectivity();
+    _flushAudit(); // حاول ترحّل أي حركات معلّقة من جلسة سابقة
+    if (SupabaseService.isEmployee) loadMyAssignments(); // مجموعات الموظف الموكلة له
     _autoMonthlyBilling();
     _addMonthlyPoints();
     _autoGroupNotes();
@@ -165,12 +235,6 @@ class AppProvider extends ChangeNotifier {
     if (_autoBackup) _checkAutoBackup();
     applyAllNotifications();
     notifyListeners();
-  }
-
-  @override
-  void dispose() {
-    _telegramTimer?.cancel();
-    super.dispose();
   }
 
   void _scheduleVoucherNotifications() {
@@ -190,10 +254,26 @@ class AppProvider extends ChangeNotifier {
 
   // ─── SAVE ────────────────────────────────────────────────────
   Future<void> save() async {
+    // حاجز الأوفلاين: ممنوع أي كتابة وانت مش متصل. نرجّع آخر نسخة سليمة
+    // عشان أي تعديل اتسرّب لا يُحفظ ولا يُرفع (منع تضارب نهائياً).
+    if (!_isOnline) {
+      if (_lastGoodJson != null) {
+        try { db = AppDB.fromJson(jsonDecode(_lastGoodJson!)); } catch (_) {}
+      }
+      onOfflineWriteBlocked?.call(); // رسالة حمرا: التعديل مش هيتحفظ من غير نت
+      notifyListeners();
+      return;
+    }
+    // ختم وقت التعديل قبل الحفظ — عشان المزامنة تحسم بالأحدث زمنياً
+    db.updatedAt = DateTime.now().millisecondsSinceEpoch;
     final json = db.toJson();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('tcm_v3', jsonEncode(json));
+    // وضع الموظف: ممنوع حفظ نسخة على الذاكرة الداخلية — السيرفر فقط
+    if (!SupabaseService.isEmployee) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('tcm_v3', jsonEncode(json));
+    }
     _saveToCloud(json); // fire & forget
+    _lastGoodJson = jsonEncode(json);
     notifyListeners();
   }
 
@@ -206,32 +286,235 @@ class AppProvider extends ChangeNotifier {
       'ownerName': _ownerName,
       'enabled': _telegramEnabled,
     };
-    SupabaseService.saveUserData(withConfig);
+    // حفظ محمي ضد التضارب: لو السيرفر بقى أحدث، السيرفر بيرفض الكتابة
+    // وبنسحب نسخته بدل ما نمسح بيانات الأجهزة التانية.
+    SupabaseService.saveUserDataGuarded(withConfig, _dataVersion).then((res) {
+      if (!res.ok) return; // فشل اتصال — هنحاول تاني في المزامنة الجاية
+      if (res.accepted) {
+        _dataVersion = res.version;
+        _persistDataVersion();
+      } else if (res.stale && res.serverData != null) {
+        // 🔒 الجهاز ده كان قديم — منع الكتابة فوق الأحدث. اسحب نسخة السيرفر.
+        _applyServerData(res.serverData!, res.version);
+      }
+    });
+    // برضه نحاول نرحّل أي حركات سجل معلّقة
+    _flushAudit();
   }
 
-  // ─── LOAD FROM CLOUD (بعد Login) ─────────────────────────────
-  Future<void> loadFromCloud() async {
-    final cloudData = await SupabaseService.loadUserData();
+  /// تطبيق نسخة السيرفر على الجهاز (بعد رفض كتابة قديمة، أو سحب عادي).
+  Future<void> _applyServerData(Map<String, dynamic> data, int version) async {
+    try {
+      db = AppDB.fromJson(data);
+      _dataVersion = version;
+      _lastGoodJson = jsonEncode(db.toJson());
+      if (!SupabaseService.isEmployee) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('tcm_v3', jsonEncode(data));
+      }
+      await _persistDataVersion();
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<void> _persistDataVersion() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('tcm_data_version', _dataVersion);
+  }
+
+  // ─── AUDIT QUEUE (الصندوق الأسود — ترحيل مستقل عن الـ Blob) ────
+  /// يضيف حركة لطابور الترحيل المستقل ويحاول يرفعها فوراً لو في نت.
+  /// ده بيخلّي السجل ينجو حتى لو المزامنة رجعت لورا أو الـ Blob اتمسح.
+  void _enqueueAudit(Map<String, dynamic> entry) {
+    _pendingAudit.add(entry);
+    _persistPendingAudit();
+    _flushAudit();
+  }
+
+  Future<void> _persistPendingAudit() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('tcm_pending_audit', jsonEncode(_pendingAudit));
+  }
+
+  /// يرحّل الطابور للسيرفر دفعة واحدة. آمن للاستدعاء المتكرر.
+  Future<void> _flushAudit() async {
+    if (_flushingAudit || !_isOnline || _pendingAudit.isEmpty) return;
+    if (!SupabaseService.isLoggedIn) return;
+    _flushingAudit = true;
+    try {
+      // لقطة من الموجود حالياً (ممكن يتضاف غيره أثناء الرفع)
+      final batch = List<Map<String, dynamic>>.from(_pendingAudit);
+      final ok = await SupabaseService.pushAuditLogs(batch);
+      if (ok) {
+        _pendingAudit.removeRange(0, batch.length);
+        await _persistPendingAudit();
+      }
+    } finally {
+      _flushingAudit = false;
+    }
+    // لو اتضاف حركات جديدة أثناء الرفع، كمّل
+    if (_isOnline && _pendingAudit.isNotEmpty) _flushAudit();
+  }
+
+  /// تحميل السجل الرسمي من السيرفر (للعرض في شاشة النشاط).
+  Future<List<Map<String, dynamic>>> fetchServerAudit({int limit = 500}) =>
+      SupabaseService.fetchAuditLogs(limit: limit);
+
+  /// أرشفة تدقيق فاتورة خط في الجدول الدائم (غير قابل للحذف) + قيد في النشاط.
+  Future<void> recordLineInvoiceAudit({
+    required String groupId,
+    required String month,
+    required double expected,
+    required double actual,
+    required bool hasOverage,
+    String? note,
+  }) async {
+    await SupabaseService.addLineInvoiceHistory(
+      groupId: groupId,
+      month: month,
+      expected: expected,
+      actual: actual,
+      hasOverage: hasOverage,
+      note: note,
+    );
+    final g = db.groups.firstWhere((x) => x.id == groupId,
+        orElse: () => Group(id: '', phone: ''));
+    final tag = hasOverage ? ' ⚠️ زيادة عن المتوقع' : '';
+    final noteTxt = (note != null && note.isNotEmpty) ? ' — $note' : '';
+    _addLog(null, 'bill',
+        'تدقيق فاتورة ${g.phone} ($month): متوقع ${expected.toStringAsFixed(0)} / فعلي ${actual.toStringAsFixed(0)}$tag$noteTxt',
+        targetId: groupId, targetType: 'group');
+    save();
+  }
+
+  /// أرشيف فواتير خط معيّن (من السيرفر).
+  Future<List<Map<String, dynamic>>> fetchLineInvoiceHistory(String groupId) =>
+      SupabaseService.fetchLineInvoiceHistory(groupId);
+
+  // ─── LOAD FROM CLOUD (بعد Login / عند رجوع التطبيق) ───────────
+  /// بيرجّع: pulled = نزّل من السيرفر | pushed = رفع المحلي | noop = مفيش تغيير
+  Future<String> loadFromCloud() async {
+    final r = await _loadFromCloudInner();
+    // حدّث لقطة الحالة السليمة (للرجوع وقت محاولة كتابة أوفلاين)
+    _lastGoodJson = jsonEncode(db.toJson());
+    return r;
+  }
+
+  Future<String> _loadFromCloudInner() async {
+    final res = await SupabaseService.loadUserData();
+    final cloudData = res.data;
     if (cloudData == null) {
       // مفيش بيانات على السيرفر — ارفع المحلي
       _saveToCloud(db.toJson());
-      return;
+      return 'pushed';
     }
     try {
       final cloudDb = AppDB.fromJson(cloudData);
-      // لو السيرفر عنده بيانات أكتر → استخدم السيرفر
-      final localCount  = db.groups.length + db.members.length;
-      final cloudCount  = cloudDb.groups.length + cloudDb.members.length;
-      if (cloudCount >= localCount) {
+      final cloudVersion = res.version;
+      final localTs = db.updatedAt;
+      final cloudTs = cloudDb.updatedAt;
+
+      // الحسم بالوقت: أحدث نسخة زمنياً تكسب.
+      if (cloudTs > localTs) {
+        // السيرفر أحدث → نزّله واعتمد إصداره
         db = cloudDb;
+        _dataVersion = cloudVersion;
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('tcm_v3', jsonEncode(cloudData));
-      } else {
-        // المحلي أحدث → ارفعه
+        await _persistDataVersion();
+        notifyListeners();
+        return 'pulled';
+      } else if (localTs > cloudTs) {
+        // المحلي أحدث → ارفعه (بإصدار السيرفر الحالي كأساس، والكتابة محمية)
+        _dataVersion = cloudVersion;
         _saveToCloud(db.toJson());
+        return 'pushed';
+      }
+
+      // الوقت متساوي (غالباً داتا قديمة من غير ختم وقت) → احسم بالعدد
+      // عشان منمسحش بيانات بالغلط.
+      final localCount = db.groups.length + db.members.length;
+      final cloudCount = cloudDb.groups.length + cloudDb.members.length;
+      if (cloudCount > localCount) {
+        db = cloudDb;
+        _dataVersion = cloudVersion;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('tcm_v3', jsonEncode(cloudData));
+        await _persistDataVersion();
+        notifyListeners();
+        return 'pulled';
+      } else if (localCount > cloudCount) {
+        _dataVersion = cloudVersion;
+        _saveToCloud(db.toJson());
+        return 'pushed';
+      }
+      // متطابقين — اعتمد إصدار السيرفر كأساس لأي كتابة لاحقة
+      _dataVersion = cloudVersion;
+      await _persistDataVersion();
+      return 'noop';
+    } catch (_) {
+      return 'noop';
+    }
+  }
+
+  // ─── CONNECTIVITY (read-only when offline) ───────────────────
+  Future<void> _initConnectivity() async {
+    final conn = Connectivity();
+    try {
+      final initial = await conn.checkConnectivity();
+      _isOnline = !initial.contains(ConnectivityResult.none);
+    } catch (_) {}
+    _connSub = conn.onConnectivityChanged.listen((results) {
+      final online = !results.contains(ConnectivityResult.none);
+      if (online == _isOnline) return;
+      _isOnline = online;
+      if (online) {
+        // رجع النت → اسحب أحدث نسخة، رحّل السجل المعلّق، وفعّل الـ realtime
+        loadFromCloud();
+        _flushAudit();
+        startRealtime();
+      } else {
+        stopRealtime();
       }
       notifyListeners();
-    } catch (_) {}
+    });
+  }
+
+  // ─── REALTIME (live sync بين الأجهزة) ────────────────────────
+  /// اشتراك لحظي على صف بيانات المالك — أي تعديل من جهاز تاني ينزل فوراً.
+  void startRealtime() {
+    stopRealtime();
+    final uid = SupabaseService.dataUserId;
+    if (uid == null) return;
+    _dataChannel = SupabaseService.client
+        .channel('user_data_rt_$uid')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'user_data',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: uid,
+          ),
+          // الحدث مجرد إشارة «في تغيير» — نسحب ونطبّق بمنطق الوقت (echo-safe)
+          callback: (_) => loadFromCloud(),
+        )
+        .subscribe();
+  }
+
+  void stopRealtime() {
+    final ch = _dataChannel;
+    _dataChannel = null;
+    if (ch != null) SupabaseService.client.removeChannel(ch);
+  }
+
+  @override
+  void dispose() {
+    _connSub?.cancel();
+    stopRealtime();
+    _telegramTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> saveSettings() async {
@@ -357,6 +640,8 @@ class AppProvider extends ChangeNotifier {
     final now = DateTime.now();
     db.workNums[i].lastContactDate =
         '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    _addLog(null, 'service', 'تسجيل اتصال على رقم العمل ${db.workNums[i].phone}',
+        targetId: id, targetType: 'worknum');
     save(); notifyListeners();
   }
 
@@ -401,6 +686,8 @@ class AppProvider extends ChangeNotifier {
 
   // ─── AUTO BACKUP ─────────────────────────────────────────────
   Future<String?> performBackup() async {
+    // الموظف ممنوع ياخد نسخة من البيانات
+    if (SupabaseService.isEmployee) return null;
     try {
       final now    = DateTime.now();
       final stamp  = '${now.year}-${now.month.toString().padLeft(2,'0')}-${now.day.toString().padLeft(2,'0')}';
@@ -451,6 +738,8 @@ class AppProvider extends ChangeNotifier {
     final i = db.groups.indexWhere((x) => x.id == g.id);
     if (i >= 0) db.groups[i] = g;
     _scheduleVoucherNotifications();
+    _addLog(null, 'edit', 'تعديل المجموعة ${g.phone}',
+        targetId: g.id, targetType: 'group');
     save();
   }
 
@@ -535,11 +824,15 @@ class AppProvider extends ChangeNotifier {
   }
 
   void deleteGroup(String gid) {
+    final g = db.groups.firstWhere((x) => x.id == gid,
+        orElse: () => Group(id: gid, phone: '—'));
     db.groups.removeWhere((g) => g.id == gid);
     // archive members
     final mems = db.members.where((m) => m.gid == gid).toList();
     db.deleted.addAll(mems);
     db.members.removeWhere((m) => m.gid == gid);
+    _addLog(null, 'delete', 'حذف المجموعة ${g.phone} (${mems.length} عميل)',
+        targetId: gid, targetType: 'group');
     save();
   }
 
@@ -584,6 +877,7 @@ class AppProvider extends ChangeNotifier {
     final m = db.deleted.firstWhere((x) => x.id == mid);
     db.members.add(m);
     db.deleted.removeWhere((x) => x.id == mid);
+    _addLog(m, 'add', 'استرجاع العميل ${m.name}');
     save();
   }
 
@@ -610,6 +904,8 @@ class AppProvider extends ChangeNotifier {
       'desc': note.isNotEmpty ? note : 'خصم',
       'amount': -amount,
     });
+    _addLog(db.members[i], 'charge',
+        'تحميل ${amount.toStringAsFixed(0)} ج على ${db.members[i].name}${note.isNotEmpty ? ' ($note)' : ''}');
     save();
   }
 
@@ -628,6 +924,8 @@ class AppProvider extends ChangeNotifier {
     final amount = (entry['amount'] ?? 0).toDouble();
     db.members[i].balance -= amount;
     db.members[i].log.removeAt(index);
+    _addLog(db.members[i], 'edit',
+        'حذف حركة من كشف ${db.members[i].name} (${amount.toStringAsFixed(0)} ج: ${entry['desc'] ?? ''})');
     save();
     notifyListeners();
   }
@@ -642,6 +940,12 @@ class AppProvider extends ChangeNotifier {
       'desc': logDesc,
       'amount': isPaid ? -amount : 0,
     });
+    _addLog(
+        db.members[i],
+        'service',
+        isPaid && amount > 0
+            ? 'خدمة "$logDesc" بـ ${amount.toStringAsFixed(0)} ج للعميل ${db.members[i].name}'
+            : 'خدمة "$logDesc" (مجانية) للعميل ${db.members[i].name}');
     save();
     notifyListeners();
   }
@@ -649,7 +953,13 @@ class AppProvider extends ChangeNotifier {
   void moveMember(String mid, String newGid) {
     final i = db.members.indexWhere((x) => x.id == mid);
     if (i < 0) return;
+    final oldG = db.groups.firstWhere((g) => g.id == db.members[i].gid,
+        orElse: () => Group(id: '', phone: '—'));
+    final newG = db.groups.firstWhere((g) => g.id == newGid,
+        orElse: () => Group(id: '', phone: '—'));
     db.members[i].gid = newGid;
+    _addLog(db.members[i], 'move',
+        'نقل العميل ${db.members[i].name} من ${oldG.phone} إلى ${newG.phone}');
     save();
     notifyListeners();
   }
@@ -657,6 +967,7 @@ class AppProvider extends ChangeNotifier {
   void clearMemberLog(String mid) {
     final i = db.members.indexWhere((x) => x.id == mid);
     if (i < 0) return;
+    _addLog(db.members[i], 'delete', 'مسح كشف حساب العميل ${db.members[i].name}');
     db.members[i].log.clear();
     save();
     notifyListeners();
@@ -867,6 +1178,9 @@ class AppProvider extends ChangeNotifier {
       'desc': note.isNotEmpty ? note : 'دفعة إيجار',
       'amount': amount,
     });
+    _addLog(null, 'pay',
+        'دفعة إيجار ${amount.toStringAsFixed(0)} ج - ${db.rentals[i].name}',
+        targetId: rid, targetType: 'rental');
     save(); notifyListeners();
   }
   void addRentalCharge(String rid, double amount, String note) {
@@ -878,6 +1192,9 @@ class AppProvider extends ChangeNotifier {
       'desc': note.isNotEmpty ? note : 'خصم إيجار',
       'amount': -amount,
     });
+    _addLog(null, 'charge',
+        'خصم إيجار ${amount.toStringAsFixed(0)} ج - ${db.rentals[i].name}',
+        targetId: rid, targetType: 'rental');
     save(); notifyListeners();
   }
   void toggleRentalStatus(String rid) {
@@ -940,23 +1257,75 @@ class AppProvider extends ChangeNotifier {
     if (i >= 0) { db.waitlist[i].status = status; save(); }
   }
 
-  // ─── ACTIVITY LOG ────────────────────────────────────────────
-  void _addLog(Member? m, String type, String desc) {
+  // ─── ACTIVITY LOG / AUDIT (الصندوق الأسود) ───────────────────
+  /// يسجّل حركة في النسخة المحلية (للعرض السريع/الأوفلاين) وفي نفس الوقت
+  /// يضيفها لطابور الترحيل المستقل اللي بيوصل لجدول shop_audit_logs.
+  /// [targetId]/[targetType] للربط النشط: الضغط على السطر يفتح العنصر.
+  void _addLog(Member? m, String type, String desc,
+      {String? targetId, String? targetType}) {
+    final now = DateTime.now();
+    final tid = targetId ?? m?.id;
+    final ttype = targetType ?? (m != null ? 'member' : null);
     db.activityLog.insert(0, {
       'date': _today(),
+      'time':
+          '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
+      'ts': now.toIso8601String(),
       'type': type,
       'desc': desc,
       'member': m?.name,
+      'targetId': tid,
+      'targetType': ttype,
+      'by': SupabaseService.isEmployee
+          ? 'موظف: ${SupabaseService.employeeName ?? '—'}'
+          : 'المالك',
+      'isEmployee': SupabaseService.isEmployee,
     });
     if (db.activityLog.length > 500) db.activityLog.removeLast();
+    // الصندوق الأسود: قيد مستقل لا يتأثر بتراجع المزامنة
+    _enqueueAudit({
+      'type': type,
+      'desc': desc,
+      'member': m?.name,
+      'targetId': tid,
+      'targetType': ttype,
+      'ts': now.toIso8601String(),
+    });
   }
 
-  void clearActivityLog() { db.activityLog.clear(); save(); }
+  /// تسجيل حركة عامة من الشاشات (إرسال رسالة، إلخ) — واجهة عامة للـ UI.
+  void logAction(String type, String desc,
+      {String? targetId, String? targetType, Member? member}) {
+    _addLog(member, type, desc, targetId: targetId, targetType: targetType);
+    save();
+  }
+
+  /// تحقق من الرقم السري للمالك. الموظف دائماً مرفوض.
+  bool verifyOwnerPin(String pin) {
+    if (SupabaseService.isEmployee) return false;
+    return pin == _pin;
+  }
+
+  /// مسح النسخة المحلية فقط من السجل — محمي بالرقم السري للمالك.
+  /// ⚠️ السجل الرسمي على السيرفر (shop_audit_logs) Append-Only ومستحيل يتمسح.
+  bool clearActivityLog(String pin) {
+    if (!verifyOwnerPin(pin)) return false;
+    db.activityLog.clear();
+    save();
+    return true;
+  }
 
   // ─── DELETE ALL ──────────────────────────────────────────────
   void deleteAllData() {
     db = AppDB();
     save();
+  }
+
+  /// مسح بيانات المحل من الذاكرة فقط (بدون رفع للسيرفر) —
+  /// يُستخدم لطرد الموظف فوراً عند إيقافه/حذفه.
+  void wipeInMemoryData() {
+    db = AppDB();
+    notifyListeners();
   }
 
   void deleteAllMembers() {
@@ -1232,6 +1601,57 @@ class AppProvider extends ChangeNotifier {
     save(); notifyListeners();
   }
 
+  // ─── DEBT REMINDER COUNTER ───────────────────────────────────
+  /// تسجيل إرسال تذكير مديونية — channel: 'wa_debt' | 'wa_statement' | 'sms' | 'manual'
+  void recordReminderSent(String memberId, String channel) {
+    final i = db.members.indexWhere((m) => m.id == memberId);
+    if (i < 0) return;
+    db.members[i].reminderLog.insert(0, {
+      'ts': DateTime.now().millisecondsSinceEpoch,
+      'ch': channel,
+    });
+    const chLabel = {
+      'sms': 'SMS',
+      'wa': 'واتساب',
+      'whatsapp': 'واتساب',
+      'manual': 'يدوي',
+    };
+    _addLog(db.members[i], 'message',
+        'إرسال رسالة (${chLabel[channel] ?? channel}) للعميل ${db.members[i].name}');
+    save();
+    notifyListeners();
+  }
+
+  /// تنقيص العداد يدوياً (لو فشل الإرسال) — يمسح أحدث حركة في الشهر الحالي
+  void decrementReminder(String memberId) {
+    final i = db.members.indexWhere((m) => m.id == memberId);
+    if (i < 0) return;
+    final now = DateTime.now();
+    final idx = db.members[i].reminderLog.indexWhere((e) {
+      final ts = (e['ts'] ?? 0) as int;
+      if (ts == 0) return false;
+      final d = DateTime.fromMillisecondsSinceEpoch(ts);
+      return d.year == now.year && d.month == now.month;
+    });
+    if (idx < 0) return; // مفيش حركات الشهر ده
+    db.members[i].reminderLog.removeAt(idx);
+    save();
+    notifyListeners();
+  }
+
+  /// زيادة العداد يدوياً (حركة يدوية بتاريخ النهاردة)
+  void incrementReminderManual(String memberId) =>
+      recordReminderSent(memberId, 'manual');
+
+  /// حذف حركة محددة من سجل التذكيرات (بالـ timestamp)
+  void deleteReminderEntry(String memberId, int ts) {
+    final i = db.members.indexWhere((m) => m.id == memberId);
+    if (i < 0) return;
+    db.members[i].reminderLog.removeWhere((e) => (e['ts'] ?? 0) == ts);
+    save();
+    notifyListeners();
+  }
+
   // ─── MEMBER NOTES ─────────────────────────────────────────────
   void addMemberNote(String memberId, String note) {
     final i = db.members.indexWhere((m) => m.id == memberId);
@@ -1278,6 +1698,48 @@ class AppProvider extends ChangeNotifier {
     final ci = db.groups[i].complaints.indexWhere((c) => c['id'] == complaintId);
     if (ci < 0) return;
     db.groups[i].complaints[ci] = {...db.groups[i].complaints[ci], ...updated};
+    save();
+    notifyListeners();
+  }
+
+  // ─── الشكاوى الموحّدة (كل الخطوط في مكان واحد) ────────────────
+  /// حالة الشكوى: 'pending' (لسه) / 'inProgress' (شغالة) / 'resolved' (تمت)
+  String complaintStatus(Map<String, dynamic> c) {
+    if (c['resolved'] == true) return 'resolved';
+    final s = (c['status'] ?? '').toString();
+    if (s == 'inProgress' || s == 'resolved' || s == 'pending') return s;
+    return 'pending';
+  }
+
+  /// كل الشكاوى من كل الخطوط، مع بيانات الخط، مرتّبة بالأحدث
+  List<Map<String, dynamic>> allComplaints() {
+    final out = <Map<String, dynamic>>[];
+    for (final g in db.groups) {
+      for (final c in g.complaints) {
+        out.add({
+          ...c,
+          '_gid': g.id,
+          '_groupPhone': g.phone,
+          '_groupOwner': g.ownerName ?? '',
+          '_status': complaintStatus(c),
+        });
+      }
+    }
+    out.sort((a, b) => (b['date'] ?? '').toString().compareTo((a['date'] ?? '').toString()));
+    return out;
+  }
+
+  /// تغيير حالة الشكوى مباشرة (للفلاتر: لسه/شغالة/تمت)
+  void setComplaintStatus(String gid, String complaintId, String status) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    final ci = db.groups[i].complaints.indexWhere((c) => c['id'] == complaintId);
+    if (ci < 0) return;
+    db.groups[i].complaints[ci] = {
+      ...db.groups[i].complaints[ci],
+      'status': status,
+      'resolved': status == 'resolved',
+    };
     save();
     notifyListeners();
   }
@@ -1497,6 +1959,230 @@ class AppProvider extends ChangeNotifier {
     }
     save();
     notifyListeners();
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  GIFTS V2 — مخزن أنواع متعددة + 3 مراحل لكل خط
+  //  المرحلة: chosen (أحمر) → received (أصفر) → sold (أخضر = ربح)
+  //  البيانات تُخزّن في group.gifts كـ:
+  //    { giftTypeId, name, price, date, stage: 'chosen'|'received'|'sold' }
+  // ═══════════════════════════════════════════════════════════════
+
+  /// كل أنواع الهدايا المعرّفة في المخزن (تتجاهل أي بيانات قديمة بدون اسم)
+  List<Map<String, dynamic>> get giftCatalog =>
+      db.giftTypes.where((g) => (g['name'] ?? '').toString().trim().isNotEmpty).toList();
+
+  /// إضافة نوع هدية جديد للمخزن
+  void addGiftTypeV2(String name, double price) {
+    final id = 'gift_${DateTime.now().millisecondsSinceEpoch}';
+    db.giftTypes.add({'id': id, 'name': name.trim(), 'price': price});
+    save(); notifyListeners();
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  //  نظام المربعين (هديتين لكل خط) — تصميم أبو عمر
+  //  كل خط له خانتين (slot 0 و 1). كل خانة تختار منها نوع هدية من المخزن.
+  //  لونين بس:  🔴 أحمر = اتخصصت (لسه ما اتباعتش)  |  🟢 أخضر = اتباعت (تضيف ربح).
+  //  تُخزّن في group.gifts كـ: { slot, giftTypeId, name, price, sold, date }
+  // ════════════════════════════════════════════════════════════════
+  // ── نظام فوترة الخط (شهر وشهر) — لمراجعة الفواتير فقط ──────────
+  void setGroupBillingSystem(String gid, String system) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    db.groups[i].billingSystem = system; // 'fixed' | 'bimonthly'
+    save();
+    notifyListeners();
+  }
+
+  Map<String, dynamic>? lineGiftSlot(String gid, int slot) {
+    final g = db.groups.firstWhere((x) => x.id == gid,
+        orElse: () => Group(id: '', phone: ''));
+    final idx = g.gifts.indexWhere((e) => (e['slot'] ?? -1) == slot);
+    return idx >= 0 ? g.gifts[idx] : null;
+  }
+
+  void setLineGiftSlot(String gid, int slot, Map<String, dynamic> giftType) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    final g = db.groups[i];
+    final idx = g.gifts.indexWhere((e) => (e['slot'] ?? -1) == slot);
+    // لو الخانة فيها هدية مباعة، اخصم ربحها قبل الاستبدال
+    if (idx >= 0 && g.gifts[idx]['sold'] == true) {
+      g.giftProfit -= (g.gifts[idx]['price'] ?? 0).toDouble();
+      if (g.giftProfit < 0) g.giftProfit = 0;
+    }
+    final entry = {
+      'slot': slot,
+      'giftTypeId': giftType['id'],
+      'name': giftType['name'],
+      'price': giftType['price'],
+      'sold': false,
+      'date': _today(),
+    };
+    if (idx >= 0) {
+      g.gifts[idx] = entry;
+    } else {
+      g.gifts.add(entry);
+    }
+    save();
+    notifyListeners();
+  }
+
+  void clearLineGiftSlot(String gid, int slot) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    final g = db.groups[i];
+    final idx = g.gifts.indexWhere((e) => (e['slot'] ?? -1) == slot);
+    if (idx < 0) return;
+    if (g.gifts[idx]['sold'] == true) {
+      g.giftProfit -= (g.gifts[idx]['price'] ?? 0).toDouble();
+      if (g.giftProfit < 0) g.giftProfit = 0;
+    }
+    g.gifts.removeAt(idx);
+    save();
+    notifyListeners();
+  }
+
+  void toggleLineGiftSold(String gid, int slot) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    final g = db.groups[i];
+    final idx = g.gifts.indexWhere((e) => (e['slot'] ?? -1) == slot);
+    if (idx < 0) return;
+    final wasSold = g.gifts[idx]['sold'] == true;
+    final price = (g.gifts[idx]['price'] ?? 0).toDouble();
+    if (wasSold) {
+      g.gifts[idx]['sold'] = false;
+      g.giftProfit -= price;
+      if (g.giftProfit < 0) g.giftProfit = 0;
+    } else {
+      g.gifts[idx]['sold'] = true;
+      g.giftProfit += price;
+    }
+    save();
+    notifyListeners();
+  }
+
+  /// تعديل نوع هدية (الاسم/السعر) — يحدّث الخطوط اللي لسه ما نزّلتش ربحها
+  void updateGiftType(String id, String name, double price) {
+    final idx = db.giftTypes.indexWhere((g) => g['id'] == id);
+    if (idx < 0) return;
+    db.giftTypes[idx] = {'id': id, 'name': name.trim(), 'price': price};
+    for (final g in db.groups) {
+      for (final e in g.gifts) {
+        if (e['giftTypeId'] == id && e['stage'] != 'sold') {
+          e['name'] = name.trim();
+          e['price'] = price;
+        }
+      }
+    }
+    save(); notifyListeners();
+  }
+
+  /// حذف نوع هدية من المخزن — يشيل اختياراته من الخطوط (ويخصم ربح المباع منها)
+  void deleteGiftTypeV2(String id) {
+    for (final g in db.groups) {
+      final eIdx = g.gifts.indexWhere((e) => e['giftTypeId'] == id);
+      if (eIdx >= 0) {
+        if (g.gifts[eIdx]['stage'] == 'sold') {
+          g.giftProfit -= (g.gifts[eIdx]['price'] ?? 0).toDouble();
+          if (g.giftProfit < 0) g.giftProfit = 0;
+        }
+        g.gifts.removeAt(eIdx);
+      }
+    }
+    db.giftTypes.removeWhere((g) => g['id'] == id);
+    save(); notifyListeners();
+  }
+
+  /// النوع المختار لخط معيّن (أول هدية مسجّلة) — null لو مفيش اختيار
+  Map<String, dynamic>? chosenGiftForGroup(String gid) {
+    final g = db.groups.firstWhere((x) => x.id == gid,
+        orElse: () => Group(id: '', phone: ''));
+    if (g.gifts.isEmpty) return null;
+    // أول هدية ليها giftTypeId موجود في الكتالوج الحالي
+    for (final e in g.gifts) {
+      if (db.giftTypes.any((t) => t['id'] == e['giftTypeId'])) return e;
+    }
+    return g.gifts.first;
+  }
+
+  /// مرحلة هدية الخط: 'none' | 'chosen' | 'received' | 'sold'
+  String giftStage(String gid) {
+    final e = chosenGiftForGroup(gid);
+    if (e == null) return 'none';
+    final s = (e['stage'] ?? 'chosen').toString();
+    // توافق مع البيانات القديمة: لو فيه sold==true اعتبرها أخضر
+    if (e['sold'] == true && s != 'sold') return 'sold';
+    return s;
+  }
+
+  /// اختيار نوع هدية لخط (يستبدل أي اختيار سابق) — يبدأ بمرحلة chosen (أحمر)
+  void setGroupGiftChoice(String gid, String giftTypeId) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    final g = db.groups[i];
+    final t = db.giftTypes.firstWhere((x) => x['id'] == giftTypeId,
+        orElse: () => {});
+    if (t.isEmpty) return;
+    // لو كان فيه اختيار قديم مباع، اخصم ربحه قبل الاستبدال
+    for (final e in g.gifts) {
+      if (e['stage'] == 'sold' || e['sold'] == true) {
+        g.giftProfit -= (e['price'] ?? 0).toDouble();
+      }
+    }
+    if (g.giftProfit < 0) g.giftProfit = 0;
+    g.gifts
+      ..clear()
+      ..add({
+        'giftTypeId': giftTypeId,
+        'name': t['name'],
+        'price': t['price'],
+        'date': _today(),
+        'stage': 'chosen',
+      });
+    save(); notifyListeners();
+  }
+
+  /// إلغاء اختيار الهدية لخط تماماً
+  void clearGroupGiftChoice(String gid) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    final g = db.groups[i];
+    for (final e in g.gifts) {
+      if (e['stage'] == 'sold' || e['sold'] == true) {
+        g.giftProfit -= (e['price'] ?? 0).toDouble();
+      }
+    }
+    if (g.giftProfit < 0) g.giftProfit = 0;
+    g.gifts.clear();
+    save(); notifyListeners();
+  }
+
+  /// تقديم مرحلة الهدية للأمام: chosen→received→sold ثم يلفّ لـ chosen
+  /// sold يضيف السعر للربح، والرجوع منه يخصمه.
+  void cycleGiftStage(String gid) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    final g = db.groups[i];
+    final e = chosenGiftForGroup(gid);
+    if (e == null) return;
+    final cur = giftStage(gid);
+    final price = (e['price'] ?? 0).toDouble();
+    if (cur == 'chosen') {
+      e['stage'] = 'received';
+    } else if (cur == 'received') {
+      e['stage'] = 'sold';
+      e['sold'] = true;
+      g.giftProfit += price; // نزّل الكاش/الربح
+    } else {
+      // من sold → نرجع لـ chosen ونخصم الربح
+      e['stage'] = 'chosen';
+      e['sold'] = false;
+      g.giftProfit -= price;
+      if (g.giftProfit < 0) g.giftProfit = 0;
+    }
+    save(); notifyListeners();
   }
 
   // ─── GUEST USERS ─────────────────────────────────────────────

@@ -11,7 +11,7 @@ import '../services/app_theme.dart';
 // ── Helpers ────────────────────────────────────────────────────────────────────
 enum _Period { last, current, next }
 
-enum _Anomaly { none, doubled, repeated }
+enum _Anomaly { none, doubled, repeated, unexpectedBimonthly }
 
 String _monthKey(DateTime d) =>
     '${d.year}-${d.month.toString().padLeft(2, '0')}';
@@ -59,6 +59,13 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
     }
   }
 
+  // مجموعة بالـ id (من المزوّد) — للاستخدام داخل كشف الشذوذ
+  Group? _grpOf(String gid) {
+    final groups = context.read<AppProvider>().db.groups;
+    final idx = groups.indexWhere((x) => x.id == gid);
+    return idx >= 0 ? groups[idx] : null;
+  }
+
   // ── Anomaly detection ────────────────────────────────────────────
   _Anomaly _anomalyOf(CompanyBill bill, List<CompanyBill> allBills) {
     if (bill.actualAmount <= 0) return _Anomaly.none;
@@ -66,6 +73,15 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
     final CompanyBill? prev = allBills.cast<CompanyBill?>().firstWhere(
         (b) => b!.groupId == bill.groupId && b.month == prevM,
         orElse: () => null);
+    // إنذار "شهر وشهر": لو الخط نظامه شهر وشهر ونزلت فاتورة في شهر
+    // المفروض يكون فاضي (لأن الشهر اللي قبله نزلت فيه فاتورة) → ضرب إنذار.
+    final g = _grpOf(bill.groupId);
+    if (g != null &&
+        g.billingSystem == 'bimonthly' &&
+        prev != null &&
+        prev.actualAmount > 0) {
+      return _Anomaly.unexpectedBimonthly;
+    }
     if (prev == null || prev.actualAmount <= 0) return _Anomaly.none;
     // مضاعفة: الفاتورة الحالية أكبر بـ 75% أو أكثر من الشهر الماضي
     if (bill.actualAmount >= prev.actualAmount * 1.75) return _Anomaly.doubled;
@@ -124,12 +140,20 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
         .where((b) => b.month == m)
         .map((b) => b.groupId)
         .toSet();
+    final prevM = _prevMonthOf(m);
     return db.groups.where((g) {
       if (g.fixedBillAmount <= 0) return false;
       if (addedGids.contains(g.id)) return false;
       // إخفاء الخطوط الفرعية — هتنزل تلقائياً مع الخط الرئيسي
       if (g.parentGroupId != null && g.parentGroupId!.isNotEmpty) return false;
       if (_provFilter != 'all' && g.provider != _provFilter) return false;
+      // نظام شهر وشهر: لو الشهر اللي قبله نزلت فيه فاتورة، فالشهر ده
+      // المفروض يكون فاضي (ببلاش) — فمنحطّوش في المتوقعة عشان ما نطلعش إنذار غلط.
+      if (g.billingSystem == 'bimonthly') {
+        final hadPrev = db.companyBills.any(
+            (b) => b.groupId == g.id && b.month == prevM && b.actualAmount > 0);
+        if (hadPrev) return false;
+      }
       return true;
     }).toList();
   }
@@ -1269,6 +1293,12 @@ class _AuditCardState extends State<_AuditCard> {
             // ── Anomaly details (expanded) ─────────────────────
             if (hasAnomaly && _expanded)
               _anomalyDetails(widget.anomaly, prev),
+            // ── نظام فواتير الخط (ثابت / شهر وشهر) — للمراجعة فقط ──
+            if (_expanded)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                child: _billingSystemToggle(),
+              ),
             // ── Actions ────────────────────────────────────────
             Padding(
               padding:
@@ -1429,12 +1459,64 @@ class _AuditCardState extends State<_AuditCard> {
     );
   }
 
+  // زرار اختيار نوع نظام الخط: ثابت / شهر وشهر — لمراجعة الفواتير فقط
+  Widget _billingSystemToggle() {
+    final groups = widget.db.groups;
+    final idx = groups.indexWhere((x) => x.id == widget.bill.groupId);
+    if (idx < 0) return const SizedBox.shrink();
+    final g = groups[idx];
+    final isBi = g.billingSystem == 'bimonthly';
+    Widget opt(String label, bool selected, VoidCallback onTap) => Expanded(
+          child: GestureDetector(
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 7),
+              decoration: BoxDecoration(
+                color: selected ? AppColors.blue2 : Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: selected ? AppColors.blue2 : AppColors.border),
+              ),
+              child: Center(
+                child: Text(label,
+                    style: GoogleFonts.cairo(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: selected ? Colors.white : AppColors.muted)),
+              ),
+            ),
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('🔄 نظام فواتير الخط (للمراجعة فقط):',
+            style: GoogleFonts.cairo(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: AppColors.muted)),
+        const SizedBox(height: 5),
+        Row(children: [
+          opt('📅 ثابت (كل شهر)', !isBi,
+              () => widget.prov.setGroupBillingSystem(g.id, 'fixed')),
+          const SizedBox(width: 6),
+          opt('🔂 شهر وشهر', isBi,
+              () => widget.prov.setGroupBillingSystem(g.id, 'bimonthly')),
+        ]),
+      ]),
+    );
+  }
+
   Widget _anomalyBadge(_Anomaly a) {
     final isDoubled = a == _Anomaly.doubled;
     final color = isDoubled
         ? const Color(0xFFc62828)
         : const Color(0xFFe65100);
-    final txt = isDoubled ? '⚠️ مضاعفة' : '⚠️ تكرار';
+    final txt = isDoubled
+        ? '⚠️ مضاعفة'
+        : a == _Anomaly.unexpectedBimonthly
+            ? '🚨 شهر مفروض فاضي'
+            : '⚠️ تكرار';
     return Container(
       margin: const EdgeInsets.only(right: 4),
       padding: const EdgeInsets.symmetric(
@@ -1460,6 +1542,10 @@ class _AuditCardState extends State<_AuditCard> {
       msg = 'تنبيه: الفاتورة (${b.actualAmount.toStringAsFixed(0)} ج) أكبر بكثير من '
           'الشهر الماضي${prev != null ? " (${prev.actualAmount.toStringAsFixed(0)} ج)" : ""}.'
           ' احتمال وجود خطأ أو تراكم فواتير من الشركة.';
+    } else if (a == _Anomaly.unexpectedBimonthly) {
+      color = const Color(0xFFc62828);
+      msg = '🚨 الخط ده نظامه «شهر وشهر» والمفروض الشهر ده يكون ببلاش، '
+          'بس نزلت فاتورة (${b.actualAmount.toStringAsFixed(0)} ج)! راجع حسابك مع الشركة فوراً.';
     } else {
       color = const Color(0xFFe65100);
       msg = 'تنبيه: نفس المبلغ (${b.actualAmount.toStringAsFixed(0)} ج) تكرر شهرين متتاليين.'
@@ -1696,77 +1782,138 @@ class _AuditCardState extends State<_AuditCard> {
   void _showConfirmDialog(BuildContext context) {
     final ctrl = TextEditingController(
         text: b.actualAmount.toStringAsFixed(0));
+    final noteCtrl = TextEditingController();
+    // المتوقع: آخر فاتورة فعلية للشهر السابق، وإلا المبلغ الثابت، وإلا التقدير الحالي.
+    final g = db.groups.firstWhere((x) => x.id == b.groupId,
+        orElse: () => Group(id: '', phone: ''));
+    final prevM = _prevMonthOf(b.month);
+    final CompanyBill? prevBill = db.companyBills.cast<CompanyBill?>().firstWhere(
+        (x) => x!.groupId == b.groupId && x.month == prevM && x.isActual,
+        orElse: () => null);
+    final expected = (prevBill != null && prevBill.actualAmount > 0)
+        ? prevBill.actualAmount
+        : (g.fixedBillAmount > 0 ? g.fixedBillAmount : b.actualAmount);
+
     showDialog(
       context: context,
       builder: (_) => Directionality(
         textDirection: TextDirection.rtl,
-        child: AlertDialog(
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18)),
-          title: Text('✅ تأكيد الفاتورة الفعلية',
-              style: GoogleFonts.cairo(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 15)),
-          content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
+        child: StatefulBuilder(builder: (context, setLocal) {
+          final amount = double.tryParse(ctrl.text.trim()) ?? 0;
+          final overage = expected > 0 && amount > expected + 0.5;
+          final diff = amount - expected;
+          final noteMissing = overage && noteCtrl.text.trim().isEmpty;
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18)),
+            title: Text('✅ تأكيد الفاتورة الفعلية',
+                style: GoogleFonts.cairo(
+                    fontWeight: FontWeight.w900, fontSize: 15)),
+            content: Column(mainAxisSize: MainAxisSize.min, children: [
+              // ── القيمة المتوقعة بخط باهت ──
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  'المتوقع لهذا الشهر: ${expected.toStringAsFixed(0)} ج',
+                  style: GoogleFonts.cairo(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade500),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text('أدخل المبلغ الفعلي الوارد من الشركة',
+                    style: GoogleFonts.cairo(
+                        fontSize: 11, color: AppColors.muted)),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: ctrl,
+                keyboardType: TextInputType.number,
+                textDirection: TextDirection.ltr,
+                onChanged: (_) => setLocal(() {}),
+                decoration: InputDecoration(
+                  labelText: 'المبلغ الفعلي (ج)',
+                  labelStyle: GoogleFonts.cairo(fontSize: 13),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 10),
+                ),
+              ),
+              // ── تحذير الزيادة + ملاحظة إجبارية ──
+              if (overage) ...[
+                const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                      color: const Color(0xFFF3E5F5),
-                      borderRadius:
-                          BorderRadius.circular(10)),
+                      color: AppColors.redLight,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: AppColors.red.withValues(alpha: 0.5))),
                   child: Text(
-                    'الفاتورة التقديرية: ${b.actualAmount.toStringAsFixed(0)} ج\n'
-                    'أدخل المبلغ الفعلي الوارد من الشركة',
+                    '🔴 يوجد زيادة ${diff.toStringAsFixed(0)} ج عن المتوقع — راجع الشركة لمعرفة السبب، واكتب الملاحظة:',
                     style: GoogleFonts.cairo(
                         fontSize: 12,
-                        color: const Color(0xFF6a1b9a)),
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.red),
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 TextField(
-                  controller: ctrl,
-                  keyboardType: TextInputType.number,
-                  textDirection: TextDirection.ltr,
+                  controller: noteCtrl,
+                  textDirection: TextDirection.rtl,
+                  minLines: 1,
+                  maxLines: 3,
+                  onChanged: (_) => setLocal(() {}),
                   decoration: InputDecoration(
-                    labelText: 'المبلغ الفعلي (ج)',
-                    labelStyle:
-                        GoogleFonts.cairo(fontSize: 13),
+                    labelText: 'سبب الزيادة / الملاحظة (إجباري)',
+                    labelStyle: GoogleFonts.cairo(fontSize: 12),
+                    errorText:
+                        noteMissing ? 'لازم تكتب سبب الزيادة قبل التأكيد' : null,
                     border: OutlineInputBorder(
-                        borderRadius:
-                            BorderRadius.circular(12)),
-                    contentPadding:
-                        const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
+                        borderRadius: BorderRadius.circular(12)),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
                   ),
                 ),
-              ]),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text('إلغاء',
-                    style: GoogleFonts.cairo())),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.green,
-                  shape: RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.circular(10))),
-              onPressed: () {
-                final amount =
-                    double.tryParse(ctrl.text.trim()) ?? 0;
-                if (amount <= 0) return;
-                prov.confirmActualBill(b.id, amount);
-                Navigator.pop(context);
-              },
-              child: Text('تأكيد',
-                  style: GoogleFonts.cairo(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700)),
-            ),
-          ],
-        ),
+              ],
+            ]),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('إلغاء', style: GoogleFonts.cairo())),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.green,
+                    disabledBackgroundColor: AppColors.green.withValues(alpha: 0.4),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10))),
+                onPressed: (amount <= 0 || noteMissing)
+                    ? null
+                    : () {
+                        final note = noteCtrl.text.trim();
+                        prov.confirmActualBill(b.id, amount);
+                        // أرشفة دائمة (غير قابلة للحذف) على السيرفر + قيد نشاط
+                        prov.recordLineInvoiceAudit(
+                          groupId: b.groupId,
+                          month: b.month,
+                          expected: expected,
+                          actual: amount,
+                          hasOverage: overage,
+                          note: note.isEmpty ? null : note,
+                        );
+                        Navigator.pop(context);
+                      },
+                child: Text('تأكيد',
+                    style: GoogleFonts.cairo(
+                        color: Colors.white, fontWeight: FontWeight.w700)),
+              ),
+            ],
+          );
+        }),
       ),
     );
   }

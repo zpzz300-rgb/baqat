@@ -26,6 +26,7 @@ class _EditMemberModalState extends State<EditMemberModal> {
   late TextEditingController _nameCtrl, _phoneCtrl, _phone2Ctrl;
   late TextEditingController _priceCtrl, _notesCtrl, _natIdCtrl, _addressCtrl;
   late TextEditingController _guarantorNameCtrl, _guarantorPhoneCtrl;
+  late TextEditingController _minutesCtrl, _intlCtrl;
 
   late String _type;
   late String? _paymentFlag;
@@ -49,6 +50,10 @@ class _EditMemberModalState extends State<EditMemberModal> {
     _addressCtrl = TextEditingController(text: m.address ?? '');
     _guarantorNameCtrl = TextEditingController(text: m.guarantorName ?? '');
     _guarantorPhoneCtrl = TextEditingController(text: m.guarantorPhone ?? '');
+    _minutesCtrl = TextEditingController(
+        text: m.minutesAllocation > 0 ? '${m.minutesAllocation}' : '');
+    _intlCtrl = TextEditingController(
+        text: m.internationalAllocation > 0 ? '${m.internationalAllocation}' : '');
 
     _type = m.type;
     _paymentFlag = m.paymentFlag;
@@ -652,6 +657,26 @@ class _EditMemberModalState extends State<EditMemberModal> {
         ),
         const SizedBox(height: 12),
 
+        // ── الدقايق والدولي ──
+        Row(children: [
+          Expanded(
+            child: AppFormField(
+              label: 'الدقايق/شهر',
+              controller: _minutesCtrl,
+              keyboardType: TextInputType.number,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: AppFormField(
+              label: 'دقايق دولي/شهر',
+              controller: _intlCtrl,
+              keyboardType: TextInputType.number,
+            ),
+          ),
+        ]),
+        const SizedBox(height: 12),
+
         // ── Notes ──
         AppFormField(label: 'ملاحظات', controller: _notesCtrl),
         const SizedBox(height: 12),
@@ -790,6 +815,11 @@ class _EditMemberModalState extends State<EditMemberModal> {
       files: m.files,
       invoiceLog: m.invoiceLog,
       natIdPhotoPath: _natIdPhotoPath,
+      deferralDate: m.deferralDate,
+      deferralNote: m.deferralNote,
+      reminderLog: m.reminderLog,
+      minutesAllocation: int.tryParse(_minutesCtrl.text.trim()) ?? 0,
+      internationalAllocation: int.tryParse(_intlCtrl.text.trim()) ?? 0,
     ));
     Navigator.pop(context);
   }

@@ -74,6 +74,9 @@ interface WorkNum {
   provider?: string | null;
   status?: string;        // 'available' | 'reserved' | 'needsRenewal' | 'damaged'
   notes?: string | null;
+  lastContactDate?: string | null;   // آخر اتصال/تفعيل (ISO)
+  offerExpiryDate?: string | null;
+  reminderDaysOverride?: number | null;
 }
 
 interface GeneralNote {
@@ -330,6 +333,21 @@ function welcome(ownerName: string): string {
 /مدفوع — المسددة
 /اتصالات /فودافون /اورانج /وي — ملخص كل شركة
 
+🚨 <b>تنبيهات ذكية ووقائية</b>
+/تنبيهات — تنبيهات عامة مهمة
+/مضاعفة — فواتير زادت فجأة (خطر)
+/تجديد — أرقام محتاجة اتصال قبل التقفيل
+/متعثرين — عملاء محتاجين متابعة عاجلة
+/متوقع 7 — المتوقع تحصيله قريباً
+/فرص — ربط الأماكن الفاضية بقائمة الانتظار
+/احسب 3800 5 — حاسبة ربح خط قبل الإضافة
+
+🎛️ <b>تفاعلي</b>
+/قائمة — أزرار سريعة
+/رسم — رسوم بيانية
+/كارت [اسم] — كارت عميل كامل
+/واتس [اسم] — لينك واتساب جاهز
+
 🗂️ <b>أخرى</b>
 /ايجارات — الإيجارات النشطة
 /ضيوف — العملاء الضيوف
@@ -337,7 +355,6 @@ function welcome(ownerName: string): string {
 /ارقام — أرقام الشغل
 /ملاحظات — الملاحظات
 /نشاط 15 — آخر نشاط
-/تنبيهات — تنبيهات مهمة
 
 💡 الأوامر تعمل بـ / أو بدونها، والأرقام اختيارية.`;
 }
@@ -776,7 +793,7 @@ function searchMembers(db: AppDB, query: string): string {
     (m) => m.name.toLowerCase().includes(q) || m.phone.includes(q),
   );
   if (hits.length === 0) return `🔍 لا يوجد عميل مطابق لـ "${esc(query)}"`;
-  let out = `🔍 <b>نتائج البحث عن "${esc(query)}" (${hits.length})</b>\n━━━━━━━━━━━━━━━━━━\n\n`;
+  let out = `🔍 <b>نتائج البحث عن "${esc(query)}" (${hits.length})</b>\n💡 للتفاصيل والأزرار: <code>/كارت ${esc(query)}</code>\n━━━━━━━━━━━━━━━━━━\n\n`;
   for (const m of hits.slice(0, 20)) {
     const g = groupByGid(db, m.gid);
     out += `${flagOf(m)} <b>${esc(m.name)}</b>\n`;
@@ -1062,6 +1079,134 @@ function workNumsReport(db: AppDB): string {
   return out;
 }
 
+// ── (1) الفواتير المضاعفة: زادت 75%+ عن الشهر السابق ────────────────────────
+function doubledBillsReport(db: AppDB): string {
+  const now = new Date();
+  const curM = currentMonth();
+  const prevM = prevMonth(curM);
+  const hits: string[] = [];
+  for (const b of db.companyBills.filter((x) => x.month === curM)) {
+    const prev = db.companyBills.find((x) => x.groupId === b.groupId && x.month === prevM);
+    if (prev && prev.actualAmount > 0 && b.actualAmount >= prev.actualAmount * 1.75) {
+      const g = findGroup(db, b.groupId) ?? ({ phone: "?" } as Group);
+      const pct = Math.round(((b.actualAmount - prev.actualAmount) / prev.actualAmount) * 100);
+      hits.push(`🔴 <b>${esc(g.phone)}</b>${g.ownerName ? ` (${esc(g.ownerName)})` : ""}\n   ${n0(prev.actualAmount)} ج ← ${n0(b.actualAmount)} ج (+${pct}%)`);
+    }
+  }
+  if (hits.length === 0) return "✅ لا توجد فواتير مضاعفة هذا الشهر — كله طبيعي 👍";
+  return `🚨 <b>فواتير مضاعفة هذا الشهر!</b>\nراجعها فوراً (احتمال خطأ شركة أو استهلاك زائد):\n━━━━━━━━━━━━━━━━━━\n\n${hits.join("\n\n")}`;
+}
+
+// ── (2) أرقام مخزون قربت تتقفل (محتاجة اتصال) ───────────────────────────────
+function lineRenewalReport(db: AppDB, deactivationDays = 90, reminderDays = 15): string {
+  const now = Date.now();
+  const rows: Array<{ w: WorkNum; left: number }> = [];
+  for (const w of db.workNums) {
+    if (w.status === "damaged") continue;
+    if (!w.lastContactDate) continue;
+    const last = new Date(w.lastContactDate);
+    if (isNaN(last.getTime())) continue;
+    const daysSince = Math.floor((now - last.getTime()) / 86400000);
+    const limit = w.reminderDaysOverride ?? deactivationDays;
+    const left = limit - daysSince; // أيام متبقية قبل التقفيل
+    if (left <= reminderDays) rows.push({ w, left });
+  }
+  if (rows.length === 0) return "✅ لا توجد أرقام معرّضة للتقفيل قريباً 👍";
+  rows.sort((a, b) => a.left - b.left);
+  let out = "⏰ <b>أرقام محتاجة اتصال قبل التقفيل!</b>\n━━━━━━━━━━━━━━━━━━\n\n";
+  for (const { w, left } of rows) {
+    const em = left <= 0 ? "🔴" : left <= 5 ? "🟠" : "🟡";
+    const txt = left <= 0 ? `تجاوز الموعد بـ ${-left} يوم!` : `باقي ${left} يوم`;
+    out += `${em} <code>${esc(w.phone)}</code>${w.label ? ` — ${esc(w.label)}` : ""} — ${txt}\n`;
+  }
+  out += "\n💡 اعمل اتصال/تفعيل على الأرقام دي عشان متتقفلش.";
+  return out;
+}
+
+// ── (3) كشف العملاء النايمين: دين ثابت ومافيش تواصل ─────────────────────────
+function dormantDebtorsReport(db: AppDB): string {
+  // نعتمد على paymentFlag الأحمر كإشارة دين قديم/خطر + غياب تأجيل نشط
+  const list = db.members
+    .filter((m) => m.balance < -200 && m.paymentFlag === "red" && !m.deferralDate)
+    .sort((a, b) => a.balance - b.balance);
+  if (list.length === 0) return "✅ لا يوجد عملاء متعثرين بحاجة متابعة عاجلة 👍";
+  const total = list.reduce((s, m) => s + -m.balance, 0);
+  let out = `😴 <b>عملاء محتاجين متابعة عاجلة</b>\n(دين مرتفع + علامة حمراء + بدون تأجيل)\nالعدد: <b>${list.length}</b> — الإجمالي: <code>${n0(total)} ج</code>\n━━━━━━━━━━━━━━━━━━\n\n`;
+  let i = 0;
+  for (const m of list.slice(0, 30)) {
+    i++;
+    out += `${i}. 🔴 <b>${esc(m.name)}</b> — <code>${n0(-m.balance)} ج</code>\n   📞 ${esc(m.phone)}\n`;
+  }
+  if (list.length > 30) out += `\n... و ${list.length - 30} آخرين`;
+  out += `\n\n💬 لتذكير سريع: /واتس [اسم العميل]`;
+  return out;
+}
+
+// ── (4) المتوقع تحصيله: تأجيلات حلّ موعدها/قرب ──────────────────────────────
+function expectedCollectionReport(db: AppDB, withinDays = 7): string {
+  const list = db.members.filter((m) => {
+    const d = daysUntil(m.deferralDate);
+    return d !== null && d <= withinDays && m.balance < 0;
+  });
+  if (list.length === 0) return `لا توجد تحصيلات متوقعة (تأجيلات مستحقة) خلال ${withinDays} يوم.`;
+  const expected = list.reduce((s, m) => s + -m.balance, 0);
+  let out = `💰 <b>المتوقع تحصيله خلال ${withinDays} يوم</b>\n`;
+  out += `الإجمالي المتوقع: <code>${n0(expected)} ج</code> من ${list.length} عميل\n━━━━━━━━━━━━━━━━━━\n\n`;
+  list.sort((a, b) => daysUntil(a.deferralDate)! - daysUntil(b.deferralDate)!);
+  for (const m of list) {
+    const d = daysUntil(m.deferralDate)!;
+    const w = d < 0 ? `فات ${-d} يوم` : d === 0 ? "النهاردة" : `بعد ${d} يوم`;
+    out += `📅 <b>${esc(m.name)}</b> — <code>${n0(-m.balance)} ج</code> (${w})\n`;
+  }
+  return out;
+}
+
+// ── (5) ربط الفرص: خطوط فاضية + قائمة انتظار ────────────────────────────────
+function matchOpportunitiesReport(db: AppDB): string {
+  const freeGroups = db.groups
+    .map((g) => ({ g, free: (g.maxClients ?? 0) - membersOf(db, g.id).length }))
+    .filter((x) => (x.g.maxClients ?? 0) > 0 && x.free > 0);
+  const totalFree = freeGroups.reduce((s, x) => s + x.free, 0);
+  const waiting = db.waitlist.filter((w) => w.status !== "assigned");
+
+  let out = "🔗 <b>ربط الفرص</b>\n━━━━━━━━━━━━━━━━━━\n\n";
+  out += `🟢 أماكن فاضية: <b>${totalFree}</b> في ${freeGroups.length} خط\n`;
+  out += `⏳ في قائمة الانتظار: <b>${waiting.length}</b>\n\n`;
+
+  if (totalFree === 0) { out += "🔴 لا توجد أماكن فاضية حالياً."; return out; }
+  if (waiting.length === 0) { out += "📋 قائمة الانتظار فاضية — مفيش حد تحطه دلوقتي."; return out; }
+
+  out += `✅ <b>عندك فرصة!</b> تقدر تحط ${Math.min(totalFree, waiting.length)} من الانتظار:\n\n`;
+  out += "<b>الأماكن المتاحة:</b>\n";
+  for (const { g, free } of freeGroups) out += `📡 ${esc(g.phone)} — ${free} مكان\n`;
+  out += "\n<b>أوائل قائمة الانتظار:</b>\n";
+  for (const w of waiting.slice(0, totalFree)) {
+    out += `👤 ${esc(w.name)} — 📞 ${esc(w.phone)}${w.packageType && w.packageType !== "any" ? ` (${esc(w.packageType)})` : ""}\n`;
+  }
+  return out;
+}
+
+// ── (9) حاسبة ربح خط قبل الإضافة ─────────────────────────────────────────────
+function profitCalc(system: number, clients: number): string {
+  // 3800 = 200 جيجا/260 سعر افتراضي ، غيره = 70 جيجا/190
+  const isBig = system === 3800;
+  const pricePerClient = isBig ? 260 : 190;
+  const fixedBill = isBig ? 3800 : 1800; // تقديري للفاتورة الثابتة
+  const income = clients * pricePerClient;
+  const profit = income - fixedBill;
+  return `🧮 <b>حاسبة ربح سريعة (تقديرية)</b>
+━━━━━━━━━━━━━━━━━━
+النظام: <b>${system}</b>
+عدد العملاء: <b>${clients}</b>
+سعر العميل (افتراضي): ${n0(pricePerClient)} ج
+الدخل: ${n0(income)} ج
+الفاتورة الثابتة (تقديري): ${n0(fixedBill)} ج
+━━━━━━━━━━━━━━
+${profit >= 0 ? "🟢" : "🔴"} <b>الربح المتوقع: ${n0(profit)} ج</b>
+
+⚠️ أرقام تقديرية للمساعدة في القرار فقط — الأرقام الفعلية حسب إعداداتك في التطبيق.`;
+}
+
 // ── الملاحظات العامة ─────────────────────────────────────────────────────────
 function notesReport(db: AppDB): string {
   const active = db.generalNotes.filter((n) => !n.isCompleted);
@@ -1318,14 +1463,176 @@ function route(text: string, db: AppDB, ownerName: string): string {
     case "/alerts":
       return alertsReport(db);
 
+    // ── تنبيهات وقائية وذكية (الحزمة الجديدة) ───────────────
+    case "/مضاعفة":
+    case "/مضاعف":
+    case "/doubled":
+      return doubledBillsReport(db);
+    case "/تجديد":
+    case "/تقفيل":
+    case "/renewal":
+      return lineRenewalReport(db);
+    case "/متعثرين":
+    case "/نايمين":
+    case "/dormant":
+      return dormantDebtorsReport(db);
+    case "/متوقع":
+    case "/تحصيل":
+    case "/expected":
+      return expectedCollectionReport(db, arg > 0 ? arg : 7);
+    case "/فرص":
+    case "/match":
+      return matchOpportunitiesReport(db);
+    case "/احسب":
+    case "/حاسبة":
+    case "/calc": {
+      const sys = parts.slice(1).map((p) => parseInt(p, 10)).find((x) => x === 3800 || x === 1800) ?? 3800;
+      const clients = parts.slice(1).map((p) => parseInt(p, 10)).find((x) => x > 0 && x !== 3800 && x !== 1800) ?? 0;
+      if (clients === 0) return "✍️ اكتب: <code>/احسب 3800 5</code>\n(النظام: 3800 أو 1800، وعدد العملاء)";
+      return profitCalc(sys, clients);
+    }
+
     default:
       return "❓ أمر غير معروف.\nأرسل /مساعدة لعرض كل الأوامر المتاحة.";
   }
 }
 
-// ─── إرسال رسالة عبر تليجرام (مع تقسيم الرسائل الطويلة) ───────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  ميزات تفاعلية: واتساب + كارت العميل + الأزرار + الرسم البياني
+// ═══════════════════════════════════════════════════════════════════════════
 
-async function sendMessage(token: string, chatId: number | string, text: string) {
+// تحويل رقم مصري لصيغة wa.me (كود الدولة 20 بدون صفر البداية)
+function normalizeEg(phone: string): string {
+  let p = (phone ?? "").replace(/[^0-9]/g, "");
+  if (p.startsWith("0020")) p = p.slice(2);
+  if (p.startsWith("20")) return p;
+  if (p.startsWith("0")) return "20" + p.slice(1);
+  if (p.length === 10) return "20" + p; // 1xxxxxxxxx
+  return p;
+}
+
+// رسالة تذكير المديونية الجاهزة
+function waReminderText(m: Member, ownerName: string): string {
+  const debt = -m.balance;
+  return `السلام عليكم ${m.name} 🌟
+نحب نذكّر حضرتك بقيمة المستحق: ${n0(debt)} ج
+برجاء السداد في أقرب وقت، ولو تم السداد تجاهل الرسالة 🙏
+${ownerName}`;
+}
+
+function waLink(phone: string, text: string): string {
+  return `https://wa.me/${normalizeEg(phone)}?text=${encodeURIComponent(text)}`;
+}
+
+const findMember = (db: AppDB, id: string) => db.members.find((m) => m.id === id);
+
+// كارت العميل الكامل + أزرار (واتساب / كارت)
+function memberCard(db: AppDB, m: Member, ownerName: string): { text: string; keyboard: unknown } {
+  const g = groupByGid(db, m.gid);
+  let t = `👤 <b>${esc(m.name)}</b>\n━━━━━━━━━━━━━━━━━━\n`;
+  t += `📞 الهاتف: <code>${esc(m.phone)}</code>\n`;
+  t += `💵 الاشتراك: <b>${n0(m.price)} ج</b>\n`;
+  if (m.balance < 0) t += `🔴 المديونية: <code>${n0(-m.balance)} ج</code> ${flagOf(m)}\n`;
+  else if (m.balance > 0) t += `🟢 رصيد دائن: <code>${n0(m.balance)} ج</code>\n`;
+  else t += `✅ الحساب مسدّد\n`;
+  if (m.package) t += `📦 الباقة: ${esc(m.package)}\n`;
+  if (g) t += `📡 الخط: ${esc(g.phone)}${g.ownerName ? ` (${esc(g.ownerName)})` : ""}\n`;
+  if (m.guarantorName) t += `🛡️ الضامن: ${esc(m.guarantorName)}\n`;
+  if (m.deferralDate) {
+    const d = daysUntil(m.deferralDate);
+    const w = d === null ? "" : d < 0 ? ` (فات ${-d} يوم)` : d === 0 ? " (النهاردة)" : ` (بعد ${d} يوم)`;
+    t += `⏳ مؤجل لـ: ${esc(m.deferralDate)}${w}\n`;
+  }
+  if (m.date) t += `📅 الاشتراك من: ${esc(m.date)}\n`;
+
+  const row: Array<Record<string, string>> = [];
+  if (m.phone) {
+    const msg = m.balance < 0 ? waReminderText(m, ownerName) : `السلام عليكم ${m.name} 🌟`;
+    row.push({ text: "💬 واتساب", url: waLink(m.phone, msg) });
+  }
+  const keyboard = { inline_keyboard: row.length ? [row] : [] };
+  return { text: t, keyboard };
+}
+
+// أمر /واتس [اسم] — يرجّع لينكات واتساب جاهزة للمطابقين
+function whatsappCmd(db: AppDB, query: string, ownerName: string): { text: string; keyboard: unknown } {
+  const q = query.trim().toLowerCase();
+  if (!q) return { text: "✍️ اكتب اسم أو رقم العميل.\nمثال: <code>/واتس احمد</code>", keyboard: { inline_keyboard: [] } };
+  const hits = db.members.filter((m) => m.name.toLowerCase().includes(q) || m.phone.includes(q));
+  if (hits.length === 0) return { text: `🔍 لا يوجد عميل مطابق لـ "${esc(query)}"`, keyboard: { inline_keyboard: [] } };
+
+  let t = `💬 <b>واتساب — نتائج "${esc(query)}"</b>\nاضغط على الزر لفتح المحادثة برسالة جاهزة:\n`;
+  const rows: Array<Array<Record<string, string>>> = [];
+  for (const m of hits.slice(0, 10)) {
+    const msg = m.balance < 0 ? waReminderText(m, ownerName) : `السلام عليكم ${m.name} 🌟`;
+    const label = `${m.name}${m.balance < 0 ? ` (${n0(-m.balance)} ج)` : ""}`;
+    rows.push([{ text: `💬 ${label}`.slice(0, 60), url: waLink(m.phone, msg) }]);
+  }
+  return { text: t, keyboard: { inline_keyboard: rows } };
+}
+
+// لوحة المنيو الرئيسية (أزرار)
+function mainMenuKeyboard(): unknown {
+  return {
+    inline_keyboard: [
+      [{ text: "📌 ملخص", callback_data: "summary" }, { text: "📊 تقرير", callback_data: "report" }],
+      [{ text: "💸 الديون", callback_data: "debts" }, { text: "🔝 أكبر 5", callback_data: "top" }],
+      [{ text: "⏳ تأجيلات", callback_data: "deferred" }, { text: "⚠️ تنبيهات", callback_data: "alerts" }],
+      [{ text: "💹 الأرباح", callback_data: "profit" }, { text: "📋 فواتير", callback_data: "bills" }],
+      [{ text: "📡 مجموعات", callback_data: "groups" }, { text: "🔗 فرص", callback_data: "match" }],
+      [{ text: "🚨 مضاعفة", callback_data: "مضاعفة" }, { text: "⏰ تجديد", callback_data: "تجديد" }],
+      [{ text: "💰 متوقع", callback_data: "متوقع" }, { text: "😴 متعثرين", callback_data: "متعثرين" }],
+      [{ text: "📈 رسم بياني", callback_data: "chart" }, { text: "❓ كل الأوامر", callback_data: "help" }],
+    ],
+  };
+}
+
+// رابط رسم بياني (QuickChart) — لقطة مالية بعناوين إنجليزية (تُعرض بوضوح)
+function financialChartUrl(db: AppDB): string {
+  const income = Math.round(totalMonthlyIncome(db));
+  const debts = Math.round(totalDebt(db));
+  const profit = Math.round(netProfit(db));
+  const bills = Math.round(totalBillsOwed(db));
+  const config = {
+    type: "bar",
+    data: {
+      labels: ["Income", "Debts", "Net Profit", "Bills Owed"],
+      datasets: [{
+        label: "EGP",
+        data: [income, debts, profit, bills],
+        backgroundColor: ["#2e7d32", "#c62828", "#1565c0", "#ef6c00"],
+      }],
+    },
+    options: {
+      plugins: { legend: { display: false }, title: { display: true, text: "Financial Snapshot (EGP)" } },
+    },
+  };
+  return `https://quickchart.io/chart?w=600&h=380&bkg=white&c=${encodeURIComponent(JSON.stringify(config))}`;
+}
+
+// رابط رسم بياني لأرباح كل شركة
+function providerChartUrl(db: AppDB): string {
+  const provs = ["etisalat", "vodafone", "orange", "we"];
+  const names = ["Etisalat", "Vodafone", "Orange", "WE"];
+  const data = provs.map((p) =>
+    Math.round(db.groups.filter((g) => g.provider === p).reduce((s, g) => s + groupProfit(db, g.id), 0))
+  );
+  const config = {
+    type: "bar",
+    data: { labels: names, datasets: [{ label: "Profit EGP", data, backgroundColor: ["#2e7d32", "#c62828", "#ef6c00", "#6a1b9a"] }] },
+    options: { plugins: { legend: { display: false }, title: { display: true, text: "Profit by Provider (EGP)" } } },
+  };
+  return `https://quickchart.io/chart?w=600&h=380&bkg=white&c=${encodeURIComponent(JSON.stringify(config))}`;
+}
+
+// ─── إرسال رسالة عبر تليجرام (مع تقسيم الرسائل الطويلة + أزرار اختيارية) ───────
+
+async function sendMessage(
+  token: string,
+  chatId: number | string,
+  text: string,
+  replyMarkup?: unknown,
+) {
   const chunks: string[] = [];
   let remaining = text;
   while (remaining.length > 4000) {
@@ -1336,32 +1643,235 @@ async function sendMessage(token: string, chatId: number | string, text: string)
   }
   chunks.push(remaining);
 
-  for (const chunk of chunks) {
+  for (let i = 0; i < chunks.length; i++) {
+    const body: Record<string, unknown> = {
+      chat_id: chatId,
+      text: chunks[i],
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+    };
+    // الأزرار تُرفق مع آخر جزء فقط
+    if (replyMarkup && i === chunks.length - 1) body.reply_markup = replyMarkup;
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: chunk,
-        parse_mode: "HTML",
-        disable_web_page_preview: true,
-      }),
+      body: JSON.stringify(body),
     });
   }
+}
+
+async function sendPhoto(token: string, chatId: number | string, photoUrl: string, caption: string) {
+  await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, photo: photoUrl, caption, parse_mode: "HTML" }),
+  });
+}
+
+async function answerCallback(token: string, callbackId: string) {
+  await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ callback_query_id: callbackId }),
+  });
+}
+
+// ينفّذ أمراً ويرسله (يتعامل مع الأوامر الخاصة: واتساب / رسم / قائمة / كارت)
+async function execAndSend(
+  token: string,
+  chatId: number | string,
+  raw: string,
+  db: AppDB,
+  ownerName: string,
+) {
+  const parts = (raw.startsWith("/") ? raw : `/${raw}`).split(/\s+/);
+  const cmd = parts[0].replace(/@\w+/g, "").toLowerCase();
+  const textArg = parts.slice(1).join(" ").trim();
+
+  // قائمة الأزرار
+  if (cmd === "/قائمة" || cmd === "/menu") {
+    await sendMessage(token, chatId, "🎛️ <b>القائمة الرئيسية</b>\nاختر من الأزرار:", mainMenuKeyboard());
+    return;
+  }
+  // واتساب
+  if (cmd === "/واتس" || cmd === "/واتساب" || cmd === "/wa" || cmd === "/whatsapp") {
+    const r = whatsappCmd(db, textArg, ownerName);
+    await sendMessage(token, chatId, r.text, r.keyboard);
+    return;
+  }
+  // كارت عميل (بحث يرجّع أول نتيجة ككارت)
+  if (cmd === "/كارت" || cmd === "/card") {
+    const q = textArg.toLowerCase();
+    const hit = db.members.find((m) => m.name.toLowerCase().includes(q) || m.phone.includes(q));
+    if (!hit) { await sendMessage(token, chatId, `🔍 لا يوجد عميل مطابق لـ "${esc(textArg)}"`); return; }
+    const c = memberCard(db, hit, ownerName);
+    await sendMessage(token, chatId, c.text, c.keyboard);
+    return;
+  }
+  // رسم بياني
+  if (cmd === "/رسم" || cmd === "/chart" || cmd === "/graph") {
+    await sendPhoto(token, chatId, financialChartUrl(db), "📊 لقطة مالية");
+    await sendPhoto(token, chatId, providerChartUrl(db), "📡 الأرباح حسب الشركة");
+    return;
+  }
+  // أي أمر نصّي عادي
+  const reply = route(raw, db, ownerName);
+  // نُرفق منيو أزرار مع /start و /مساعدة
+  const withMenu = cmd === "/start" || cmd === "/مساعدة" || cmd === "/help";
+  await sendMessage(token, chatId, reply, withMenu ? mainMenuKeyboard() : undefined);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  التقارير التلقائية (Cron) — تقرير صباحي + تذكير تحصيل أسبوعي
+// ═══════════════════════════════════════════════════════════════════════════
+
+// تقرير صباحي: ملخص ديون + تأجيلات مستحقة + خطوط تنتهي قريباً + ديون مرتفعة
+function dailyDigest(db: AppDB, ownerName: string): string {
+  const now = new Date();
+  const debtors = db.members.filter((m) => m.balance < 0);
+  let out = `🌅 <b>تقرير الصباح — ${ownerName}</b>\n`;
+  out += `📅 ${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}\n━━━━━━━━━━━━━━━━━━\n\n`;
+
+  out += `💸 <b>الديون:</b> ${debtors.length} مدين — إجمالي <code>${n0(totalDebt(db))} ج</code>\n`;
+  const top3 = [...debtors].sort((a, b) => a.balance - b.balance).slice(0, 3);
+  for (const m of top3) out += `   ${flagOf(m)} ${esc(m.name)} — ${n0(-m.balance)} ج\n`;
+
+  // تأجيلات مستحقة خلال يومين
+  const dueSoon = db.members.filter((m) => {
+    const d = daysUntil(m.deferralDate);
+    return d !== null && d <= 2;
+  });
+  if (dueSoon.length) {
+    out += `\n⏳ <b>تأجيلات مستحقة:</b>\n`;
+    for (const m of dueSoon) {
+      const d = daysUntil(m.deferralDate)!;
+      const w = d < 0 ? `فات ${-d} يوم` : d === 0 ? "النهاردة" : `بعد ${d} يوم`;
+      out += `   📅 ${esc(m.name)} (${w})${m.balance < 0 ? ` — ${n0(-m.balance)} ج` : ""}\n`;
+    }
+  }
+
+  // ديون مرتفعة فوق 500
+  const high = debtors.filter((m) => -m.balance > 500);
+  if (high.length) out += `\n⚠️ <b>${high.length}</b> عميل دينهم فوق 500 ج\n`;
+
+  // خطوط تنتهي خلال 7 أيام
+  const expSoon = db.groups.filter((g) => {
+    const d = daysUntil(g.expiryDate);
+    return d !== null && d >= 0 && d <= 7;
+  });
+  if (expSoon.length) {
+    out += `\n📅 <b>خطوط تنتهي قريباً:</b>\n`;
+    for (const g of expSoon) out += `   ⏰ ${esc(g.phone)} (بعد ${daysUntil(g.expiryDate)} يوم)\n`;
+  }
+
+  // فواتير مضاعفة هذا الشهر (تنبيه وقائي)
+  const curM = currentMonth();
+  const prevM = prevMonth(curM);
+  const doubled = db.companyBills.filter((b) => {
+    if (b.month !== curM) return false;
+    const prev = db.companyBills.find((x) => x.groupId === b.groupId && x.month === prevM);
+    return prev && prev.actualAmount > 0 && b.actualAmount >= prev.actualAmount * 1.75;
+  });
+  if (doubled.length) out += `\n\n🚨 <b>${doubled.length}</b> فاتورة مضاعفة هذا الشهر — اكتب /مضاعفة`;
+
+  // أرقام مخزون قربت تتقفل
+  const nowMs = Date.now();
+  const renew = db.workNums.filter((w) => {
+    if (w.status === "damaged" || !w.lastContactDate) return false;
+    const last = new Date(w.lastContactDate);
+    if (isNaN(last.getTime())) return false;
+    const daysSince = Math.floor((nowMs - last.getTime()) / 86400000);
+    return (w.reminderDaysOverride ?? 90) - daysSince <= 15;
+  });
+  if (renew.length) out += `\n⏰ <b>${renew.length}</b> رقم محتاج اتصال قبل التقفيل — اكتب /تجديد`;
+
+  out += `\n\n💵 الدخل الشهري: <code>${n0(totalMonthlyIncome(db))} ج</code>`;
+  out += `\n📈 صافي الربح: <code>${n0(netProfit(db))} ج</code>`;
+  out += `\n\n💡 اكتب /قائمة لكل الخيارات.`;
+  return out;
+}
+
+// تذكير التحصيل الأسبوعي: قائمة كل المدينين جاهزة للجولة
+function weeklyDigest(db: AppDB, ownerName: string): string {
+  const debtors = db.members.filter((m) => m.balance < 0).sort((a, b) => a.balance - b.balance);
+  let out = `📋 <b>تذكير التحصيل الأسبوعي — ${ownerName}</b>\n━━━━━━━━━━━━━━━━━━\n`;
+  if (debtors.length === 0) return out + "\n✅ لا توجد مديونيات — أسبوع موفّق! 🎉";
+  out += `إجمالي للتحصيل: <code>${n0(totalDebt(db))} ج</code> من ${debtors.length} عميل\n\n`;
+  let i = 0;
+  for (const m of debtors.slice(0, 40)) {
+    i++;
+    out += `${i}. ${flagOf(m)} <b>${esc(m.name)}</b> — <code>${n0(-m.balance)} ج</code> | 📞 ${esc(m.phone)}\n`;
+  }
+  if (debtors.length > 40) out += `\n... و ${debtors.length - 40} آخرين (اكتب /ديون للكل)`;
+  out += `\n\n💬 لإرسال تذكير واتساب: /واتس [اسم العميل]`;
+  return out;
+}
+
+// يشغّل تقريراً تلقائياً لكل المستخدمين المفعّلين
+async function runCron(
+  supabase: ReturnType<typeof createClient>,
+  type: string,
+): Promise<string> {
+  const { data: configs } = await supabase
+    .from("telegram_config")
+    .select("user_id, bot_token, chat_id, owner_name, enabled")
+    .eq("enabled", true);
+
+  if (!configs || configs.length === 0) return "no enabled configs";
+
+  let sent = 0;
+  for (const cfg of configs) {
+    const token = cfg.bot_token as string;
+    const chatId = cfg.chat_id as string;
+    if (!token || !chatId) continue; // لازم chat_id لإرسال تلقائي
+
+    const { data: row } = await supabase
+      .from("user_data")
+      .select("data")
+      .eq("user_id", cfg.user_id)
+      .maybeSingle();
+    const db = emptyDB(row?.data as Partial<AppDB> | null);
+    const ownerName = (cfg.owner_name as string) || "صاحب الحساب";
+
+    try {
+      const msg = type === "weekly" ? weeklyDigest(db, ownerName) : dailyDigest(db, ownerName);
+      await sendMessage(token, chatId, msg);
+      sent++;
+    } catch (_) { /* تجاهل مستخدم فاشل وأكمل الباقي */ }
+  }
+  return `cron ${type}: sent ${sent}`;
 }
 
 // ─── المعالج الرئيسي ─────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
+  const url = new URL(req.url);
+
   // فحص صحة سريع (افتح الرابط في المتصفح للتأكد أن الدالة تعمل)
-  if (req.method === "GET") {
+  if (req.method === "GET" && !url.searchParams.get("mode")) {
     return new Response("telegram-bot edge function is alive ✅", { status: 200 });
   }
+
+  // ── وضع التقارير التلقائية (Cron) ──
+  // يُستدعى من pg_cron: ?mode=cron&type=daily&key=SECRET
+  if (url.searchParams.get("mode") === "cron") {
+    const key = url.searchParams.get("key") ?? req.headers.get("x-cron-key");
+    if (key !== Deno.env.get("CRON_SECRET")) {
+      return new Response("forbidden", { status: 403 });
+    }
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+    const type = url.searchParams.get("type") ?? "daily";
+    const result = await runCron(supabase, type);
+    return new Response(result, { status: 200 });
+  }
+
   if (req.method !== "POST") {
     return new Response("Method Not Allowed", { status: 405 });
   }
 
-  const url = new URL(req.url);
   const uid = url.searchParams.get("uid");
   if (!uid) return new Response("missing uid", { status: 400 });
 
@@ -1375,12 +1885,27 @@ Deno.serve(async (req) => {
     return ok();
   }
 
+  // إما رسالة نصية أو ضغطة زر (callback)
+  const callback = update["callback_query"] as Record<string, unknown> | undefined;
   const message = (update["message"] ?? update["edited_message"]) as
     | Record<string, unknown>
     | undefined;
-  const text = (message?.["text"] as string | undefined) ?? "";
-  const chat = message?.["chat"] as Record<string, unknown> | undefined;
-  const fromChatId = chat?.["id"] as number | undefined;
+
+  let fromChatId: number | undefined;
+  let text = "";
+  let callbackId = "";
+
+  if (callback) {
+    callbackId = (callback["id"] as string) ?? "";
+    const cMsg = callback["message"] as Record<string, unknown> | undefined;
+    const cChat = cMsg?.["chat"] as Record<string, unknown> | undefined;
+    fromChatId = cChat?.["id"] as number | undefined;
+    text = (callback["data"] as string) ?? "";
+  } else {
+    text = (message?.["text"] as string | undefined) ?? "";
+    const chat = message?.["chat"] as Record<string, unknown> | undefined;
+    fromChatId = chat?.["id"] as number | undefined;
+  }
   if (!text || fromChatId == null) return ok();
 
   const supabase = createClient(
@@ -1388,27 +1913,28 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  // 1) جلب إعدادات البوت لهذا المستخدم (التوكن + التفعيل + chat_id)
+  // 1) جلب إعدادات البوت لهذا المستخدم
   const { data: cfg, error: cfgErr } = await supabase
     .from("telegram_config")
     .select("bot_token, chat_id, owner_name, enabled")
     .eq("user_id", uid)
     .maybeSingle();
 
-  if (cfgErr || !cfg || !cfg.bot_token) return ok(); // لا إعدادات — تجاهل بهدوء
-  if (cfg.enabled === false) return ok();             // البوت موقوف
+  if (cfgErr || !cfg || !cfg.bot_token) return ok();
+  if (cfg.enabled === false) return ok();
 
   const token = cfg.bot_token as string;
   const ownerName = (cfg.owner_name as string) || "صاحب الحساب";
 
-  // 2) قفل المحادثة: إن كان chat_id محفوظاً، نرد فقط على نفس المالك.
+  // 2) قفل المحادثة على المالك
   const savedChatId = cfg.chat_id ? String(cfg.chat_id) : "";
   if (savedChatId && savedChatId !== String(fromChatId)) {
+    if (callbackId) await answerCallback(token, callbackId);
     await sendMessage(token, fromChatId, "🚫 هذا البوت خاص ولا يردّ إلا على صاحبه.");
     return ok();
   }
 
-  // 3) جلب بيانات التطبيق لهذا المستخدم
+  // 3) جلب البيانات
   const { data: row } = await supabase
     .from("user_data")
     .select("data")
@@ -1417,10 +1943,26 @@ Deno.serve(async (req) => {
 
   const db = emptyDB(row?.data as Partial<AppDB> | null);
 
-  // 4) تنفيذ الأمر والرد
+  // 4) التنفيذ
   try {
-    const reply = route(text, db, ownerName);
-    await sendMessage(token, fromChatId, reply);
+    if (callbackId) await answerCallback(token, callbackId); // إيقاف مؤشر التحميل على الزر
+
+    if (callback) {
+      // ضغطة زر: data = "card:<id>" أو اسم أمر مثل "summary"/"chart"
+      if (text.startsWith("card:")) {
+        const m = findMember(db, text.slice(5));
+        if (m) {
+          const c = memberCard(db, m, ownerName);
+          await sendMessage(token, fromChatId, c.text, c.keyboard);
+        } else {
+          await sendMessage(token, fromChatId, "تعذّر إيجاد العميل.");
+        }
+      } else {
+        await execAndSend(token, fromChatId, "/" + text, db, ownerName);
+      }
+    } else {
+      await execAndSend(token, fromChatId, text, db, ownerName);
+    }
   } catch (e) {
     await sendMessage(token, fromChatId, `⚠️ حدث خطأ أثناء معالجة الأمر.\n<code>${esc(String(e))}</code>`);
   }

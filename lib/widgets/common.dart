@@ -3,7 +3,21 @@ import 'package:flutter/material.dart';
 // ignore: unnecessary_import
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import '../services/app_theme.dart';
+import '../providers/app_provider.dart';
+
+/// حارس التعديل: يرجّع true لو مسموح بالتعديل (متصل بالنت)،
+/// وإلا يعرض تحذير ويرجّع false. استخدمه قبل أي عملية كتابة في الواجهة.
+bool guardEdit(BuildContext context) {
+  final canEdit = context.read<AppProvider>().canEdit;
+  if (!canEdit) {
+    AppSnackbar.show(context,
+        '🚫 مفيش إنترنت — التطبيق قراءة فقط، التعديل مش هيتحفظ',
+        background: const Color(0xFFD32F2F));
+  }
+  return canEdit;
+}
 
 // ─── STAT CHIP ───────────────────────────────────────────────────
 class StatChip extends StatelessWidget {
@@ -78,10 +92,10 @@ class GradientButton extends StatelessWidget {
 
 // ─── APP SNACKBAR ────────────────────────────────────────────────
 class AppSnackbar {
-  static void show(BuildContext context, String msg) {
+  static void show(BuildContext context, String msg, {Color? background}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg, style: GoogleFonts.cairo(fontWeight: FontWeight.w700, fontSize: 13)),
-      backgroundColor: const Color(0xFF0d1b2e).withValues(alpha: 0.95),
+      backgroundColor: background ?? const Color(0xFF0d1b2e).withValues(alpha: 0.95),
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       margin: const EdgeInsets.all(16),

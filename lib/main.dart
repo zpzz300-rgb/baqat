@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -16,6 +17,72 @@ import 'screens/login_screen.dart';
 import 'screens/activation_screen.dart';
 import 'services/notification_service.dart';
 import 'package:permission_handler/permission_handler.dart';
+
+/// مفتاح عام للـ ScaffoldMessenger عشان نعرض رسالة (SnackBar) فوق أي شاشة،
+/// حتى من داخل الـ Provider اللي مالوش BuildContext.
+final GlobalKey<ScaffoldMessengerState> rootMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
+
+/// رسالة حمرا واضحة: محاولة تعديل وانت من غير نت — التعديل مش هيتحفظ.
+void showOfflineWriteBlocked() {
+  final m = rootMessengerKey.currentState;
+  if (m == null) return;
+  m.hideCurrentSnackBar();
+  m.showSnackBar(SnackBar(
+    content: Row(children: [
+      const Icon(Icons.wifi_off_rounded, color: Colors.white, size: 20),
+      const SizedBox(width: 10),
+      Expanded(
+        child: Text(
+          '🚫 مفيش إنترنت — التعديل مش هيتحفظ. اتصل بالنت وحاول تاني.',
+          style: GoogleFonts.cairo(
+              fontWeight: FontWeight.w800, fontSize: 13, color: Colors.white),
+        ),
+      ),
+    ]),
+    backgroundColor: const Color(0xFFD32F2F),
+    behavior: SnackBarBehavior.floating,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    margin: const EdgeInsets.all(16),
+    duration: const Duration(seconds: 3),
+  ));
+}
+
+/// شريط أحمر دائم أعلى الشاشة طول ما مفيش نت — تنبيه وقائي قبل أي تعديل.
+class _OfflineBanner extends StatelessWidget {
+  const _OfflineBanner();
+  @override
+  Widget build(BuildContext context) {
+    final online = context.watch<AppProvider>().isOnline;
+    if (online) return const SizedBox.shrink();
+    return Material(
+      color: const Color(0xFFD32F2F),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.wifi_off_rounded, color: Colors.white, size: 16),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  'مفيش إنترنت — أي تعديل دلوقتي مش هيتحفظ',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.cairo(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12.5,
+                      color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,6 +101,8 @@ void main() async {
 
   try {
     await SupabaseService.initialize();
+    // استرجاع سياق الموظف (لو كان داخل كموظف) قبل تحميل أي بيانات
+    await SupabaseService.restoreEmployeeContext();
   } catch (e) {
     debugPrint('❌ Supabase initialization failed: $e');
   }
@@ -56,19 +125,31 @@ class TelecomApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Consumer<AppProvider>(
-      builder: (ctx, prov, _) => MaterialApp(
-        debugShowCheckedModeBanner: false,
-        title: 'باقات الاتصالات',
-        theme: AppTheme.resolve(prov.themeStyle, prov.fontSize, prov.darkMode),
-        locale: const Locale('ar', 'EG'),
-        localizationsDelegates: const [
-          GlobalMaterialLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-        ],
-        supportedLocales: const [Locale('ar', 'EG')],
-        home: prov.loading ? const _Splash() : const _AuthGate(),
-      ),
+      builder: (ctx, prov, _) {
+        // ربط الرسالة الحمرا: أي كتابة تتمنع بسبب عدم وجود نت تعرض تنبيه.
+        prov.onOfflineWriteBlocked = showOfflineWriteBlocked;
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: 'باقات الاتصالات',
+          scaffoldMessengerKey: rootMessengerKey,
+          theme: AppTheme.resolve(prov.themeStyle, prov.fontSize, prov.darkMode),
+          locale: const Locale('ar', 'EG'),
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: const [Locale('ar', 'EG')],
+          // شريط أحمر دائم أعلى كل الشاشات وقت عدم الاتصال.
+          builder: (context, child) => Column(
+            children: [
+              const _OfflineBanner(),
+              Expanded(child: child ?? const SizedBox.shrink()),
+            ],
+          ),
+          home: prov.loading ? const _Splash() : const _AuthGate(),
+        );
+      },
     );
   }
 }
@@ -80,14 +161,17 @@ class _AuthGate extends StatefulWidget {
   State<_AuthGate> createState() => _AuthGateState();
 }
 
-class _AuthGateState extends State<_AuthGate> {
+class _AuthGateState extends State<_AuthGate> with WidgetsBindingObserver {
   bool _checkingCloud = false;
+  bool _syncing = false; // يمنع تداخل أكتر من مزامنة في نفس الوقت
 
   late final StreamSubscription<AuthState> _authSubscription;
+  RealtimeChannel? _empChannel; // اشتراك حالة الموظف (للطرد الفوري)
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // استمع لتغييرات الـ Auth (login / logout)
     _authSubscription =
         Supabase.instance.client.auth.onAuthStateChange.listen((data) {
@@ -95,7 +179,10 @@ class _AuthGateState extends State<_AuthGate> {
       if (event == AuthChangeEvent.signedIn) {
         _onSignedIn();
       } else if (event == AuthChangeEvent.signedOut) {
-        if (mounted) setState(() {});
+        if (mounted) {
+          context.read<AppProvider>().stopRealtime();
+          setState(() {});
+        }
       }
     });
     // لو الجلسة موجودة من قبل
@@ -104,8 +191,25 @@ class _AuthGateState extends State<_AuthGate> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _authSubscription.cancel();
     super.dispose();
+  }
+
+  /// عند رجوع التطبيق للواجهة — اسحب أحدث نسخة من السيرفر بصمت.
+  /// ده بيقلّل تأخير المزامنة من غير ما تحتاج تقفل وتفتح.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        mounted &&
+        SupabaseService.isLoggedIn &&
+        !_syncing &&
+        !_checkingCloud) {
+      _syncing = true;
+      context.read<AppProvider>().loadFromCloud().whenComplete(() {
+        _syncing = false;
+      });
+    }
   }
 
   Future<void> _onSignedIn() async {
@@ -116,6 +220,21 @@ class _AuthGateState extends State<_AuthGate> {
       // جيب البيانات من السيرفر
       final prov = context.read<AppProvider>();
       await prov.loadFromCloud();
+
+      // مزامنة لحظية بين الأجهزة على نفس البيانات
+      prov.startRealtime();
+
+      if (SupabaseService.isEmployee) {
+        // الموظف: حمّل المجموعات الموكلة له (للفلترة والسرية)
+        await prov.loadMyAssignments();
+        // الموظف: اشترك على حالته — لو المالك فصله/حذفه يتقفل فوراً
+        _empChannel ??= SupabaseService.subscribeOwnEmployeeStatus((status) {
+          if (status != 'active') _kickEmployee();
+        });
+      } else {
+        // المالك: اتأكد إن عنده ملف وكود محل
+        await SupabaseService.ensureOwnerProfile();
+      }
     } catch (e) {
       debugPrint('❌ Failed to load cloud data: $e');
       if (mounted) {
@@ -126,6 +245,23 @@ class _AuthGateState extends State<_AuthGate> {
     } finally {
       if (mounted) setState(() => _checkingCloud = false);
     }
+  }
+
+  /// طرد الموظف فوراً (المالك أوقفه أو حذفه): يخرج ويمسح أي بيانات محلية.
+  Future<void> _kickEmployee() async {
+    _empChannel = null;
+    final prov = context.read<AppProvider>();
+    prov.wipeInMemoryData(); // امسح بيانات المحل من الذاكرة فوراً
+    await SupabaseService.signOut();
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        backgroundColor: Colors.red,
+        content: Text('تم إيقاف حسابك من قِبَل المالك',
+            textAlign: TextAlign.center),
+      ),
+    );
   }
 
   @override

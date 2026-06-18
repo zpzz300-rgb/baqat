@@ -5,6 +5,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/supabase_service.dart';
+import 'employees_screen.dart';
 import '../widgets/group_card.dart';
 import '../widgets/common.dart';
 import '../utils/print_helper.dart';
@@ -29,6 +31,8 @@ import 'bills_screen.dart';
 import 'notes_screen.dart';
 import 'company_invoices_screen.dart';
 import 'assets_dashboard_screen.dart';
+import 'complaints_screen.dart';
+import 'unified_billing_screen.dart';
 import '../widgets/add_group_modal.dart';
 import '../widgets/add_member_modal.dart';
 import '../widgets/member_card.dart';
@@ -66,10 +70,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // "المزيد" menu items
   final List<Map<String, dynamic>> _moreTabs = [
-    {'icon': '📋', 'label': 'فواتير الخطوط', 'key': 'bills', 'tab': 17},
-    {'icon': '🧾', 'label': 'مراجعة الفواتير', 'key': 'invoice_audit', 'tab': 19},
+    {'icon': '🧾', 'label': 'الفواتير والخطوط', 'key': 'billing', 'tab': 22},
     {'icon': '📝', 'label': 'الملاحظات', 'key': 'notes', 'tab': 18},
-    {'icon': '📡', 'label': 'خطوط رئيسية', 'key': 'mainlines', 'tab': 13},
+    {'icon': '📢', 'label': 'الشكاوى', 'key': 'complaints', 'tab': 21},
     {'icon': '📦', 'label': 'الأرشيف', 'key': 'archive', 'tab': 7},
     {'icon': '📋', 'label': 'النشاط', 'key': 'activity', 'tab': 8},
     {'icon': '💾', 'label': 'البيانات', 'key': 'dataio', 'tab': 9},
@@ -118,9 +121,34 @@ class _HomeScreenState extends State<HomeScreen> {
                   BoxConstraints(maxHeight: constraints.maxHeight * 0.55),
               child: SingleChildScrollView(child: _buildHeader(prov)),
             ),
+            if (!prov.isOnline) _readOnlyBanner(),
             Expanded(child: _buildBody(prov)),
           ],
         ),
+      ),
+    );
+  }
+
+  // ─── READ-ONLY BANNER (offline) ─────────────────────────────
+  Widget _readOnlyBanner() {
+    return Container(
+      width: double.infinity,
+      color: const Color(0xFFb71c1c),
+      padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.cloud_off, color: Colors.white, size: 16),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              'وضع القراءة فقط — مفيش نت. فعّل الإنترنت لإجراء أي تعديل',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.cairo(
+                  color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -199,28 +227,34 @@ class _HomeScreenState extends State<HomeScreen> {
                         '+ مجموعة',
                         bg: Colors.white.withValues(alpha: 0.15),
                         border: true,
-                        onTap: () => showModalBottomSheet(
-                          useRootNavigator: true,
-                          context: context,
-                          isScrollControlled: true,
-                          backgroundColor: Colors.transparent,
-                          barrierColor: Colors.black54,
-                          builder: (_) => const AddGroupModal(),
-                        ),
+                        onTap: () {
+                          if (!guardEdit(context)) return;
+                          showModalBottomSheet(
+                            useRootNavigator: true,
+                            context: context,
+                            isScrollControlled: true,
+                            backgroundColor: Colors.transparent,
+                            barrierColor: Colors.black54,
+                            builder: (_) => const AddGroupModal(),
+                          );
+                        },
                       ),
                       const SizedBox(width: 5),
                       _headerBtn(
                         '+ عميل',
                         bg: Colors.white,
                         textColor: AppColors.blue2,
-                        onTap: () => showModalBottomSheet(
-                          useRootNavigator: true,
-                          context: context,
-                          isScrollControlled: true,
-                          backgroundColor: Colors.transparent,
-                          barrierColor: Colors.black54,
-                          builder: (_) => const AddMemberModal(),
-                        ),
+                        onTap: () {
+                          if (!guardEdit(context)) return;
+                          showModalBottomSheet(
+                            useRootNavigator: true,
+                            context: context,
+                            isScrollControlled: true,
+                            backgroundColor: Colors.transparent,
+                            barrierColor: Colors.black54,
+                            builder: (_) => const AddMemberModal(),
+                          );
+                        },
                       ),
                       const SizedBox(width: 5),
                       _iconBtn(Icons.search, onTap: () => _showGlobalSearch(prov)),
@@ -578,6 +612,15 @@ class _HomeScreenState extends State<HomeScreen> {
                       builder: (_) => const AssetsDashboardScreen()),
                 );
               }),
+              // إدارة الموظفين — للمالك فقط
+              if (!SupabaseService.isEmployee)
+                _drawerItem('👥 إدارة الموظفين', () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const EmployeesScreen()),
+                  );
+                }),
               _drawerItem('⚙️ الإعدادات', () {
                 Navigator.pop(context);
                 showDialog(context: context, builder: (_) => const SettingsModal());
@@ -665,6 +708,10 @@ class _HomeScreenState extends State<HomeScreen> {
         return const NotesScreen();
       case 19:
         return const CompanyInvoicesScreen();
+      case 21:
+        return const ComplaintsScreen();
+      case 22:
+        return const UnifiedBillingScreen();
       default:
         return _buildGroupsSection(prov);
     }
@@ -862,7 +909,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildGroupsList(AppProvider prov) {
-    if (prov.db.groups.isEmpty) {
+    final groups = prov.visibleGroups; // الموظف يشوف الموكلة له فقط
+    if (groups.isEmpty) {
+      final isEmp = SupabaseService.isEmployee;
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -870,24 +919,32 @@ class _HomeScreenState extends State<HomeScreen> {
             const Text('📡', style: TextStyle(fontSize: 48)),
             const SizedBox(height: 12),
             Text(
-              'لا توجد مجموعات بعد',
+              isEmp ? 'لا توجد مجموعات موكلة لك بعد' : 'لا توجد مجموعات بعد',
               style: GoogleFonts.cairo(color: AppColors.muted, fontSize: 14),
             ),
             const SizedBox(height: 8),
             Text(
-              'اضغط + مجموعة لإضافة خط رئيسي',
+              isEmp
+                  ? 'صاحب المحل لسه ما عيّنلكش مجموعات تتابعها'
+                  : 'اضغط + مجموعة لإضافة خط رئيسي',
+              textAlign: TextAlign.center,
               style: GoogleFonts.cairo(color: AppColors.muted, fontSize: 12),
             ),
           ],
         ),
       );
     }
+    // الموظف: قائمة عادية (مفيش إعادة ترتيب على مجموعات مش بتاعته)
+    final canReorder = !SupabaseService.isEmployee;
     return ReorderableListView.builder(
       padding: const EdgeInsets.all(12),
-      itemCount: prov.db.groups.length,
-      onReorder: (oldIndex, newIndex) => prov.reorderGroups(oldIndex, newIndex),
-      itemBuilder: (_, i) => GroupCard(
-          key: ValueKey(prov.db.groups[i].id), group: prov.db.groups[i]),
+      itemCount: groups.length,
+      buildDefaultDragHandles: canReorder,
+      onReorder: (oldIndex, newIndex) {
+        if (canReorder) prov.reorderGroups(oldIndex, newIndex);
+      },
+      itemBuilder: (_, i) =>
+          GroupCard(key: ValueKey(groups[i].id), group: groups[i]),
     );
   }
 

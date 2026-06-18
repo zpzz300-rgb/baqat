@@ -1,4 +1,4 @@
-// lib/widgets/group_card.dart
+﻿// lib/widgets/group_card.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -388,6 +388,30 @@ class _GroupCardState extends State<GroupCard> {
         _miniChip(Icons.people, '$memberCount',
             AppColors.blue3, AppColors.blueLight),
         const SizedBox(width: 4),
+        // عداد انتهاء الخط — يظهر مختصر حتى والكارت مقفول وقت الخطورة
+        ...() {
+          final info = _expiryInfo(prov);
+          if (info == null || !(info.critical || info.days < 0)) return const <Widget>[];
+          return [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(
+                color: info.bg,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: info.color.withValues(alpha: 0.9), width: 1.5),
+              ),
+              child: Text(
+                info.days < 0 ? '🔴 منتهي' : '🔴 ${info.days}ي',
+                style: GoogleFonts.cairo(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    color: info.color),
+              ),
+            ),
+            const SizedBox(width: 4),
+          ];
+        }(),
         // Bill amount (if any)
         if (billAmount > 0)
           Container(
@@ -1034,29 +1058,57 @@ class _GroupCardState extends State<GroupCard> {
   }
 
   // ── Expiry Badge ─────────────────────────────────────────────
-  Widget _buildExpiryBadge(AppProvider prov) {
+  /// بيانات عداد انتهاء الخط — نافذة شهرين (60 يوم) قبل الانتهاء.
+  /// يرجّع null لو الخط بره النافذة (مفيش داعي للعرض).
+  ({int days, Color color, Color bg, String label, bool critical})?
+      _expiryInfo(AppProvider prov) {
     final days = prov.daysToExpiry(widget.group.id);
-    if (days == null) return const SizedBox.shrink();
-    final expired = days <= 0;
-    final urgent = days <= 30;
-    final warn = days <= 90;
-    if (!warn && !expired) return const SizedBox.shrink();
-    final color = expired
-        ? AppColors.red
-        : urgent
-            ? AppColors.orange
-            : const Color(0xFFf57c00);
-    final bg = expired ? AppColors.redLight : AppColors.orangeLight;
-    final label = expired ? '🔴 منتهي' : '⚠️ ينتهي خلال $days يوم';
+    if (days == null) return null;
+    final expired = days < 0;
+    if (!expired && days > 60) return null; // بره نافذة الشهرين
+    final critical = !expired && days <= 5; // 🔴 أحمر فاقع آخر 5 أيام
+    final urgent = !expired && days <= 15;
+
+    final Color color;
+    final Color bg;
+    if (expired || critical) {
+      color = AppColors.red;
+      bg = AppColors.redLight;
+    } else if (urgent) {
+      color = AppColors.orange;
+      bg = AppColors.orangeLight;
+    } else {
+      color = const Color(0xFFf57c00);
+      bg = AppColors.orangeLight;
+    }
+
+    final label = expired
+        ? '🔴 الخط منتهي'
+        : days == 0
+            ? '🔴 ينتهي النهاردة!'
+            : critical
+                ? '🔴 باقي $days يوم على الانتهاء'
+                : '⏳ ينتهي خلال $days يوم';
+    return (days: days, color: color, bg: bg, label: label, critical: critical);
+  }
+
+  Widget _buildExpiryBadge(AppProvider prov) {
+    final info = _expiryInfo(prov);
+    if (info == null) return const SizedBox.shrink();
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-          color: bg,
+          color: info.bg,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: color.withValues(alpha: 0.5))),
-      child: Text(label,
+          border: Border.all(
+              color: info.color
+                  .withValues(alpha: info.critical ? 0.9 : 0.5),
+              width: info.critical ? 1.5 : 1)),
+      child: Text(info.label,
           style: GoogleFonts.cairo(
-              fontSize: 10, fontWeight: FontWeight.w800, color: color)),
+              fontSize: 10,
+              fontWeight: info.critical ? FontWeight.w900 : FontWeight.w800,
+              color: info.color)),
     );
   }
 

@@ -1213,6 +1213,7 @@ class _MemberDrawerState extends State<MemberDrawer> {
   }
 
   void _manualAction(AppProvider prov, {required bool isDebt}) {
+    if (!guardEdit(context)) return;
     final amt = double.tryParse(_manAmt.text.trim());
     if (amt == null || amt <= 0) return;
     final reason = _manReason.text.trim().isNotEmpty
@@ -1409,15 +1410,206 @@ class _MemberDrawerState extends State<MemberDrawer> {
 
   // ── ACTIONS (2 WA buttons only — rest in bottom bar) ─────────
   Widget _buildActions(Member member, AppProvider prov) {
+    final count = member.reminderCountThisMonth;
     return Row(children: [
       Expanded(
-          child: _actionBtn('💬 واتساب (مديونية)', const Color(0xFFe8f5e9),
-              AppColors.green2, () => _openWADebtOnly(member))),
+        child: Stack(clipBehavior: Clip.none, children: [
+          _actionBtn('💬 واتساب (مديونية)', const Color(0xFFe8f5e9),
+              AppColors.green2, () => _openWADebtOnly(member)),
+          if (count > 0)
+            Positioned(
+              top: -7,
+              right: -5,
+              child: GestureDetector(
+                onTap: () => _showReminderLog(member, prov),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.red,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white, width: 1.5),
+                  ),
+                  child: Text('$count',
+                      style: GoogleFonts.cairo(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 11)),
+                ),
+              ),
+            ),
+        ]),
+      ),
       const SizedBox(width: 8),
       Expanded(
           child: _actionBtn('📋 كشف حساب كامل', const Color(0xFFe8f5e9),
               AppColors.green2, () => _openWAWithStatement(member))),
+      const SizedBox(width: 6),
+      // زرار سجل/عداد التذكيرات
+      GestureDetector(
+        onTap: () => _showReminderLog(member, prov),
+        child: Container(
+          padding: const EdgeInsets.all(9),
+          decoration: BoxDecoration(
+            color: const Color(0xFFe8f5e9),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.blue2.withValues(alpha: 0.3)),
+          ),
+          child: const Icon(Icons.history, size: 18, color: AppColors.blue2),
+        ),
+      ),
     ]);
+  }
+
+  // ── سجل/عداد تذكيرات المديونية ───────────────────────────────
+  static String _reminderChLabel(String ch) => switch (ch) {
+        'wa_debt' => '💬 واتساب (مديونية)',
+        'wa_statement' => '📋 كشف حساب كامل',
+        'sms' => '📱 SMS',
+        'manual' => '✏️ إضافة يدوية',
+        _ => 'إرسال',
+      };
+
+  static String _fmtReminderTs(int ts) {
+    final d = DateTime.fromMillisecondsSinceEpoch(ts);
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${d.year}/${two(d.month)}/${two(d.day)} - ${two(d.hour)}:${two(d.minute)}';
+  }
+
+  Widget _reminderCounterBtn(IconData icon, Color color, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          shape: BoxShape.circle,
+          border: Border.all(color: color.withValues(alpha: 0.4)),
+        ),
+        child: Icon(icon, color: color, size: 24),
+      ),
+    );
+  }
+
+  void _showReminderLog(Member member, AppProvider prov) {
+    showModalBottomSheet(
+      useRootNavigator: true,
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setSt) {
+          final m = prov.db.members.firstWhere((x) => x.id == member.id,
+              orElse: () => member);
+          final count = m.reminderCountThisMonth;
+          final entries = List<Map<String, dynamic>>.from(m.reminderLog);
+          return Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                    child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                            color: Colors.grey[300],
+                            borderRadius: BorderRadius.circular(2)))),
+                const SizedBox(height: 14),
+                Text('🔔 عداد تذكيرات المديونية',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.cairo(
+                        fontWeight: FontWeight.w900, fontSize: 16)),
+                const SizedBox(height: 4),
+                Text(m.name,
+                    textAlign: TextAlign.center,
+                    style:
+                        GoogleFonts.cairo(fontSize: 12, color: Colors.grey[600])),
+                const SizedBox(height: 16),
+                // العداد + / -
+                Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  _reminderCounterBtn(Icons.remove, AppColors.red, () {
+                    prov.decrementReminder(m.id);
+                    setSt(() {});
+                  }),
+                  const SizedBox(width: 26),
+                  Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text('$count',
+                        style: GoogleFonts.cairo(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 32,
+                            color: AppColors.blue2)),
+                    Text('هذا الشهر',
+                        style: GoogleFonts.cairo(
+                            fontSize: 11, color: Colors.grey[600])),
+                  ]),
+                  const SizedBox(width: 26),
+                  _reminderCounterBtn(Icons.add, AppColors.green2, () {
+                    prov.incrementReminderManual(m.id);
+                    setSt(() {});
+                  }),
+                ]),
+                const SizedBox(height: 16),
+                const Divider(),
+                Align(
+                    alignment: Alignment.centerRight,
+                    child: Text('📋 سجل الإرسال (${entries.length})',
+                        style: GoogleFonts.cairo(
+                            fontWeight: FontWeight.w700, fontSize: 13))),
+                const SizedBox(height: 6),
+                if (entries.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text('لا توجد تذكيرات بعد',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.cairo(color: Colors.grey)),
+                  )
+                else
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                        maxHeight: MediaQuery.of(ctx).size.height * 0.4),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: entries.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (_, i) {
+                        final e = entries[i];
+                        final ts = (e['ts'] ?? 0) as int;
+                        final ch = (e['ch'] ?? '') as String;
+                        return ListTile(
+                          dense: true,
+                          contentPadding:
+                              const EdgeInsets.symmetric(horizontal: 4),
+                          title: Text(_reminderChLabel(ch),
+                              style: GoogleFonts.cairo(
+                                  fontWeight: FontWeight.w700, fontSize: 13)),
+                          subtitle: Text(_fmtReminderTs(ts),
+                              style: GoogleFonts.cairo(
+                                  fontSize: 11, color: Colors.grey[600])),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline,
+                                color: AppColors.red, size: 20),
+                            onPressed: () {
+                              prov.deleteReminderEntry(m.id, ts);
+                              setSt(() {});
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   // ── BOTTOM BAR ──────────────────────────────────────────────
@@ -1432,7 +1624,7 @@ class _MemberDrawerState extends State<MemberDrawer> {
         SizedBox(
           width: double.infinity,
           child: ElevatedButton.icon(
-            onPressed: () => _openWAWithStatement(member),
+            onPressed: () => _openWAWithStatement(member, countReminder: false),
             icon: const Icon(Icons.folder_open, size: 18),
             label: Text('📁 الملف الكامل والتقرير',
                 style: GoogleFonts.cairo(
@@ -1610,7 +1802,10 @@ class _MemberDrawerState extends State<MemberDrawer> {
         : 'السلام عليكم ${m.name}، حسابك مسدد، شكرا لك.';
     final phone = m.waPhone;
     final url = 'sms:$phone?body=${Uri.encodeComponent(msg)}';
-    if (await canLaunchUrl(Uri.parse(url))) launchUrl(Uri.parse(url));
+    if (await canLaunchUrl(Uri.parse(url))) {
+      await launchUrl(Uri.parse(url));
+      if (debt > 0 && mounted) prov.recordReminderSent(m.id, 'sms');
+    }
   }
 
   void _moveMember(Member member, AppProvider prov) {
@@ -1664,7 +1859,7 @@ class _MemberDrawerState extends State<MemberDrawer> {
   }
 
   // ── WhatsApp preview dialog ──────────────────────────────────
-  void _showWAPreview(String msg, String phone) {
+  void _showWAPreview(String msg, String phone, {String? memberId, String? channel}) {
     final ctrl = TextEditingController(text: msg);
     showModalBottomSheet(useRootNavigator: true,
       context: context,
@@ -1738,6 +1933,12 @@ class _MemberDrawerState extends State<MemberDrawer> {
                               'https://wa.me/$phone?text=${Uri.encodeComponent(ctrl.text)}';
                           if (await canLaunchUrl(Uri.parse(url))) {
                             await launchUrl(Uri.parse(url));
+                            // سجّل تذكير المديونية (لو الإرسال من زرار مديونية/كشف حساب)
+                            if (memberId != null && channel != null && mounted) {
+                              context
+                                  .read<AppProvider>()
+                                  .recordReminderSent(memberId, channel);
+                            }
                           }
                         },
                       )),
@@ -1768,10 +1969,10 @@ class _MemberDrawerState extends State<MemberDrawer> {
         ? 'السلام عليكم ${m.name} 👋\nتذكير بمديونيتك: 🔴 ${debt.toStringAsFixed(0)} ج\nالاشتراك الشهري: ${m.price.toStringAsFixed(0)} ج$instapay$vodafone$note\nشكراً 🙏'
         : 'السلام عليكم ${m.name} 👋\n✅ حسابك مسدّد، شكراً لك 🙏';
     final phone = m.waPhone.replaceFirst(RegExp(r'^0'), '20');
-    _showWAPreview(msg, phone);
+    _showWAPreview(msg, phone, memberId: m.id, channel: 'wa_debt');
   }
 
-  void _openWAWithStatement(Member m) {
+  void _openWAWithStatement(Member m, {bool countReminder = true}) {
     final prov = context.read<AppProvider>();
     final paid = m.log
         .where((l) => (l['amount'] ?? 0) > 0)
@@ -1816,7 +2017,9 @@ class _MemberDrawerState extends State<MemberDrawer> {
     lines.writeln('━━━━━━━━━━━━━━━');
 
     final phone = m.waPhone.replaceFirst(RegExp(r'^0'), '20');
-    _showWAPreview(lines.toString(), phone);
+    _showWAPreview(lines.toString(), phone,
+        memberId: countReminder ? m.id : null,
+        channel: countReminder ? 'wa_statement' : null);
   }
 
   void _deleteMember(AppProvider prov) {

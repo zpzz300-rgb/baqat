@@ -46,9 +46,6 @@ class _AddGroupModalState extends State<AddGroupModal> {
   bool _weCouponEnabled = false;
   String? _vodafoneRateType;
 
-  // نقاط/شهر — اختيار مسبق أو يدوي
-  int? _pointsMonthlySelected; // null = يدوي
-  static const _pointsPresets = [500, 1000, 1500, 2000, 3000, 5000];
 
   String _type = '3800';
   String _payer = 'me';
@@ -107,12 +104,8 @@ class _AddGroupModalState extends State<AddGroupModal> {
       _billingCycle = e.billingCycle;
       _offerEndDate = e.offerEndDate;
       if (e.maxClients != null) _maxClientsCtrl.text = e.maxClients.toString();
-      if (e.pointsMonthly != null) {
-        if (_pointsPresets.contains(e.pointsMonthly)) {
-          _pointsMonthlySelected = e.pointsMonthly;
-        } else {
-          _pointsMonthlyCtrl.text = e.pointsMonthly.toString();
-        }
+      if (e.pointsMonthly != null && e.pointsMonthly! > 0) {
+        _pointsMonthlyCtrl.text = e.pointsMonthly.toString();
       }
       if (e.pointPrice != null) {
         _pointPriceCtrl.text = e.pointPrice!.toStringAsFixed(0);
@@ -467,78 +460,33 @@ class _AddGroupModalState extends State<AddGroupModal> {
               textDirection: TextDirection.ltr),
           const SizedBox(height: 10),
 
-          // نقاط/شهر — dropdown أو يدوي
-          Text('🏅 نقاط/شهر (تُضاف يوم 7 تلقائياً)',
+          // النقاط — عدد يدوي + المجمل التلقائي
+          Text('🏅 النقاط (تُضاف يوم 7 تلقائياً)',
               style: GoogleFonts.cairo(
                   fontSize: 12,
                   color: AppColors.muted,
                   fontWeight: FontWeight.w700)),
           const SizedBox(height: 6),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              ..._pointsPresets.map((pts) {
-                final sel = _pointsMonthlySelected == pts;
-                return GestureDetector(
-                  onTap: () => setState(() {
-                    _pointsMonthlySelected = pts;
-                    _pointsMonthlyCtrl.clear();
-                  }),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: sel ? AppColors.blue2 : Colors.white,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                          color: sel ? AppColors.blue2 : AppColors.border),
-                    ),
-                    child: Text('$pts نقطة',
-                        style: GoogleFonts.cairo(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: sel ? Colors.white : AppColors.muted)),
-                  ),
-                );
-              }),
-              GestureDetector(
-                onTap: () => setState(() => _pointsMonthlySelected = null),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: _pointsMonthlySelected == null
-                        ? AppColors.orange
-                        : Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                        color: _pointsMonthlySelected == null
-                            ? AppColors.orange
-                            : AppColors.border),
-                  ),
-                  child: Text('يدوي ✏️',
-                      style: GoogleFonts.cairo(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: _pointsMonthlySelected == null
-                              ? Colors.white
-                              : AppColors.muted)),
-                ),
-              ),
-            ],
+          AppFormField(
+            label: 'عدد النقاط',
+            controller: _pointsMonthlyCtrl,
+            keyboardType: TextInputType.number,
+            textDirection: TextDirection.ltr,
+            onChanged: (_) => setState(() {}),
           ),
-          if (_pointsMonthlySelected == null) ...[
-            const SizedBox(height: 8),
-            AppFormField(
-              label: 'أدخل عدد النقاط يدوياً',
-              controller: _pointsMonthlyCtrl,
-              keyboardType: TextInputType.number,
-              textDirection: TextDirection.ltr,
-            ),
-          ],
+          Builder(builder: (_) {
+            final pts = int.tryParse(_pointsMonthlyCtrl.text.trim()) ?? 0;
+            final price = double.tryParse(_pointPriceCtrl.text.trim()) ?? 0;
+            if (pts <= 0 || price <= 0) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text('= ${(pts * price).toStringAsFixed(0)} ج',
+                  style: GoogleFonts.cairo(
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.green2,
+                      fontSize: 14)),
+            );
+          }),
           const SizedBox(height: 10),
           Row(children: [
             Expanded(
@@ -546,7 +494,8 @@ class _AddGroupModalState extends State<AddGroupModal> {
                     label: 'سعر النقطة (ج)',
                     controller: _pointPriceCtrl,
                     keyboardType: TextInputType.number,
-                    textDirection: TextDirection.ltr)),
+                    textDirection: TextDirection.ltr,
+                    onChanged: (_) => setState(() {}))),
             const SizedBox(width: 10),
             Expanded(
                 child: AppFormField(
@@ -1035,8 +984,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
       expiryDate: widget.existing?.expiryDate,
       provider: _provider,
       maxClients: int.tryParse(_maxClientsCtrl.text.trim()),
-      pointsMonthly: _pointsMonthlySelected ??
-          int.tryParse(_pointsMonthlyCtrl.text.trim()),
+      pointsMonthly: int.tryParse(_pointsMonthlyCtrl.text.trim()),
       pointPrice: double.tryParse(_pointPriceCtrl.text.trim()),
       extraClientFee: double.tryParse(_extraFeeCtrl.text.trim()),
       billingCycle: isManual ? null : _billingCycle,
