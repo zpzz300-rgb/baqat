@@ -224,11 +224,6 @@ class _GroupCardState extends State<GroupCard> {
                       _buildLineTypeBadge(group),
                       // Provider badge
                       if (group.provider != null) _buildProviderBadge(group),
-                      _badge(
-                          group.type == '3800' ? '📡 3800' : '📶 1800',
-                          AppColors.blueLight,
-                          AppColors.blue3,
-                          AppColors.blueMid),
                       _buildRentalIndicator(context, prov),
                       _badge(_cycleLabel(group), AppColors.blueLight,
                           AppColors.blue3, AppColors.blueMid),
@@ -640,14 +635,17 @@ class _GroupCardState extends State<GroupCard> {
         ),
         const SizedBox(height: 5),
 
-        // Full-width progress bar
-        ClipRRect(
-          borderRadius: BorderRadius.circular(6),
-          child: LinearProgressIndicator(
-            value: fraction,
-            minHeight: 8,
-            backgroundColor: AppColors.border,
-            valueColor: AlwaysStoppedAnimation<Color>(barColor),
+        // Full-width progress bar (اضغط → تقسيم الجيجا/الدقايق/الدولي لكل عميل)
+        GestureDetector(
+          onTap: () => _showUsageBreakdown(prov),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: fraction,
+              minHeight: 8,
+              backgroundColor: AppColors.border,
+              valueColor: AlwaysStoppedAnimation<Color>(barColor),
+            ),
           ),
         ),
 
@@ -1058,6 +1056,119 @@ class _GroupCardState extends State<GroupCard> {
   }
 
   // ── Expiry Badge ─────────────────────────────────────────────
+  /// قائمة منبثقة: تقسيم استهلاك الجيجا والدقايق والدولي على عملاء الخط.
+  void _showUsageBreakdown(AppProvider prov) {
+    final g = prov.db.groups
+        .firstWhere((x) => x.id == widget.group.id, orElse: () => widget.group);
+    final members = prov.db.membersOf(g.id);
+    final totalGb = prov.db.groupTotalGb(g.id);
+    final usedGb = prov.db.groupUsedGb(g.id);
+    final usedMin = prov.db.groupUsedMinutes(g.id);
+    final usedIntl = prov.db.groupUsedInternational(g.id);
+
+    showModalBottomSheet(
+      useRootNavigator: true,
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: DraggableScrollableSheet(
+          initialChildSize: 0.7,
+          minChildSize: 0.4,
+          maxChildSize: 0.95,
+          expand: false,
+          builder: (_, sc) => Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFFf8fbff),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: Column(children: [
+              const SizedBox(height: 10),
+              Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2))),
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('📊 تقسيم استهلاك الخط ${g.phone}',
+                      textDirection: TextDirection.ltr,
+                      style: GoogleFonts.cairo(
+                          fontWeight: FontWeight.w900, fontSize: 15)),
+                  const SizedBox(height: 8),
+                  Wrap(spacing: 8, runSpacing: 8, children: [
+                    _usageChip('📶 جيجا', '$usedGb / $totalGb'),
+                    _usageChip('📞 دقايق', '$usedMin / ${g.totalMinutes}'),
+                    _usageChip('🌍 دولي', '$usedIntl / ${g.totalInternational}'),
+                  ]),
+                ]),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: members.isEmpty
+                    ? Center(
+                        child: Text('لا يوجد عملاء',
+                            style: GoogleFonts.cairo(color: AppColors.muted)))
+                    : ListView.builder(
+                        controller: sc,
+                        padding: const EdgeInsets.fromLTRB(14, 8, 14, 20),
+                        itemCount: members.length,
+                        itemBuilder: (_, i) {
+                          final m = members[i];
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: AppColors.border)),
+                            child: Row(children: [
+                              Expanded(
+                                  child: Text(m.name,
+                                      style: GoogleFonts.cairo(
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 13),
+                                      overflow: TextOverflow.ellipsis)),
+                              _miniUsage('📶', '${m.gb}'),
+                              _miniUsage('📞', '${m.minutesAllocation}'),
+                              _miniUsage('🌍', '${m.internationalAllocation}'),
+                            ]),
+                          );
+                        },
+                      ),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _usageChip(String label, String value) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+            color: AppColors.blueLight,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppColors.border)),
+        child: Text('$label: $value',
+            style: GoogleFonts.cairo(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: AppColors.blue2)),
+      );
+
+  Widget _miniUsage(String icon, String value) => Padding(
+        padding: const EdgeInsets.only(right: 10),
+        child: Text('$icon $value',
+            style: GoogleFonts.cairo(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: AppColors.muted)),
+      );
+
   /// بيانات عداد انتهاء الخط — نافذة شهرين (60 يوم) قبل الانتهاء.
   /// يرجّع null لو الخط بره النافذة (مفيش داعي للعرض).
   ({int days, Color color, Color bg, String label, bool critical})?

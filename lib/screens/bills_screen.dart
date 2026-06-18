@@ -95,11 +95,14 @@ class _BillsScreenState extends State<BillsScreen> {
           Row(children: [
             const Text('📋', style: TextStyle(fontSize: 22)),
             const SizedBox(width: 8),
-            Text('فواتير الخطوط',
-                style: GoogleFonts.cairo(
-                    color: Colors.white,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w900)),
+            Flexible(
+              child: Text('فواتير الخطوط',
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.cairo(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900)),
+            ),
             const Spacer(),
             IconButton(
               onPressed: () => _printBills(context, bills, db),
