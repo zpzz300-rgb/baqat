@@ -137,11 +137,14 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
                       ]),
                       // صفوف الخطوط
                       for (final g in groupsWithBills)
-                        Row(children: [
-                          _nameCell(g),
-                          for (final m in months)
-                            _dataCell(billIndex['${g.id}|$m']),
-                        ]),
+                        GestureDetector(
+                          onTap: () => _openLineHistory(context, db, g),
+                          child: Row(children: [
+                            _nameCell(g),
+                            for (final m in months)
+                              _dataCell(billIndex['${g.id}|$m']),
+                          ]),
+                        ),
                     ],
                   ),
                 ),
@@ -149,6 +152,168 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
       ),
     ]);
   }
+
+  // ── سجل الخط: كل شهر بمربعين (فاتورة الشركة + الزيادة) + ميعاد الدفع ──
+  void _openLineHistory(BuildContext context, AppDB db, Group g) {
+    final bills = db.companyBills.where((b) => b.groupId == g.id).toList()
+      ..sort((a, b) => b.month.compareTo(a.month)); // الأحدث فوق
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (_, scroll) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+          ),
+          child: Column(children: [
+            // مقبض + عنوان
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+              decoration: const BoxDecoration(
+                gradient: AppColors.headerGradient,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+              ),
+              child: Column(children: [
+                Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                        color: Colors.white54,
+                        borderRadius: BorderRadius.circular(4))),
+                Row(children: [
+                  const Text('🧾', style: TextStyle(fontSize: 18)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('سجل فواتير ${g.phone}',
+                              style: GoogleFonts.cairo(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w900)),
+                          if (g.ownerName != null && g.ownerName!.isNotEmpty)
+                            Text(g.ownerName!,
+                                style: GoogleFonts.cairo(
+                                    color: Colors.white70, fontSize: 11)),
+                        ]),
+                  ),
+                ]),
+              ]),
+            ),
+            Expanded(
+              child: bills.isEmpty
+                  ? Center(
+                      child: Text('لا توجد فواتير',
+                          style: GoogleFonts.cairo(color: AppColors.muted)))
+                  : ListView.builder(
+                      controller: scroll,
+                      padding: const EdgeInsets.all(12),
+                      itemCount: bills.length,
+                      itemBuilder: (_, i) => _historyRow(bills[i]),
+                    ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _historyRow(CompanyBill b) {
+    final company = b.fixedAmount; // فاتورة الشركة المتوقعة
+    final excess = (b.actualAmount - b.fixedAmount); // الزيادة (ممكن تبقى سالبة)
+    final payDate = b.payments.isNotEmpty ? b.payments.last.date : null;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          _box('📅 ${_fmtMonth(b.month)}', AppColors.blueLight, AppColors.blue2),
+          const Spacer(),
+          if (b.isDeferred)
+            _box('⏸ مؤجل لـ ${b.deferDate}', const Color(0xFFFFF3E0),
+                const Color(0xFFE65100))
+          else if (b.isPaid)
+            _box('✅ مسدد', AppColors.greenLight, const Color(0xFF00695c))
+          else
+            _box('متبقي ${b.remaining.toStringAsFixed(0)} ج', AppColors.redLight,
+                AppColors.red2),
+        ]),
+        const SizedBox(height: 10),
+        // ── المربعين: فاتورة الشركة + الزيادة ──
+        Row(children: [
+          Expanded(
+            child: _twoBox('فاتورة الشركة', '${company.toStringAsFixed(0)} ج',
+                const Color(0xFFE8F5E9), const Color(0xFF00695c)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _twoBox(
+                excess > 0 ? 'الزيادة' : (excess < 0 ? 'أقل من المتوقع' : 'لا زيادة'),
+                '${excess.toStringAsFixed(0)} ج',
+                excess > 0 ? AppColors.redLight : const Color(0xFFF5F5F5),
+                excess > 0 ? AppColors.red2 : AppColors.muted),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
+          Text('الفعلي: ${b.actualAmount.toStringAsFixed(0)} ج',
+              style: GoogleFonts.cairo(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.text)),
+          const Spacer(),
+          if (payDate != null)
+            Text('💳 دُفع: $payDate',
+                style: GoogleFonts.cairo(fontSize: 11, color: AppColors.green))
+          else
+            Text('لسه متدفعش',
+                style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted)),
+        ]),
+        if (b.note != null && b.note!.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text('📝 ${b.note}',
+              style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted)),
+        ],
+      ]),
+    );
+  }
+
+  Widget _twoBox(String label, String value, Color bg, Color fg) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        decoration:
+            BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label,
+              style: GoogleFonts.cairo(
+                  fontSize: 10, fontWeight: FontWeight.w700, color: fg)),
+          const SizedBox(height: 2),
+          Text(value,
+              style: GoogleFonts.cairo(
+                  fontSize: 15, fontWeight: FontWeight.w900, color: fg)),
+        ]),
+      );
+
+  Widget _box(String text, Color bg, Color fg) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration:
+            BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
+        child: Text(text,
+            style: GoogleFonts.cairo(
+                fontSize: 11, fontWeight: FontWeight.w800, color: fg)),
+      );
 
   // ── الخلية: متبقي + لون ──────────────────────────────────────
   Widget _dataCell(CompanyBill? bill) {
