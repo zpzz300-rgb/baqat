@@ -157,6 +157,11 @@ class AppProvider extends ChangeNotifier {
   String _ownerName     = 'ابو عمر';
   String _ownerPhone    = '01001005891';
 
+  // ── لقطات الجرد الشهري (snapshots للأرباح) ──────────────────────
+  List<Map<String, dynamic>> _profitSnapshots = [];
+  List<Map<String, dynamic>> get profitSnapshots =>
+      List.unmodifiable(_profitSnapshots);
+
   // ── تنويه زيادة الباقة في رسالة المديونية ──────────────────────
   bool   _debtNoteEnabled = false;
   String _debtNoteText    = 'تنويه: تم رفع قيمة الاشتراك بسبب زيادة أسعار الشركة. شكراً لتفهمكم 🙏';
@@ -267,6 +272,14 @@ class AppProvider extends ChangeNotifier {
     _bankInfo       = prefs.getString('tcm_bank_info')    ?? '';
     _ownerName      = prefs.getString('tcm_owner_name')   ?? 'ابو عمر';
     _ownerPhone     = prefs.getString('tcm_owner_phone')  ?? '01001005891';
+    final snapRaw = prefs.getString('tcm_profit_snapshots');
+    if (snapRaw != null) {
+      try {
+        _profitSnapshots = (jsonDecode(snapRaw) as List)
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      } catch (_) {}
+    }
     _debtNoteEnabled = prefs.getBool('tcm_debt_note_on')  ?? false;
     _debtNoteText    = prefs.getString('tcm_debt_note_txt') ?? _debtNoteText;
     _compactMembers  = prefs.getBool('tcm_compact_members') ?? true;
@@ -610,6 +623,7 @@ class AppProvider extends ChangeNotifier {
     await prefs.setString('tcm_bank_info',     _bankInfo);
     await prefs.setString('tcm_owner_name',    _ownerName);
     await prefs.setString('tcm_owner_phone',   _ownerPhone);
+    await prefs.setString('tcm_profit_snapshots', jsonEncode(_profitSnapshots));
     await prefs.setBool('tcm_debt_note_on',    _debtNoteEnabled);
     await prefs.setString('tcm_debt_note_txt', _debtNoteText);
     await prefs.setBool('tcm_compact_members', _compactMembers);
@@ -741,6 +755,39 @@ class AppProvider extends ChangeNotifier {
       notifyListeners();
     }
     return n;
+  }
+
+  /// التقاط لقطة جرد للأرباح للشهر الحالي (تُستبدل لو الشهر اتسجّل قبل كده).
+  void captureProfitSnapshot() {
+    final n = DateTime.now();
+    final month = '${n.year}-${n.month.toString().padLeft(2, '0')}';
+    final income = db.members.fold<double>(0, (s, m) => s + m.price);
+    final billing = db.totalBillingProfit;
+    final gift = db.groups.fold<double>(0, (s, g) => s + g.giftProfit);
+    final rental = db.rentals
+        .where((r) => r.status == 'active')
+        .fold<double>(0, (s, r) => s + r.rent);
+    final guest = db.guestUsers.fold<double>(0, (s, g) => s + g.profit);
+    final points = db.groups.fold<double>(0, (s, g) => s + g.pendingPointsProfit);
+    final debt = db.totalDebt;
+    final net = billing + gift + rental + guest + points;
+    final snap = {
+      'month': month,
+      'date': _today(),
+      'income': income,
+      'billing': billing,
+      'gift': gift,
+      'rental': rental,
+      'guest': guest,
+      'points': points,
+      'debt': debt,
+      'net': net,
+    };
+    _profitSnapshots.removeWhere((s) => s['month'] == month);
+    _profitSnapshots.add(snap);
+    _profitSnapshots.sort((a, b) => (a['month'] as String).compareTo(b['month'] as String));
+    saveSettings();
+    notifyListeners();
   }
 
   // ── Notification setters ────────────────────────────────────────

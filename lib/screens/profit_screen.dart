@@ -724,9 +724,43 @@ class _AnalysisTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final db = prov.db;
+    final snaps = prov.profitSnapshots;
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
+        // ── #7 جرد الشهر + #4 رسم الأرباح ──
+        _sectionTitle('📸 جرد الشهر (لقطة محفوظة للمقارنة)'),
+        Row(children: [
+          Expanded(
+            child: Text(
+                snaps.isEmpty
+                    ? 'سجّل لقطة دلوقتي عشان تقارن الشهور بعدين.'
+                    : 'آخر لقطة: ${snaps.last['month']} — صافي ${(snaps.last['net'] as num).toStringAsFixed(0)} ج',
+                style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted)),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.blue2,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+            icon: const Icon(Icons.camera_alt, size: 16),
+            label: Text('سجّل جرد الشهر',
+                style: GoogleFonts.cairo(fontSize: 11, fontWeight: FontWeight.w800)),
+            onPressed: () {
+              prov.captureProfitSnapshot();
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                backgroundColor: AppColors.green,
+                content: Text('✅ تم تسجيل جرد الشهر',
+                    style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+              ));
+            },
+          ),
+        ]),
+        if (snaps.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          _trendChart(snaps),
+        ],
+        const SizedBox(height: 16),
         _sectionTitle('🥧 توزيع مصادر الدخل'),
         _distribution(),
         const SizedBox(height: 16),
@@ -739,6 +773,64 @@ class _AnalysisTab extends StatelessWidget {
         _sectionTitle('🧾 أعلى ١٠ عملاء مديونية'),
         ..._topDebtors(db),
       ],
+    );
+  }
+
+  // ── #4 رسم صافي الربح بالشهور (من اللقطات) ──
+  Widget _trendChart(List<Map<String, dynamic>> snaps) {
+    final maxNet = snaps
+        .map((s) => (s['net'] as num).toDouble().abs())
+        .fold<double>(1, (a, b) => a > b ? a : b);
+    final recent = snaps.length > 12 ? snaps.sublist(snaps.length - 12) : snaps;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('صافي الربح بالشهور',
+            style: GoogleFonts.cairo(
+                fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.blue2)),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 120,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: recent.map((s) {
+              final net = (s['net'] as num).toDouble();
+              final h = (net.abs() / maxNet * 90).clamp(4, 90).toDouble();
+              final c = net >= 0 ? AppColors.green : AppColors.red2;
+              final mm = (s['month'] as String).split('-');
+              return Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Text(net.toStringAsFixed(0),
+                        style: GoogleFonts.cairo(
+                            fontSize: 8, fontWeight: FontWeight.w700, color: c)),
+                    const SizedBox(height: 2),
+                    Container(
+                      height: h,
+                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                      decoration: BoxDecoration(
+                        color: c,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(mm.length > 1 ? 'ش${mm[1]}' : '',
+                        style: GoogleFonts.cairo(
+                            fontSize: 8, color: AppColors.muted)),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ]),
     );
   }
 
