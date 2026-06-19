@@ -43,6 +43,18 @@ class AppProvider extends ChangeNotifier {
   bool canSeeGroup(String gid) =>
       !SupabaseService.isEmployee || (_assignedGroupIds?.contains(gid) ?? false);
 
+  /// هل مسموح للمستخدم الحالي يعدّل في المجموعة دي؟
+  /// المالك: دايماً. الموظف: بس لو موكلة له (أو بيغطّي عليها — [coveringGroupIds]).
+  bool canEditGroup(String gid) {
+    if (!SupabaseService.isEmployee) return true;
+    if (_assignedGroupIds?.contains(gid) ?? false) return true;
+    return _coveringGroupIds.contains(gid);
+  }
+
+  /// مجموعات بيغطّي عليها الموظف مؤقتاً (تغطية زميل غايب) — تتفعّل من المالك.
+  final Set<String> _coveringGroupIds = {};
+  Set<String> get coveringGroupIds => _coveringGroupIds;
+
   /// خريطة (group_id → اسم الموظف المسؤول) — للمالك، لعرض مؤشر المسؤول.
   Map<String, String> _groupAssignee = {};
   String? assigneeOf(String gid) => _groupAssignee[gid];

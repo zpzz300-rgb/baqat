@@ -9,6 +9,8 @@ import 'member_card.dart';
 import 'add_member_modal.dart';
 import 'add_group_modal.dart';
 import 'complaints_sheet.dart';
+import 'common.dart';
+import '../services/supabase_service.dart';
 import 'rental_sheet.dart';
 import 'pin_dialog.dart';
 import '../services/notification_service.dart';
@@ -262,6 +264,10 @@ class _GroupCardState extends State<GroupCard> {
                       // Offer end date badge
                       if (group.offerEndDate != null)
                         _buildOfferEndBadge(group),
+                      if (SupabaseService.isEmployee &&
+                          !prov.canEditGroup(group.id))
+                        _badge('👁 عرض فقط', const Color(0xFFF5F5F5),
+                            AppColors.muted, AppColors.border),
                       _buildExpiryBadge(prov),
                       _buildDeferBadge(prov),
                       if (prov.assigneeOf(group.id) != null)
@@ -1708,6 +1714,13 @@ class _GroupCardState extends State<GroupCard> {
   }
 
   void _onAction(String action, BuildContext ctx, AppProvider prov) {
+    // قفل التعديل: الموظف مايقدرش يعدّل في مجموعة مش ضمن شغله (إلا بتغطية)
+    if (!prov.canEditGroup(widget.group.id)) {
+      AppSnackbar.show(ctx,
+          '👁 عرض فقط — المجموعة دي مش ضمن شغلك. كلّم صاحب المحل يفعّلها لك.',
+          background: AppColors.red);
+      return;
+    }
     switch (action) {
       case 'edit':
         showModalBottomSheet(useRootNavigator: true,
