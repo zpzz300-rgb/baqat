@@ -36,6 +36,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
   final _totalMinutesCtrl = TextEditingController();
   final _mainLineGbCtrl = TextEditingController();
   final _insuranceCtrl = TextEditingController();
+  final _pointsResetDayCtrl = TextEditingController();
   String? _manualDueDate;
   // Phase 2
   String _tier = '';
@@ -152,6 +153,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
       if (e.refundableInsurance > 0) {
         _insuranceCtrl.text = e.refundableInsurance.toStringAsFixed(0);
       }
+      _pointsResetDayCtrl.text = '${e.pointsResetDay}';
       _tier = e.tier;
       _contractPhotoPath = e.contractPhotoPath;
       _weCouponDate = e.weCouponDate;
@@ -180,6 +182,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
     _totalMinutesCtrl.dispose();
     _mainLineGbCtrl.dispose();
     _insuranceCtrl.dispose();
+    _pointsResetDayCtrl.dispose();
     super.dispose();
   }
 
@@ -721,6 +724,14 @@ class _AddGroupModalState extends State<AddGroupModal> {
                   Text('تذكير الاسترداد بعد 6 شهور من بداية العرض',
                       style: GoogleFonts.cairo(
                           fontSize: 10, color: AppColors.muted)),
+                  const SizedBox(height: 10),
+                  AppFormField(
+                    label: '🔄 يوم تجديد النقاط في الشهر',
+                    controller: _pointsResetDayCtrl,
+                    keyboardType: TextInputType.number,
+                    textDirection: TextDirection.ltr,
+                    hint: '7',
+                  ),
                 ],
                 // WE conditional
                 if (_provider == 'we') ...[
@@ -1121,7 +1132,8 @@ class _AddGroupModalState extends State<AddGroupModal> {
       refundableInsurance: double.tryParse(_insuranceCtrl.text.trim()) ??
           (widget.existing?.refundableInsurance ?? 0),
       insuranceClaimDate: widget.existing?.insuranceClaimDate,
-      pointsResetDay: widget.existing?.pointsResetDay ?? 7,
+      pointsResetDay: int.tryParse(_pointsResetDayCtrl.text.trim()) ??
+          (widget.existing?.pointsResetDay ?? 7),
       weCouponEnabled: _weCouponEnabled,
       weCouponDate: _weCouponDate,
       vodafoneRateType: _vodafoneRateType,
