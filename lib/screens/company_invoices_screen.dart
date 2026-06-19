@@ -267,6 +267,19 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
                   fontWeight: FontWeight.w900),
             ),
           ),
+          GestureDetector(
+            onTap: () => _showRotationDialog(ctx, prov),
+            child: Container(
+              padding: const EdgeInsets.all(7),
+              margin: const EdgeInsets.only(left: 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.4)),
+              ),
+              child: const Icon(Icons.sync, color: Colors.white, size: 16),
+            ),
+          ),
           _generateBtn(ctx, prov),
           const SizedBox(width: 6),
           _addBillBtn(ctx, prov, db),
@@ -363,6 +376,69 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
                   fontWeight: FontWeight.w700)),
         ]),
       ),
+    );
+  }
+
+  void _showRotationDialog(BuildContext ctx, AppProvider prov) {
+    final month = _targetMonth;
+    final (billing, free) = prov.bimonthlyRotation(month);
+    showDialog(
+      context: ctx,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('🔄 تدوير شهر وشهر — ${_monthLabel(month)}',
+            style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 15)),
+        content: (billing.isEmpty && free.isEmpty)
+            ? Text('مفيش خطوط على نظام «شهر وشهر».',
+                style: GoogleFonts.cairo(fontSize: 13))
+            : SizedBox(
+                width: double.maxFinite,
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text('عرض فقط — مايغيّرش أي مبلغ.',
+                      style: GoogleFonts.cairo(
+                          fontSize: 11, color: AppColors.muted)),
+                  const SizedBox(height: 10),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(children: [
+                        _rotSection('🧾 دورهم فاتورة الشهر ده', billing,
+                            AppColors.redLight, AppColors.red2),
+                        const SizedBox(height: 8),
+                        _rotSection('🆓 فاضي ببلاش الشهر ده', free,
+                            AppColors.greenLight, const Color(0xFF00695c)),
+                      ]),
+                    ),
+                  ),
+                ]),
+              ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('تمام', style: GoogleFonts.cairo())),
+        ],
+      ),
+    );
+  }
+
+  Widget _rotSection(String title, List<Group> groups, Color bg, Color fg) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('$title (${groups.length})',
+            style: GoogleFonts.cairo(
+                fontSize: 12, fontWeight: FontWeight.w900, color: fg)),
+        if (groups.isNotEmpty) const SizedBox(height: 4),
+        for (final g in groups)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 1),
+            child: Text(
+                '• ${g.phone}${g.ownerName != null && g.ownerName!.isNotEmpty ? " — ${g.ownerName}" : ""}',
+                style: GoogleFonts.cairo(fontSize: 11, color: AppColors.text)),
+          ),
+      ]),
     );
   }
 

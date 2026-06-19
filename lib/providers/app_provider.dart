@@ -2627,6 +2627,25 @@ class AppProvider extends ChangeNotifier {
     }).toList();
   }
 
+  /// معاينة تدوير «شهر وشهر» لشهر معيّن (قراءة فقط — مايغيّرش أي مبلغ).
+  /// بيرجّع: [خطوط دورها فاتورة الشهر ده], [خطوط فاضية ببلاش الشهر ده].
+  (List<Group>, List<Group>) bimonthlyRotation(String month) {
+    final p = month.split('-');
+    final prevDt = DateTime(int.parse(p[0]), int.parse(p[1]) - 1);
+    final prevM = '${prevDt.year}-${prevDt.month.toString().padLeft(2, '0')}';
+    final billing = <Group>[];
+    final free = <Group>[];
+    for (final g in db.groups) {
+      if (g.billingSystem != 'bimonthly') continue;
+      if (g.parentGroupId != null && g.parentGroupId!.isNotEmpty) continue;
+      final hadPrev = db.companyBills.any(
+          (b) => b.groupId == g.id && b.month == prevM && b.actualAmount > 0);
+      // لو نزلت الشهر اللي فات → الشهر ده فاضي؛ والعكس → دوره فاتورة
+      (hadPrev ? free : billing).add(g);
+    }
+    return (billing, free);
+  }
+
   /// توليد فواتير تقديرية لكل الخطوط المؤهَّلة دفعة واحدة. بيرجّع عدد اللي اتعمل.
   int generateMonthlyBills(String month) {
     final eligible = _eligibleForMonthlyBill(month);
