@@ -208,6 +208,8 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
                 ]),
               ]),
             ),
+            // ── توقّع «شهر وشهر»: الخط ده الشهر الجاي فاضي ولا عليه فاتورة ──
+            if (g.billingSystem == 'bimonthly') _bimonthlyForecast(db, g),
             Expanded(
               child: bills.isEmpty
                   ? Center(
@@ -223,6 +225,37 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
           ]),
         ),
       ),
+    );
+  }
+
+  // توقّع الشهر الجاي لخط «شهر وشهر» (قراءة فقط — مايغيّرش أي مبلغ)
+  Widget _bimonthlyForecast(AppDB db, Group g) {
+    final now = DateTime.now();
+    final curMonth =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    final nextDt = DateTime(now.year, now.month + 1);
+    final nextMonth =
+        '${nextDt.year}-${nextDt.month.toString().padLeft(2, '0')}';
+    final billedThisMonth = db.companyBills.any(
+        (b) => b.groupId == g.id && b.month == curMonth && b.actualAmount > 0);
+    // شهر وشهر: لو نزلت الشهر ده → الجاي فاضي، والعكس
+    final nextFree = billedThisMonth;
+    final bg = nextFree ? AppColors.greenLight : const Color(0xFFFFF3E0);
+    final fg = nextFree ? const Color(0xFF00695c) : const Color(0xFFE65100);
+    final label = nextFree
+        ? '🔄 شهر وشهر: الشهر ده عليه فاتورة → الشهر الجاي ($nextMonth) المفروض فاضي ببلاش'
+        : '🔄 شهر وشهر: الشهر ده فاضي → الشهر الجاي ($nextMonth) هيتقلب وعليه فاتورة';
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: fg.withValues(alpha: 0.5)),
+      ),
+      child: Text(label,
+          style: GoogleFonts.cairo(
+              fontSize: 11, fontWeight: FontWeight.w800, color: fg)),
     );
   }
 
