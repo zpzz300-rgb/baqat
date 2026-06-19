@@ -616,6 +616,32 @@ class _AddGroupModalState extends State<AddGroupModal> {
                     ),
                   ),
                 ]),
+                // ── عنوان ديناميكي بإعدادات الشركة المختارة ──
+                if (_provider != null) ...[
+                  const SizedBox(height: 14),
+                  Container(
+                    width: double.infinity,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: _providerColors[_provider]!.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: _providerColors[_provider]!
+                              .withValues(alpha: 0.5)),
+                    ),
+                    child: Row(children: [
+                      Text(_providerEmojis[_provider]!,
+                          style: const TextStyle(fontSize: 14)),
+                      const SizedBox(width: 6),
+                      Text('إعدادات ${_providerNames[_provider]} الخاصة',
+                          style: GoogleFonts.cairo(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                              color: _providerColors[_provider])),
+                    ]),
+                  ),
+                ],
                 // Etisalat conditional
                 if (_provider == 'etisalat') ...[
                   const SizedBox(height: 14),
@@ -697,6 +723,15 @@ class _AddGroupModalState extends State<AddGroupModal> {
                       ),
                     ),
                   ]),
+                ],
+                // Orange conditional
+                if (_provider == 'orange') ...[
+                  const SizedBox(height: 10),
+                  Text('🟠 سعر النقطة في أورانج بيختلف — اضبطه فوق في خانة «سعر النقطة».',
+                      style: GoogleFonts.cairo(
+                          fontSize: 11,
+                          color: const Color(0xFFE65100),
+                          fontWeight: FontWeight.w700)),
                 ],
                 const SizedBox(height: 14),
                 // Contract photo
