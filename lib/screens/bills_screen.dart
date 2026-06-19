@@ -7,6 +7,7 @@ import '../providers/app_provider.dart';
 import '../models/models.dart';
 import '../services/app_theme.dart';
 import '../utils/print_helper.dart';
+import '../services/export_service.dart';
 import '../widgets/common.dart';
 
 class BillsScreen extends StatefulWidget {
@@ -106,6 +107,11 @@ class _BillsScreenState extends State<BillsScreen> {
                       fontWeight: FontWeight.w900)),
             ),
             const Spacer(),
+            IconButton(
+              onPressed: () => ExportService.exportInvoicesExcel(context, prov),
+              icon: const Icon(Icons.table_view_outlined, color: Colors.white, size: 22),
+              tooltip: 'تصدير Excel',
+            ),
             IconButton(
               onPressed: () => _printBills(context, bills, db),
               icon: const Icon(Icons.print_outlined, color: Colors.white, size: 22),

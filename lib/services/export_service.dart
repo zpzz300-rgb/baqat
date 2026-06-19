@@ -65,6 +65,77 @@ class ExportService {
     await OpenFile.open(file.path);
   }
 
+  // ── Invoices-only Excel export ──────────────────────────────────
+  static Future<void> exportInvoicesExcel(
+      BuildContext context, AppProvider prov) async {
+    final excel = Excel.createExcel();
+    excel.delete('Sheet1');
+    _buildInvoicesSheet(excel, prov);
+
+    final bytes = excel.save();
+    if (bytes == null) {
+      _snack(context, 'فشل إنشاء الملف');
+      return;
+    }
+    final dir = await getApplicationDocumentsDirectory();
+    final ts = intl.DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
+    final file = File('${dir.path}/telecom_invoices_$ts.xlsx');
+    await file.writeAsBytes(bytes);
+    await Share.shareXFiles([XFile(file.path)], text: '🧾 فواتير الخطوط');
+  }
+
+  static void _buildInvoicesSheet(Excel excel, AppProvider prov) {
+    final sheet = excel['الفواتير'];
+    const headers = [
+      'الرقم',
+      'صاحب الخط',
+      'المزود',
+      'الشهر',
+      'الثابت/المتوقع',
+      'الفعلي',
+      'الزيادة',
+      'المدفوع',
+      'المتبقي',
+      'الحالة',
+      'مؤجَّل لـ',
+      'تاريخ الإضافة',
+      'آخر دفعة',
+      'ملاحظة',
+    ];
+    sheet.appendRow(headers.map((h) => TextCellValue(h)).toList());
+
+    const statusLabels = {
+      'paid': 'مسدد',
+      'partial': 'جزئي',
+      'unpaid': 'غير مسدد'
+    };
+    final bills = [...prov.db.companyBills]
+      ..sort((a, b) => b.month.compareTo(a.month));
+    for (final b in bills) {
+      final g = prov.db.groups.cast<Group?>().firstWhere(
+            (x) => x?.id == b.groupId,
+            orElse: () => null,
+          );
+      final lastPay = b.payments.isNotEmpty ? b.payments.last.date : '-';
+      sheet.appendRow(<CellValue>[
+        TextCellValue(g?.phone ?? b.groupId),
+        TextCellValue(g?.ownerName ?? '-'),
+        TextCellValue(g?.provider ?? '-'),
+        TextCellValue(b.month),
+        DoubleCellValue(b.fixedAmount),
+        DoubleCellValue(b.actualAmount),
+        DoubleCellValue(b.actualAmount - b.fixedAmount),
+        DoubleCellValue(b.paidAmount),
+        DoubleCellValue(b.remaining),
+        TextCellValue(statusLabels[b.status] ?? b.status),
+        TextCellValue(b.deferDate ?? '-'),
+        TextCellValue(_fDate(b.date)),
+        TextCellValue(lastPay),
+        TextCellValue(b.note ?? '-'),
+      ]);
+    }
+  }
+
   static void _buildMembersSheet(Excel excel, AppProvider prov,
       {required bool deleted}) {
     final sheetName = deleted ? 'المحذوفون' : 'العملاء النشطون';
