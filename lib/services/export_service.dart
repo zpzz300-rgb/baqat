@@ -179,6 +179,107 @@ class ExportService {
     await OpenFile.open(file.path);
   }
 
+  // ── Profit report Excel export ──────────────────────────────────
+  static Future<void> exportProfitReport(
+      BuildContext context, AppProvider prov) async {
+    final db = prov.db;
+    final excel = Excel.createExcel();
+    excel.delete('Sheet1');
+
+    // ملخص
+    final monthlyIncome = db.members.fold<double>(0, (s, m) => s + m.price);
+    final billing = db.totalBillingProfit;
+    final gift = db.groups.fold<double>(0, (s, g) => s + g.giftProfit);
+    final rental = db.rentals
+        .where((r) => r.status == 'active')
+        .fold<double>(0, (s, r) => s + r.rent);
+    final guest = db.guestUsers.fold<double>(0, (s, g) => s + g.profit);
+    final points = db.groups.fold<double>(0, (s, g) => s + g.pendingPointsProfit);
+    final debt = db.totalDebt;
+    final s1 = excel['ملخص'];
+    s1.appendRow([TextCellValue('البند'), TextCellValue('القيمة (ج)')]);
+    void add(String k, double v) =>
+        s1.appendRow([TextCellValue(k), DoubleCellValue(v)]);
+    add('دخل شهري متوقّع', monthlyIncome);
+    add('ربح الفواتير', billing);
+    add('ربح الهدايا', gift);
+    add('دخل الإيجارات', rental);
+    add('ربح الضيوف', guest);
+    add('نقاط تراكمية', points);
+    add('إجمالي المديونيات', debt);
+    add('صافي الربح النهائي', billing + gift + rental + guest + points);
+
+    // المجموعات
+    final s2 = excel['المجموعات'];
+    s2.appendRow([
+      'الرقم', 'المالك', 'المزود', 'العملاء', 'دخل', 'فاتورة', 'ربح', 'ديون'
+    ].map((h) => TextCellValue(h)).toList());
+    for (final g in db.groups) {
+      final members = db.membersOf(g.id);
+      final income = members.fold<double>(0, (s, m) => s + m.price);
+      final bill = g.fixedBillAmount > 0 ? g.fixedBillAmount : (g.actualBillAmount ?? 0);
+      s2.appendRow(<CellValue>[
+        TextCellValue(g.phone),
+        TextCellValue(g.ownerName ?? '-'),
+        TextCellValue(g.provider ?? '-'),
+        IntCellValue(members.length),
+        DoubleCellValue(income),
+        DoubleCellValue(bill),
+        DoubleCellValue(db.groupProfit(g.id)),
+        DoubleCellValue(db.groupDebt(g.id)),
+      ]);
+    }
+
+    // العملاء
+    final s3 = excel['العملاء'];
+    s3.appendRow(['الاسم', 'الرقم', 'الباقة', 'الاشتراك', 'الرصيد']
+        .map((h) => TextCellValue(h))
+        .toList());
+    for (final m in db.members) {
+      s3.appendRow(<CellValue>[
+        TextCellValue(m.name),
+        TextCellValue(m.phone),
+        TextCellValue(m.package),
+        DoubleCellValue(m.price),
+        DoubleCellValue(m.balance),
+      ]);
+    }
+
+    // لقطات الجرد
+    final snaps = prov.profitSnapshots;
+    if (snaps.isNotEmpty) {
+      final s4 = excel['الجرد الشهري'];
+      s4.appendRow(['الشهر', 'دخل', 'ربح فواتير', 'هدايا', 'إيجارات', 'ضيوف', 'نقاط', 'ديون', 'صافي']
+          .map((h) => TextCellValue(h))
+          .toList());
+      for (final s in snaps) {
+        double g(String k) => (s[k] as num?)?.toDouble() ?? 0;
+        s4.appendRow(<CellValue>[
+          TextCellValue(s['month']?.toString() ?? ''),
+          DoubleCellValue(g('income')),
+          DoubleCellValue(g('billing')),
+          DoubleCellValue(g('gift')),
+          DoubleCellValue(g('rental')),
+          DoubleCellValue(g('guest')),
+          DoubleCellValue(g('points')),
+          DoubleCellValue(g('debt')),
+          DoubleCellValue(g('net')),
+        ]);
+      }
+    }
+
+    final bytes = excel.save();
+    if (bytes == null) {
+      _snack(context, 'فشل إنشاء التقرير');
+      return;
+    }
+    final dir = await getApplicationDocumentsDirectory();
+    final ts = intl.DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
+    final file = File('${dir.path}/telecom_profit_$ts.xlsx');
+    await file.writeAsBytes(bytes);
+    await Share.shareXFiles([XFile(file.path)], text: '💰 تقرير الأرباح');
+  }
+
   // ── Invoices-only Excel export ──────────────────────────────────
   static Future<void> exportInvoicesExcel(
       BuildContext context, AppProvider prov) async {

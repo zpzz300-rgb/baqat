@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/export_service.dart';
 import '../models/models.dart';
 
 class ProfitScreen extends StatefulWidget {
@@ -757,9 +758,54 @@ class _AnalysisTab extends StatelessWidget {
           ),
         ]),
         if (snaps.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          // #8 مقارنة الفترة: الفرق عن آخر لقطة
+          Builder(builder: (_) {
+            final lastNet = (snaps.last['net'] as num).toDouble();
+            final delta = finalNetProfit - lastNet;
+            final up = delta >= 0;
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: (up ? AppColors.greenLight : AppColors.redLight),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(children: [
+                Icon(up ? Icons.trending_up : Icons.trending_down,
+                    size: 18, color: up ? AppColors.green : AppColors.red2),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                      'الفرق عن آخر لقطة (${snaps.last['month']}): '
+                      '${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(0)} ج',
+                      style: GoogleFonts.cairo(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: up ? AppColors.green : AppColors.red2)),
+                ),
+              ]),
+            );
+          }),
           const SizedBox(height: 10),
           _trendChart(snaps),
         ],
+        const SizedBox(height: 12),
+        // #10 تصدير تقرير الأرباح
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Color(0xFF00695c)),
+                padding: const EdgeInsets.symmetric(vertical: 11),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10))),
+            icon: const Icon(Icons.table_view, size: 18, color: Color(0xFF00695c)),
+            label: Text('📊 تصدير تقرير الأرباح Excel',
+                style: GoogleFonts.cairo(
+                    fontWeight: FontWeight.w800, color: const Color(0xFF00695c))),
+            onPressed: () => ExportService.exportProfitReport(context, prov),
+          ),
+        ),
         const SizedBox(height: 16),
         _sectionTitle('💵 جرد الكاش والموقف المالي'),
         _cashReconciliation(db),
