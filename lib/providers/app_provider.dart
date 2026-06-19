@@ -91,6 +91,17 @@ class AppProvider extends ChangeNotifier {
     return ok;
   }
 
+  /// تغطية: نقل كل مجموعات موظف (غايب) لموظف تاني. بيرجّع عدد المنقول.
+  Future<int> transferAssignments(String fromEmpId, String toEmpId) async {
+    final rows = await SupabaseService.fetchAssignments();
+    final gids = rows
+        .where((r) => r['employee_id']?.toString() == fromEmpId)
+        .map((r) => r['group_id'].toString())
+        .toList();
+    if (gids.isEmpty) return 0;
+    return bulkAssign(gids, toEmpId);
+  }
+
   /// توزيع تلقائي بالتساوي (round-robin) لكل المجموعات على الموظفين. بيرجّع العدد.
   Future<int> autoDistribute(List<String> employeeIds) async {
     if (employeeIds.isEmpty) return 0;

@@ -243,13 +243,74 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
         ]),
         if (status == 'active') ...[
           const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: _btn('📡 المجموعات المتابَعة', AppColors.blue2,
-                () => _openAssign(id, name)),
-          ),
+          Row(children: [
+            Expanded(
+              child: _btn('📡 المجموعات المتابَعة', AppColors.blue2,
+                  () => _openAssign(id, name)),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _btn('🔁 تغطية', const Color(0xFF6a1b9a),
+                  () => _coverFor(id, name)),
+            ),
+          ]),
         ],
       ]),
+    );
+  }
+
+  /// تغطية: نقل كل مجموعات الموظف [fromId] لموظف تاني (لو غاب).
+  void _coverFor(String fromId, String fromName) {
+    final others = _employees
+        .where((e) => e['status'] == 'active' && e['id'].toString() != fromId)
+        .toList();
+    if (others.isEmpty) {
+      AppSnackbar.show(context, 'مفيش موظف تاني مفعّل تنقل له');
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(4))),
+          Text('🔁 تغطية مجموعات «$fromName»',
+              style: GoogleFonts.cairo(
+                  fontWeight: FontWeight.w900, fontSize: 15)),
+          const SizedBox(height: 4),
+          Text('هتتنقل كل مجموعاته لموظف تاني (لو غاب). تقدر ترجّعها بعدين.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted)),
+          const SizedBox(height: 14),
+          ...others.map((e) {
+            final toId = e['id'].toString();
+            final toName = (e['name'] ?? '').toString();
+            return ListTile(
+              leading: const Icon(Icons.person, color: Color(0xFF6a1b9a)),
+              title: Text('انقل لـ $toName',
+                  style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+              onTap: () async {
+                Navigator.pop(context);
+                final n = await context
+                    .read<AppProvider>()
+                    .transferAssignments(fromId, toId);
+                if (!mounted) return;
+                AppSnackbar.show(context,
+                    n > 0 ? '✅ تم نقل $n مجموعة لـ $toName' : 'مفيش مجموعات تتنقل');
+              },
+            );
+          }),
+        ]),
+      ),
     );
   }
 
