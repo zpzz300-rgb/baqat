@@ -83,6 +83,10 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
       return _Anomaly.unexpectedBimonthly;
     }
     if (prev == null || prev.actualAmount <= 0) return _Anomaly.none;
+    // فودافون «سعر متغير»: طبيعي يتغيّر شهرياً → مانضربش إنذار مضاعفة/تكرار
+    if (g != null && g.provider == 'vodafone' && g.vodafoneRateType == 'variable') {
+      return _Anomaly.none;
+    }
     // مضاعفة: الفاتورة الحالية أكبر بـ 75% أو أكثر من الشهر الماضي
     if (bill.actualAmount >= prev.actualAmount * 1.75) return _Anomaly.doubled;
     // تكرار: نفس المبلغ شهرين متتاليين (كلاهما فعليتان)
