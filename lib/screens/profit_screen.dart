@@ -19,7 +19,7 @@ class _ProfitScreenState extends State<ProfitScreen>
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 3, vsync: this);
+    _tabs = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -143,10 +143,12 @@ class _ProfitScreenState extends State<ProfitScreen>
             unselectedLabelColor: Colors.white54,
             indicatorColor: Colors.white,
             labelStyle: GoogleFonts.cairo(fontWeight: FontWeight.w700, fontSize: 12),
+            isScrollable: true,
             tabs: const [
               Tab(text: 'المجموعات'),
               Tab(text: 'الأنواع'),
               Tab(text: 'العملاء'),
+              Tab(text: '📊 تحليل وجرد'),
             ],
           ),
         ),
@@ -165,6 +167,18 @@ class _ProfitScreenState extends State<ProfitScreen>
                 totalDebt: totalDebt,
               ),
               _MembersTab(db: db),
+              _AnalysisTab(
+                prov: prov,
+                monthlyIncome: monthlyIncome,
+                billingProfit: billingProfit,
+                giftProfit: giftProfit,
+                rentalIncome: rentalIncome,
+                guestProfit: guestProfit,
+                pointsProfit: pointsProfit,
+                totalDebt: totalDebt,
+                netBalance: netBalance,
+                finalNetProfit: finalNetProfit,
+              ),
             ],
           ),
         ),
@@ -686,5 +700,214 @@ class _MembersTabState extends State<_MembersTab> {
         ),
       ),
     );
+  }
+}
+
+// ── Tab 4: تحليل وجرد ─────────────────────────────────────────────────────────
+class _AnalysisTab extends StatelessWidget {
+  final AppProvider prov;
+  final double monthlyIncome, billingProfit, giftProfit, rentalIncome,
+      guestProfit, pointsProfit, totalDebt, netBalance, finalNetProfit;
+  const _AnalysisTab({
+    required this.prov,
+    required this.monthlyIncome,
+    required this.billingProfit,
+    required this.giftProfit,
+    required this.rentalIncome,
+    required this.guestProfit,
+    required this.pointsProfit,
+    required this.totalDebt,
+    required this.netBalance,
+    required this.finalNetProfit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final db = prov.db;
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        _sectionTitle('🥧 توزيع مصادر الدخل'),
+        _distribution(),
+        const SizedBox(height: 16),
+        _sectionTitle('📈 هامش الربح حسب المزود'),
+        ..._marginByProvider(db),
+        const SizedBox(height: 16),
+        _sectionTitle('🔴 خطوط خاسرة (دخلها أقل من فاتورتها)'),
+        ..._lossLines(db),
+        const SizedBox(height: 16),
+        _sectionTitle('🧾 أعلى ١٠ عملاء مديونية'),
+        ..._topDebtors(db),
+      ],
+    );
+  }
+
+  // ── #5 توزيع مصادر الدخل (شرائط مئوية) ──
+  Widget _distribution() {
+    final items = <(String, double, Color)>[
+      ('📥 اشتراكات', monthlyIncome, AppColors.blue2),
+      ('🎁 هدايا', giftProfit, const Color(0xFF7B1FA2)),
+      ('🏠 إيجارات', rentalIncome, const Color(0xFF00695C)),
+      ('🧳 ضيوف', guestProfit, const Color(0xFFE65100)),
+      ('🪙 نقاط', pointsProfit, const Color(0xFFF9A825)),
+    ].where((e) => e.$2 > 0).toList();
+    final total = items.fold<double>(0, (s, e) => s + e.$2);
+    if (total <= 0) {
+      return Text('لا يوجد دخل لعرضه',
+          style: GoogleFonts.cairo(color: AppColors.muted, fontSize: 12));
+    }
+    return Column(
+      children: items.map((e) {
+        final pct = e.$2 / total;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Text(e.$1,
+                  style: GoogleFonts.cairo(
+                      fontSize: 12, fontWeight: FontWeight.w700)),
+              Text('${e.$2.toStringAsFixed(0)} ج (${(pct * 100).toStringAsFixed(0)}%)',
+                  style: GoogleFonts.cairo(
+                      fontSize: 12, fontWeight: FontWeight.w900, color: e.$3)),
+            ]),
+            const SizedBox(height: 4),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: pct,
+                minHeight: 8,
+                backgroundColor: e.$3.withValues(alpha: 0.12),
+                valueColor: AlwaysStoppedAnimation(e.$3),
+              ),
+            ),
+          ]),
+        );
+      }).toList(),
+    );
+  }
+
+  // ── #2 هامش الربح حسب المزود ──
+  List<Widget> _marginByProvider(AppDB db) {
+    final byProv = <String, ({double income, double bill})>{};
+    for (final g in db.groups) {
+      final p = g.provider ?? 'غير محدد';
+      final income = db.membersOf(g.id).fold<double>(0, (s, m) => s + m.price);
+      final bill = g.fixedBillAmount > 0 ? g.fixedBillAmount : (g.actualBillAmount ?? 0);
+      final cur = byProv[p] ?? (income: 0.0, bill: 0.0);
+      byProv[p] = (income: cur.income + income, bill: cur.bill + bill);
+    }
+    if (byProv.isEmpty) return [_emptyNote()];
+    return byProv.entries.map((e) {
+      final profit = e.value.income - e.value.bill;
+      final margin = e.value.income > 0 ? (profit / e.value.income * 100) : 0;
+      final c = margin >= 0 ? AppColors.green : AppColors.red2;
+      return _rowCard(
+        _provName(e.key),
+        'دخل ${e.value.income.toStringAsFixed(0)} • ربح ${profit.toStringAsFixed(0)} ج',
+        '${margin.toStringAsFixed(0)}%',
+        c,
+      );
+    }).toList();
+  }
+
+  // ── #3 خطوط خاسرة ──
+  List<Widget> _lossLines(AppDB db) {
+    final losers = <(Group, double)>[];
+    for (final g in db.groups) {
+      final bill = g.fixedBillAmount > 0 ? g.fixedBillAmount : (g.actualBillAmount ?? 0);
+      if (bill <= 0) continue;
+      final profit = db.groupProfit(g.id);
+      if (profit < 0) losers.add((g, profit));
+    }
+    losers.sort((a, b) => a.$2.compareTo(b.$2));
+    if (losers.isEmpty) {
+      return [
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+              color: AppColors.greenLight,
+              borderRadius: BorderRadius.circular(10)),
+          child: Text('✅ مفيش خطوط خاسرة — كله بيغطّي فاتورته',
+              style: GoogleFonts.cairo(
+                  fontSize: 12, color: const Color(0xFF00695c),
+                  fontWeight: FontWeight.w700)),
+        )
+      ];
+    }
+    return losers.map((e) {
+      final g = e.$1;
+      return _rowCard(
+        g.ownerName?.isNotEmpty == true ? g.ownerName! : g.phone,
+        g.phone,
+        '${e.$2.toStringAsFixed(0)} ج',
+        AppColors.red2,
+      );
+    }).toList();
+  }
+
+  // ── #6 أعلى المديونيات ──
+  List<Widget> _topDebtors(AppDB db) {
+    final debtors = db.members.where((m) => m.balance < 0).toList()
+      ..sort((a, b) => a.balance.compareTo(b.balance));
+    final top = debtors.take(10).toList();
+    if (top.isEmpty) return [_emptyNote(msg: 'مفيش مديونيات 👍')];
+    return top.map((m) {
+      final g = db.groups.cast<Group?>().firstWhere((x) => x?.id == m.gid,
+          orElse: () => null);
+      return _rowCard(
+        m.name,
+        g != null ? (g.ownerName?.isNotEmpty == true ? g.ownerName! : g.phone) : '-',
+        '${m.balance.toStringAsFixed(0)} ج',
+        AppColors.red2,
+      );
+    }).toList();
+  }
+
+  Widget _rowCard(String title, String sub, String value, Color valueColor) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title,
+                style: GoogleFonts.cairo(
+                    fontSize: 12, fontWeight: FontWeight.w700)),
+            Text(sub,
+                style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),
+          ]),
+        ),
+        Text(value,
+            style: GoogleFonts.cairo(
+                fontSize: 14, fontWeight: FontWeight.w900, color: valueColor)),
+      ]),
+    );
+  }
+
+  Widget _emptyNote({String msg = 'لا توجد بيانات'}) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text(msg, style: GoogleFonts.cairo(color: AppColors.muted, fontSize: 12)),
+      );
+
+  Widget _sectionTitle(String t) => Padding(
+        padding: const EdgeInsets.only(bottom: 8, top: 4),
+        child: Text(t,
+            style: GoogleFonts.cairo(
+                fontSize: 13, fontWeight: FontWeight.w900, color: AppColors.blue2)),
+      );
+
+  String _provName(String p) {
+    switch (p) {
+      case 'vodafone': return '🔴 فودافون';
+      case 'etisalat': return '🟢 اتصالات';
+      case 'orange':   return '🟠 أورانج';
+      case 'we':       return '🟣 WE';
+      default:         return '📡 $p';
+    }
   }
 }
