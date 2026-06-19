@@ -97,6 +97,17 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
                       fontSize: 16,
                       fontWeight: FontWeight.w900)),
             ),
+            GestureDetector(
+              onTap: () => _openSpendChart(context, db),
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                margin: const EdgeInsets.only(left: 6),
+                decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.bar_chart, color: Colors.white, size: 20),
+              ),
+            ),
             _chip('${groupsWithBills.length} خط', Colors.white24),
             const SizedBox(width: 6),
             _chip('متبقي: ${totalDue.toStringAsFixed(0)} ج',
@@ -198,6 +209,103 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
               ),
       ),
     ]);
+  }
+
+  // ── رسم بياني: إجمالي مصروف الشركة (الفعلي) لكل شهر ──────────
+  void _openSpendChart(BuildContext context, AppDB db) {
+    // إجمالي الفعلي لكل شهر
+    final byMonth = <String, double>{};
+    for (final b in db.companyBills) {
+      byMonth[b.month] = (byMonth[b.month] ?? 0) + b.actualAmount;
+    }
+    final months = byMonth.keys.toList()..sort();
+    final maxVal =
+        byMonth.values.isEmpty ? 1.0 : byMonth.values.reduce((a, b) => a > b ? a : b);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.4,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (_, scroll) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+          ),
+          child: Column(children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              decoration: const BoxDecoration(
+                gradient: AppColors.headerGradient,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+              ),
+              child: Row(children: [
+                const Text('📈', style: TextStyle(fontSize: 18)),
+                const SizedBox(width: 8),
+                Text('مصروف الشركات شهرياً',
+                    style: GoogleFonts.cairo(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900)),
+              ]),
+            ),
+            Expanded(
+              child: months.isEmpty
+                  ? Center(
+                      child: Text('لا توجد بيانات',
+                          style: GoogleFonts.cairo(color: AppColors.muted)))
+                  : ListView(
+                      controller: scroll,
+                      padding: const EdgeInsets.all(16),
+                      children: [
+                        for (final m in months.reversed)
+                          _spendBar(m, byMonth[m]!, maxVal),
+                      ],
+                    ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _spendBar(String month, double value, double maxVal) {
+    final ratio = (value / maxVal).clamp(0.05, 1.0);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Text(_fmtMonth(month),
+              style: GoogleFonts.cairo(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.blue2)),
+          Text('${value.toStringAsFixed(0)} ج',
+              style: GoogleFonts.cairo(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                  color: AppColors.text)),
+        ]),
+        const SizedBox(height: 4),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Stack(children: [
+            Container(height: 18, color: const Color(0xFFEFEFEF)),
+            FractionallySizedBox(
+              widthFactor: ratio,
+              child: Container(
+                height: 18,
+                decoration: const BoxDecoration(gradient: AppColors.headerGradient),
+              ),
+            ),
+          ]),
+        ),
+      ]),
+    );
   }
 
   // ── سجل الخط: كل شهر بمربعين (فاتورة الشركة + الزيادة) + ميعاد الدفع ──
