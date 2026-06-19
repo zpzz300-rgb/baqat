@@ -2564,6 +2564,47 @@ class AppProvider extends ChangeNotifier {
     save(); notifyListeners();
   }
 
+  /// كم خط مؤهَّل لتوليد فاتورة تقديرية للشهر [month] (للمعاينة قبل التأكيد).
+  int previewMonthlyBillsCount(String month) =>
+      _eligibleForMonthlyBill(month).length;
+
+  /// الخطوط المؤهَّلة لتوليد فاتورة تقديرية لشهر معيّن:
+  /// لها مبلغ ثابت، مش متسجّلة فاتورة الشهر ده، مش خط فرعي،
+  /// ولو نظامها «شهر وشهر» تتجاهل الشهر اللي قبله نزلت فيه فاتورة (المفروض فاضي).
+  List<Group> _eligibleForMonthlyBill(String month) {
+    final p = month.split('-');
+    final prevDt = DateTime(int.parse(p[0]), int.parse(p[1]) - 1);
+    final prevM = '${prevDt.year}-${prevDt.month.toString().padLeft(2, '0')}';
+    final added = db.companyBills
+        .where((b) => b.month == month)
+        .map((b) => b.groupId)
+        .toSet();
+    return db.groups.where((g) {
+      if (g.fixedBillAmount <= 0) return false;
+      if (added.contains(g.id)) return false;
+      if (g.parentGroupId != null && g.parentGroupId!.isNotEmpty) return false;
+      if (g.billingSystem == 'bimonthly') {
+        final hadPrev = db.companyBills.any(
+            (b) => b.groupId == g.id && b.month == prevM && b.actualAmount > 0);
+        if (hadPrev) return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  /// توليد فواتير تقديرية لكل الخطوط المؤهَّلة دفعة واحدة. بيرجّع عدد اللي اتعمل.
+  int generateMonthlyBills(String month) {
+    final eligible = _eligibleForMonthlyBill(month);
+    if (eligible.isEmpty) return 0;
+    for (final g in eligible) {
+      addEstimatedBill(g.id, forMonth: month);
+    }
+    _addLog(null, 'bill_bulk',
+        'توليد ${eligible.length} فاتورة تقديرية لشهر $month');
+    save(); notifyListeners();
+    return eligible.length;
+  }
+
   /// تأكيد الفاتورة الفعلية — تحويل فاتورة تقديرية إلى فعلية مع تصحيح المبلغ والمديونية
   void confirmActualBill(String billId, double newAmount) {
     final bi = db.companyBills.indexWhere((b) => b.id == billId);

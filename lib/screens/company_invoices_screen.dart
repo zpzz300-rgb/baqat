@@ -267,6 +267,8 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
                   fontWeight: FontWeight.w900),
             ),
           ),
+          _generateBtn(ctx, prov),
+          const SizedBox(width: 6),
           _addBillBtn(ctx, prov, db),
         ]),
         const SizedBox(height: 8),
@@ -337,6 +339,72 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
                   fontSize: 12,
                   fontWeight: FontWeight.w700)),
         ]),
+      ),
+    );
+  }
+
+  Widget _generateBtn(BuildContext ctx, AppProvider prov) {
+    return GestureDetector(
+      onTap: () => _showGenerateDialog(ctx, prov),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.4)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.autorenew, color: Colors.white, size: 16),
+          const SizedBox(width: 4),
+          Text('جهّز',
+              style: GoogleFonts.cairo(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700)),
+        ]),
+      ),
+    );
+  }
+
+  void _showGenerateDialog(BuildContext ctx, AppProvider prov) {
+    final month = _targetMonth;
+    final n = prov.previewMonthlyBillsCount(month);
+    showDialog(
+      context: ctx,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('🔁 توليد فواتير ${_monthLabel(month)}',
+            style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 16)),
+        content: Text(
+          n == 0
+              ? 'مفيش خطوط محتاجة فاتورة للشهر ده — كله متسجّل أو فاضي (شهر وشهر).'
+              : 'هيتعمل $n فاتورة تقديرية (بالمبلغ الثابت) للخطوط اللي لسه ما اتسجّلش لها فاتورة الشهر ده.\n\n'
+                  '• الخطوط الفرعية بتتجمّع مع الرئيسي.\n'
+                  '• خطوط «شهر وشهر» اللي المفروض فاضية بتتخطّى.\n'
+                  '• تقدر تأكّد الفعلي بعدين لكل فاتورة.',
+          style: GoogleFonts.cairo(fontSize: 13, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('إلغاء', style: GoogleFonts.cairo())),
+          if (n > 0)
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.blue2),
+              onPressed: () {
+                final created = prov.generateMonthlyBills(month);
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                  backgroundColor: AppColors.green,
+                  content: Text('تم توليد $created فاتورة ✅',
+                      style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+                ));
+              },
+              child: Text('توليد $n فاتورة',
+                  style: GoogleFonts.cairo(
+                      fontWeight: FontWeight.w700, color: Colors.white)),
+            ),
+        ],
       ),
     );
   }
