@@ -106,9 +106,51 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
                     )
                   else
                     ..._employees.map(_employeeTile),
+                  if (_employees.where((e) => e['status'] == 'active').isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    GestureDetector(
+                      onTap: _openDistribute,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                              colors: [Color(0xFF6a1b9a), Color(0xFF8e24aa)]),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.shuffle, color: Colors.white, size: 18),
+                            const SizedBox(width: 8),
+                            Text('🗂 توزيع الشغل على الموظفين',
+                                style: GoogleFonts.cairo(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 14)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
+    );
+  }
+
+  void _openDistribute() {
+    final active = _employees
+        .where((e) => e['status'] == 'active')
+        .map((e) => {'id': e['id'].toString(), 'name': (e['name'] ?? '').toString()})
+        .toList();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => ChangeNotifierProvider.value(
+        value: context.read<AppProvider>(),
+        child: _DistributeSheet(employees: active),
+      ),
     );
   }
 
@@ -407,4 +449,226 @@ class _AssignSheetState extends State<_AssignSheet> {
       ),
     );
   }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// شيت توزيع الشغل: تلقائي بالتساوي (#4) + بالشركة (#5) + جماعي Checkbox (#6)
+// ─────────────────────────────────────────────────────────────────
+class _DistributeSheet extends StatefulWidget {
+  final List<Map<String, String>> employees; // [{id, name}]
+  const _DistributeSheet({required this.employees});
+  @override
+  State<_DistributeSheet> createState() => _DistributeSheetState();
+}
+
+class _DistributeSheetState extends State<_DistributeSheet> {
+  final Set<String> _selectedGroups = {};
+  String? _targetEmployee;
+  bool _busy = false;
+
+  static const _provNames = {
+    'vodafone': 'فودافون',
+    'etisalat': 'اتصالات',
+    'orange': 'أورانج',
+    'we': 'WE',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.employees.isNotEmpty) _targetEmployee = widget.employees.first['id'];
+  }
+
+  Future<void> _autoDistribute() async {
+    setState(() => _busy = true);
+    final ids = widget.employees.map((e) => e['id']!).toList();
+    final n = await context.read<AppProvider>().autoDistribute(ids);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    Navigator.pop(context);
+    AppSnackbar.show(context, '✅ تم توزيع $n مجموعة بالتساوي على ${ids.length} موظف');
+  }
+
+  Future<void> _assignByProvider(String provider) async {
+    if (_targetEmployee == null) return;
+    setState(() => _busy = true);
+    final prov = context.read<AppProvider>();
+    final gids = prov.db.groups
+        .where((g) => g.provider == provider)
+        .map((g) => g.id)
+        .toList();
+    final n = await prov.bulkAssign(gids, _targetEmployee!);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    Navigator.pop(context);
+    AppSnackbar.show(context, '✅ تم إسناد $n خط ${_provNames[provider]} للموظف');
+  }
+
+  Future<void> _assignSelected() async {
+    if (_targetEmployee == null || _selectedGroups.isEmpty) return;
+    setState(() => _busy = true);
+    final n = await context
+        .read<AppProvider>()
+        .bulkAssign(_selectedGroups.toList(), _targetEmployee!);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    Navigator.pop(context);
+    AppSnackbar.show(context, '✅ تم إسناد $n مجموعة للموظف');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final prov = context.watch<AppProvider>();
+    final groups = prov.db.groups;
+    String empName(String id) => widget.employees.firstWhere(
+        (e) => e['id'] == id,
+        orElse: () => {'name': '—'})['name']!;
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: DraggableScrollableSheet(
+        initialChildSize: 0.85,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (_, scroll) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+          ),
+          child: Column(children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                    colors: [Color(0xFF6a1b9a), Color(0xFF8e24aa)]),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.shuffle, color: Colors.white),
+                const SizedBox(width: 8),
+                Text('توزيع الشغل على الموظفين',
+                    style: GoogleFonts.cairo(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 15)),
+              ]),
+            ),
+            Expanded(
+              child: _busy
+                  ? const Center(child: CircularProgressIndicator())
+                  : ListView(
+                      controller: scroll,
+                      padding: const EdgeInsets.all(14),
+                      children: [
+                        // #4 توزيع تلقائي
+                        _sectionTitle('⚖️ توزيع تلقائي بالتساوي'),
+                        Text(
+                            'يقسّم ${groups.length} مجموعة على ${widget.employees.length} موظف بالتساوي (بالترتيب).',
+                            style: GoogleFonts.cairo(
+                                fontSize: 12, color: AppColors.muted)),
+                        const SizedBox(height: 8),
+                        ElevatedButton.icon(
+                          onPressed: _autoDistribute,
+                          icon: const Icon(Icons.auto_awesome, size: 18),
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF6a1b9a)),
+                          label: Text('وزّع بالتساوي',
+                              style: GoogleFonts.cairo(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800)),
+                        ),
+                        const Divider(height: 28),
+                        // اختيار الموظف الهدف (لـ #5 و #6)
+                        _sectionTitle('👤 الموظف المستهدف'),
+                        Wrap(spacing: 6, runSpacing: 6, children: [
+                          for (final e in widget.employees)
+                            ChoiceChip(
+                              label: Text(e['name']!,
+                                  style: GoogleFonts.cairo(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: _targetEmployee == e['id']
+                                          ? Colors.white
+                                          : AppColors.text)),
+                              selected: _targetEmployee == e['id'],
+                              selectedColor: const Color(0xFF6a1b9a),
+                              onSelected: (_) =>
+                                  setState(() => _targetEmployee = e['id']),
+                            ),
+                        ]),
+                        const SizedBox(height: 8),
+                        // #5 توزيع بالشركة
+                        _sectionTitle('🏢 إسناد كل خطوط شركة للموظف'),
+                        Wrap(spacing: 6, runSpacing: 6, children: [
+                          for (final p in _provNames.entries)
+                            ActionChip(
+                              label: Text(
+                                  '${p.value} (${groups.where((g) => g.provider == p.key).length})',
+                                  style: GoogleFonts.cairo(
+                                      fontSize: 12, fontWeight: FontWeight.w700)),
+                              onPressed: _targetEmployee == null
+                                  ? null
+                                  : () => _assignByProvider(p.key),
+                            ),
+                        ]),
+                        const Divider(height: 28),
+                        // #6 جماعي Checkbox
+                        _sectionTitle(
+                            '☑️ اختيار يدوي (${_selectedGroups.length} مختارة)'),
+                        ...groups.map((g) {
+                          final assignee = prov.assigneeOf(g.id);
+                          return CheckboxListTile(
+                            dense: true,
+                            value: _selectedGroups.contains(g.id),
+                            onChanged: (v) => setState(() {
+                              if (v == true) {
+                                _selectedGroups.add(g.id);
+                              } else {
+                                _selectedGroups.remove(g.id);
+                              }
+                            }),
+                            title: Text(g.phone,
+                                style: GoogleFonts.cairo(
+                                    fontSize: 13, fontWeight: FontWeight.w700)),
+                            subtitle: assignee != null
+                                ? Text('مع: $assignee',
+                                    style: GoogleFonts.cairo(
+                                        fontSize: 10,
+                                        color: const Color(0xFF6a1b9a)))
+                                : null,
+                          );
+                        }),
+                      ],
+                    ),
+            ),
+            if (!_busy && _selectedGroups.isNotEmpty)
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: ElevatedButton(
+                    onPressed: _assignSelected,
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF6a1b9a),
+                        minimumSize: const Size.fromHeight(46)),
+                    child: Text(
+                        'إسناد ${_selectedGroups.length} مجموعة لـ ${empName(_targetEmployee ?? '')}',
+                        style: GoogleFonts.cairo(
+                            color: Colors.white, fontWeight: FontWeight.w900)),
+                  ),
+                ),
+              ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionTitle(String t) => Padding(
+        padding: const EdgeInsets.only(bottom: 6, top: 4),
+        child: Text(t,
+            style: GoogleFonts.cairo(
+                fontWeight: FontWeight.w900,
+                fontSize: 13,
+                color: const Color(0xFF6a1b9a))),
+      );
 }

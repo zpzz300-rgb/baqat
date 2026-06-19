@@ -81,6 +81,29 @@ class AppProvider extends ChangeNotifier {
     } catch (_) {/* تجاهل — مؤشر تجميلي */}
   }
 
+  /// إسناد مجموعات كتير لموظف واحد دفعة (للتوزيع الجماعي/بالشركة). بيرجّع عدد اللي نجح.
+  Future<int> bulkAssign(List<String> gids, String employeeId) async {
+    var ok = 0;
+    for (final g in gids) {
+      if (await SupabaseService.setAssignment(g, employeeId)) ok++;
+    }
+    await loadAssignmentsOverview();
+    return ok;
+  }
+
+  /// توزيع تلقائي بالتساوي (round-robin) لكل المجموعات على الموظفين. بيرجّع العدد.
+  Future<int> autoDistribute(List<String> employeeIds) async {
+    if (employeeIds.isEmpty) return 0;
+    var i = 0, ok = 0;
+    for (final g in db.groups) {
+      final eid = employeeIds[i % employeeIds.length];
+      if (await SupabaseService.setAssignment(g.id, eid)) ok++;
+      i++;
+    }
+    await loadAssignmentsOverview();
+    return ok;
+  }
+
   /// تحميل تعيينات الموظف الحالي من السيرفر (المجموعات الموكلة له).
   Future<void> loadMyAssignments() async {
     if (!SupabaseService.isEmployee) {
