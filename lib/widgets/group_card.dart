@@ -1718,10 +1718,15 @@ class _GroupCardState extends State<GroupCard> {
         );
         break;
       case 'delete':
+        final childCount = prov.db.groups
+            .where((x) => x.parentGroupId == widget.group.id)
+            .length;
         showDialog(
           context: ctx,
           builder: (_) => PinDialog(
-            title: 'حذف المجموعة ${widget.group.phone}',
+            title: childCount > 0
+                ? 'حذف ${widget.group.phone} (هيتفك $childCount خط تابع)'
+                : 'حذف المجموعة ${widget.group.phone}',
             onConfirm: () {
               prov.deleteGroup(widget.group.id);
             },

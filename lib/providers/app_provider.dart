@@ -826,12 +826,21 @@ class AppProvider extends ChangeNotifier {
   void deleteGroup(String gid) {
     final g = db.groups.firstWhere((x) => x.id == gid,
         orElse: () => Group(id: gid, phone: '—'));
+    // فك أي خطوط تابعة لهذا الخط (لو كان خط أب) عشان مايفضلش رابط بايظ
+    var unlinked = 0;
+    for (final child in db.groups) {
+      if (child.parentGroupId == gid) {
+        child.parentGroupId = null;
+        unlinked++;
+      }
+    }
     db.groups.removeWhere((g) => g.id == gid);
     // archive members
     final mems = db.members.where((m) => m.gid == gid).toList();
     db.deleted.addAll(mems);
     db.members.removeWhere((m) => m.gid == gid);
-    _addLog(null, 'delete', 'حذف المجموعة ${g.phone} (${mems.length} عميل)',
+    final extra = unlinked > 0 ? ' + فك $unlinked خط تابع' : '';
+    _addLog(null, 'delete', 'حذف المجموعة ${g.phone} (${mems.length} عميل)$extra',
         targetId: gid, targetType: 'group');
     save();
   }
