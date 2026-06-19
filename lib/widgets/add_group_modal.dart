@@ -112,6 +112,20 @@ class _AddGroupModalState extends State<AddGroupModal> {
     'orange': 'cycle1',
     'we': 'day4',
   };
+  // شرايح الجيجا الشائعة لكل شركة (للملء السريع)
+  static const _gbTiers = {
+    'etisalat': ['130', '200'],
+    'vodafone': ['130', '200'],
+    'orange': ['100', '150'],
+    'we': ['200', '500'],
+  };
+  // شرايح الدقايق الشائعة لكل شركة
+  static const _minTiers = {
+    'etisalat': ['10000', '12000'],
+    'vodafone': ['6000', '10000'],
+    'orange': ['10000'],
+    'we': ['0'],
+  };
 
   @override
   void initState() {
@@ -683,6 +697,18 @@ class _AddGroupModalState extends State<AddGroupModal> {
                     ),
                   ),
                 ]),
+                // ── شرايح سريعة للدقايق/الجيجا حسب الشركة ──
+                if (_provider != null) ...[
+                  const SizedBox(height: 8),
+                  Wrap(spacing: 6, runSpacing: 6, children: [
+                    for (final m in (_minTiers[_provider] ?? const []))
+                      _quickTier('🎙 $m', () =>
+                          setState(() => _totalMinutesCtrl.text = m)),
+                    for (final gb in (_gbTiers[_provider] ?? const []))
+                      _quickTier('📡 $gb جيجا', () =>
+                          setState(() => _mainLineGbCtrl.text = gb)),
+                  ]),
+                ],
                 // ── عنوان ديناميكي بإعدادات الشركة المختارة ──
                 if (_provider != null) ...[
                   const SizedBox(height: 14),
@@ -873,6 +899,24 @@ class _AddGroupModalState extends State<AddGroupModal> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _quickTier(String label, VoidCallback onTap) {
+    final c = _provider != null ? _providerColors[_provider]! : AppColors.blue2;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: c.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: c.withValues(alpha: 0.4)),
+        ),
+        child: Text(label,
+            style: GoogleFonts.cairo(
+                fontSize: 11, fontWeight: FontWeight.w800, color: c)),
       ),
     );
   }
