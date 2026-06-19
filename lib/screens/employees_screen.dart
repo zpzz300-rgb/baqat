@@ -131,6 +131,31 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
                         ),
                       ),
                     ),
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: _openPerformance,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                              colors: [Color(0xFF00695c), Color(0xFF00897b)]),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.leaderboard,
+                                color: Colors.white, size: 18),
+                            const SizedBox(width: 8),
+                            Text('📊 أداء الموظفين ومتابعتهم',
+                                style: GoogleFonts.cairo(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 14)),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -150,6 +175,22 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
       builder: (_) => ChangeNotifierProvider.value(
         value: context.read<AppProvider>(),
         child: _DistributeSheet(employees: active),
+      ),
+    );
+  }
+
+  void _openPerformance() {
+    final active = _employees
+        .where((e) => e['status'] == 'active')
+        .map((e) => (e['name'] ?? '').toString())
+        .toList();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => ChangeNotifierProvider.value(
+        value: context.read<AppProvider>(),
+        child: _PerformanceSheet(employeeNames: active),
       ),
     );
   }
@@ -731,5 +772,190 @@ class _DistributeSheetState extends State<_DistributeSheet> {
                 fontWeight: FontWeight.w900,
                 fontSize: 13,
                 color: const Color(0xFF6a1b9a))),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// شيت أداء الموظفين (#8 متابعة لكل موظف + #10 مقارنة)
+// ─────────────────────────────────────────────────────────────────
+class _PerformanceSheet extends StatefulWidget {
+  final List<String> employeeNames;
+  const _PerformanceSheet({required this.employeeNames});
+  @override
+  State<_PerformanceSheet> createState() => _PerformanceSheetState();
+}
+
+class _PerformanceSheetState extends State<_PerformanceSheet> {
+  bool _loading = true;
+  List<Map<String, dynamic>> _logs = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final logs = await SupabaseService.fetchAuditLogs(limit: 1000);
+    if (!mounted) return;
+    setState(() {
+      _logs = logs;
+      _loading = false;
+    });
+  }
+
+  bool _isToday(dynamic ts) {
+    final d = DateTime.tryParse((ts ?? '').toString())?.toLocal();
+    if (d == null) return false;
+    final n = DateTime.now();
+    return d.year == n.year && d.month == n.month && d.day == n.day;
+  }
+
+  bool _isPay(String type) =>
+      type.contains('pay') || type.contains('سداد') || type.contains('bill_pay');
+
+  @override
+  Widget build(BuildContext context) {
+    final prov = context.watch<AppProvider>();
+    // عدد المجموعات لكل موظف (من خريطة المسؤول)
+    final groupsByEmp = <String, int>{};
+    for (final name in prov.assigneeOfValues) {
+      groupsByEmp[name] = (groupsByEmp[name] ?? 0) + 1;
+    }
+    // تجميع الحركات لكل موظف من user_type ("موظف: الاسم")
+    final stats = <String, Map<String, dynamic>>{};
+    for (final name in widget.employeeNames) {
+      stats[name] = {'total': 0, 'today': 0, 'payToday': 0, 'last': null};
+    }
+    for (final e in _logs) {
+      final by = (e['user_type'] ?? '').toString();
+      String? who;
+      for (final name in widget.employeeNames) {
+        if (by.contains(name)) { who = name; break; }
+      }
+      if (who == null) continue;
+      final s = stats[who]!;
+      s['total'] = (s['total'] as int) + 1;
+      final ts = e['client_ts'] ?? e['created_at'];
+      final type = (e['action_type'] ?? '').toString();
+      if (_isToday(ts)) {
+        s['today'] = (s['today'] as int) + 1;
+        if (_isPay(type)) s['payToday'] = (s['payToday'] as int) + 1;
+      }
+      final dt = DateTime.tryParse((ts ?? '').toString());
+      if (dt != null) {
+        final cur = s['last'] as DateTime?;
+        if (cur == null || dt.isAfter(cur)) s['last'] = dt;
+      }
+    }
+    // ترتيب حسب نشاط النهارده (#10 مقارنة)
+    final sorted = [...widget.employeeNames]
+      ..sort((a, b) =>
+          (stats[b]!['today'] as int).compareTo(stats[a]!['today'] as int));
+
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: DraggableScrollableSheet(
+        initialChildSize: 0.8,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (_, scroll) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+          ),
+          child: Column(children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                    colors: [Color(0xFF00695c), Color(0xFF00897b)]),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.leaderboard, color: Colors.white),
+                const SizedBox(width: 8),
+                Text('أداء الموظفين النهارده',
+                    style: GoogleFonts.cairo(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 15)),
+              ]),
+            ),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : ListView(
+                      controller: scroll,
+                      padding: const EdgeInsets.all(14),
+                      children: [
+                        if (widget.employeeNames.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Text('مفيش موظفين مفعّلين',
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.cairo(color: AppColors.muted)),
+                          ),
+                        for (var i = 0; i < sorted.length; i++)
+                          _empCard(i, sorted[i], stats[sorted[i]]!,
+                              groupsByEmp[sorted[i]] ?? 0),
+                      ],
+                    ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _empCard(int rank, String name, Map<String, dynamic> s, int groups) {
+    final last = s['last'] as DateTime?;
+    final lastStr = last == null
+        ? 'مفيش نشاط'
+        : '${last.toLocal().hour.toString().padLeft(2, '0')}:${last.toLocal().minute.toString().padLeft(2, '0')} — ${last.toLocal().day}/${last.toLocal().month}';
+    final medal = rank == 0 ? '🥇' : rank == 1 ? '🥈' : rank == 2 ? '🥉' : '•';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Text('$medal ', style: const TextStyle(fontSize: 16)),
+          Expanded(
+            child: Text(name,
+                style: GoogleFonts.cairo(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 14,
+                    color: const Color(0xFF00695c))),
+          ),
+          Text('آخر نشاط: $lastStr',
+              style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
+          _stat('📡 مجموعاته', '$groups'),
+          _stat('⚡ النهارده', '${s['today']}'),
+          _stat('💳 تحصيلات', '${s['payToday']}'),
+          _stat('Σ الكل', '${s['total']}'),
+        ]),
+      ]),
+    );
+  }
+
+  Widget _stat(String label, String value) => Expanded(
+        child: Column(children: [
+          Text(value,
+              style: GoogleFonts.cairo(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                  color: AppColors.blue2)),
+          Text(label,
+              style: GoogleFonts.cairo(fontSize: 9, color: AppColors.muted)),
+        ]),
       );
 }

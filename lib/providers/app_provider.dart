@@ -58,6 +58,7 @@ class AppProvider extends ChangeNotifier {
   /// خريطة (group_id → اسم الموظف المسؤول) — للمالك، لعرض مؤشر المسؤول.
   Map<String, String> _groupAssignee = {};
   String? assigneeOf(String gid) => _groupAssignee[gid];
+  Iterable<String> get assigneeOfValues => _groupAssignee.values;
 
   /// تحميل نظرة عامة على التعيينات (للمالك): مين مسؤول عن كل مجموعة.
   Future<void> loadAssignmentsOverview() async {
