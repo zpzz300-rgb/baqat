@@ -105,6 +105,13 @@ class _AddGroupModalState extends State<AddGroupModal> {
     'cycle1': 'سيكل 1 — يتجدد يوم 1',
     'cycle2': 'سيكل 2 — يتجدد يوم 15',
   };
+  // دورة الفوترة الافتراضية لكل شركة (قابلة للتعديل بعد الاختيار)
+  static const _defaultCycle = {
+    'etisalat': 'cycle1',
+    'vodafone': 'cycle2',
+    'orange': 'cycle1',
+    'we': 'day4',
+  };
 
   @override
   void initState() {
@@ -448,7 +455,11 @@ class _AddGroupModalState extends State<AddGroupModal> {
             final c = _providerColors[e.key]!;
             return Expanded(
               child: GestureDetector(
-                onTap: () => setState(() => _provider = e.key),
+                onTap: () => setState(() {
+                  _provider = e.key;
+                  // دورة فوترة افتراضية حسب الشركة (لو لسه ما اتحددتش)
+                  _billingCycle ??= _defaultCycle[e.key];
+                }),
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 3),
                   padding: const EdgeInsets.symmetric(vertical: 10),
