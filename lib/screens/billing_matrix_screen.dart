@@ -179,6 +179,7 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
                       Row(children: [
                         _headerCell('الخط', _nameW),
                         for (final m in months) _headerCell(_fmtMonth(m), _cellW),
+                        _headerCell('الإجمالي', _cellW),
                       ]),
                       // صفوف الخطوط
                       for (final g in groupsWithBills)
@@ -188,6 +189,7 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
                             _nameCell(g),
                             for (final m in months)
                               _dataCell(billIndex['${g.id}|$m']),
+                            _totalCell(g, remOf, db),
                           ]),
                         ),
                     ],
@@ -427,6 +429,35 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
       child: Text(text,
           style: GoogleFonts.cairo(
               fontSize: 12, fontWeight: FontWeight.w800, color: fg)),
+    );
+  }
+
+  // عمود الإجمالي: متبقي الخط عبر كل الشهور؛ وللأب = إجمالي الحساب (هو + توابعه)
+  Widget _totalCell(Group g, double Function(Group) remOf, AppDB db) {
+    final children = db.groups.where((x) => x.parentGroupId == g.id).toList();
+    var total = remOf(g);
+    for (final c in children) {
+      total += remOf(c);
+    }
+    final isAccount = children.isNotEmpty;
+    final due = total > 0.5;
+    return Container(
+      width: _cellW,
+      height: 44,
+      margin: const EdgeInsets.all(1),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: due ? const Color(0xFFFCE4EC) : const Color(0xFFE8F5E9),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+            color: due ? const Color(0xFFE57373) : const Color(0xFFA5D6A7)),
+      ),
+      child: Text(
+          '${isAccount ? "🔗 " : ""}${total.toStringAsFixed(0)}',
+          style: GoogleFonts.cairo(
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+              color: due ? AppColors.red2 : const Color(0xFF00695c))),
     );
   }
 
