@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../services/app_theme.dart';
 import 'bills_screen.dart';
 import 'company_invoices_screen.dart';
+import 'billing_matrix_screen.dart';
 
 class UnifiedBillingScreen extends StatefulWidget {
   const UnifiedBillingScreen({super.key});
@@ -34,6 +35,8 @@ class _UnifiedBillingScreenState extends State<UnifiedBillingScreen> {
                 _modeBtn(0, '📋', 'ليستة'),
                 const SizedBox(width: 8),
                 _modeBtn(1, '🧾', 'مراجعة'),
+                const SizedBox(width: 8),
+                _modeBtn(2, '📊', 'جدول'),
               ]),
             ),
           ),
@@ -45,6 +48,7 @@ class _UnifiedBillingScreenState extends State<UnifiedBillingScreen> {
             children: const [
               BillsScreen(),
               CompanyInvoicesScreen(),
+              BillingMatrixScreen(),
             ],
           ),
         ),
