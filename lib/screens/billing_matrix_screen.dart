@@ -17,6 +17,17 @@ class BillingMatrixScreen extends StatefulWidget {
 
 class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
   String _search = '';
+  String _provFilter = 'all'; // all | vodafone | etisalat | orange | we
+  bool _onlyDebt = false;     // اللي عليه فلوس بس
+  bool _sortByDebt = false;   // ترتيب بالأعلى مديونية
+
+  static const _provLabels = {
+    'all': 'الكل',
+    'vodafone': '🔴 فودافون',
+    'etisalat': '🟢 اتصالات',
+    'orange': '🟠 أورانج',
+    'we': '🟣 وي',
+  };
 
   static const double _nameW = 130; // عرض عمود الخط
   static const double _cellW = 84;  // عرض خانة الشهر
@@ -29,16 +40,31 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
     // كل الشهور اللي فيها فواتير، مرتبة تصاعدي
     final months = db.companyBills.map((b) => b.month).toSet().toList()..sort();
 
-    // الخطوط اللي عليها أي فاتورة + فلتر البحث
+    // متبقي كل خط (عبر كل الشهور) — للفلترة والترتيب
+    double remOf(Group g) => db.companyBills
+        .where((b) => b.groupId == g.id)
+        .fold(0.0, (s, b) => s + b.remaining);
+
+    // الخطوط اللي عليها أي فاتورة + الفلاتر
     final groupsWithBills = db.groups.where((g) {
       final hasBill = db.companyBills.any((b) => b.groupId == g.id);
       if (!hasBill) return false;
-      if (_search.isEmpty) return true;
-      final q = _search.toLowerCase();
-      return g.phone.contains(q) ||
-          (g.ownerName ?? '').toLowerCase().contains(q);
-    }).toList()
-      ..sort((a, b) => a.phone.compareTo(b.phone));
+      if (_provFilter != 'all' && g.provider != _provFilter) return false;
+      if (_onlyDebt && remOf(g) <= 0) return false;
+      if (_search.isNotEmpty) {
+        final q = _search.toLowerCase();
+        if (!g.phone.contains(q) &&
+            !(g.ownerName ?? '').toLowerCase().contains(q)) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
+    if (_sortByDebt) {
+      groupsWithBills.sort((a, b) => remOf(b).compareTo(remOf(a)));
+    } else {
+      groupsWithBills.sort((a, b) => a.phone.compareTo(b.phone));
+    }
 
     // فهرسة سريعة للفواتير: gid|month -> bill
     final billIndex = <String, CompanyBill>{};
@@ -113,6 +139,25 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
           _legend(const Color(0xFFF5F5F5), AppColors.muted, 'مفيش فاتورة'),
         ]),
       ),
+      // ── Filters ─────────────────────────────────────────────────
+      SizedBox(
+        height: 36,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          children: [
+            for (final e in _provLabels.entries)
+              _filterChip(e.value, _provFilter == e.key,
+                  () => setState(() => _provFilter = e.key)),
+            Container(width: 1, height: 20, margin: const EdgeInsets.symmetric(horizontal: 6), color: AppColors.border),
+            _filterChip('💰 عليه فلوس', _onlyDebt,
+                () => setState(() => _onlyDebt = !_onlyDebt)),
+            _filterChip('⬇️ الأعلى مديونية', _sortByDebt,
+                () => setState(() => _sortByDebt = !_sortByDebt)),
+          ],
+        ),
+      ),
+      const SizedBox(height: 4),
       // ── Matrix ──────────────────────────────────────────────────
       Expanded(
         child: (months.isEmpty || groupsWithBills.isEmpty)
@@ -436,6 +481,27 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
         child: Text(text,
             style: GoogleFonts.cairo(
                 color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+      );
+
+  Widget _filterChip(String label, bool sel, VoidCallback onTap) =>
+      GestureDetector(
+        onTap: onTap,
+        child: Container(
+          margin: const EdgeInsets.only(right: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: sel ? AppColors.blue2 : Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+                color: sel ? AppColors.blue2 : AppColors.border, width: 1.5),
+          ),
+          child: Text(label,
+              style: GoogleFonts.cairo(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: sel ? Colors.white : AppColors.text)),
+        ),
       );
 
   Widget _legend(Color bg, Color fg, String label) => Row(
