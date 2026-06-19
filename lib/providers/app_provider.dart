@@ -840,7 +840,8 @@ class AppProvider extends ChangeNotifier {
             id: newId(),
             phone: gp,
             type: 'manual',
-            provider: prov.isNotEmpty ? prov : null,
+            // الافتراضي اتصالات (كل الشغل اتصالات إلا لو حُدِّد غيرها)
+            provider: prov.isNotEmpty ? prov : 'etisalat',
           );
           db.groups.add(g);
           db.gid++;

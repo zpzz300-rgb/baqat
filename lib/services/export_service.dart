@@ -66,10 +66,10 @@ class ExportService {
       TextCellValue('محمد أحمد (مثال — امسح الصف)'),
       TextCellValue('01000000000'),
       TextCellValue('01111111111'),
-      TextCellValue('فليكس 200'),
+      TextCellValue('20 جيجا'),
       const DoubleCellValue(250),
       const DoubleCellValue(0),
-      TextCellValue('vodafone'),
+      TextCellValue('etisalat'),
       TextCellValue('عميل تجريبي'),
     ]);
 
@@ -81,22 +81,25 @@ class ExportService {
       '• «رقم الخط/المجموعة» = الخط الرئيسي اللي العميل تحته؛ لو رقم جديد البرنامج هيعمل المجموعة تلقائياً.',
       '• «مبلغ الباقة» = اشتراك العميل الشهري بالجنيه.',
       '• «مديونية قديمة» = اللي على العميل من قبل (موجب) — هتتسجّل كمديونية.',
-      '• «الشركة» = vodafone / etisalat / orange / we (اختياري).',
+      '• «الشركة» لو سبتها فاضية بتتحسب «اتصالات» تلقائياً (etisalat).',
+      '   غيّرها بس لو الخط مش اتصالات: vodafone / orange / we.',
       '• امسح صف المثال قبل الاستيراد.',
-      '• الباقات المتاحة عندك مكتوبة في شيت «الباقات».',
+      '• الباقات المتاحة مكتوبة في شيت «الباقات».',
     ];
     for (final l in lines) {
       help.appendRow([TextCellValue(l)]);
     }
 
     // شيت الباقات (مرجع — تقدر تربط Data Validation عليه)
+    // الافتراضي باقات اتصالات بالجيجا، + أي باقات موجودة عندك
     final pkgSheet = excel['الباقات'];
     pkgSheet.appendRow([TextCellValue('الباقات المتاحة')]);
-    final packages = <String>{
+    const defaultPkgs = ['10 جيجا', '20 جيجا', '30 جيجا', '40 جيجا'];
+    final existing = <String>{
       for (final m in prov.db.members)
         if (m.package.trim().isNotEmpty) m.package.trim()
-    }.toList()
-      ..sort();
+    };
+    final packages = <String>{...defaultPkgs, ...existing}.toList();
     for (final p in packages) {
       pkgSheet.appendRow([TextCellValue(p)]);
     }
