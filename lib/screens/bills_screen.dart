@@ -2,10 +2,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../providers/app_provider.dart';
 import '../models/models.dart';
 import '../services/app_theme.dart';
 import '../utils/print_helper.dart';
+import '../widgets/common.dart';
 
 class BillsScreen extends StatefulWidget {
   const BillsScreen({super.key});
@@ -633,6 +635,20 @@ class _BillCardState extends State<_BillCard> {
               ),
               const SizedBox(width: 8),
               GestureDetector(
+                onTap: () => _sendWhatsApp(context, g, b),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                      color: const Color(0xFFE8F5E9),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFF25D366))),
+                  child: const Icon(Icons.send,
+                      size: 16, color: Color(0xFF128C7E)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
                 onTap: () => _showDeferDialog(context),
                 child: Container(
                   padding:
@@ -934,6 +950,33 @@ class _BillCardState extends State<_BillCard> {
         ),
       ),
     );
+  }
+
+  Future<void> _sendWhatsApp(
+      BuildContext context, Group g, CompanyBill b) async {
+    final raw = g.phone.replaceAll(RegExp(r'[^0-9]'), '');
+    if (raw.isEmpty) {
+      AppSnackbar.show(context, 'مفيش رقم للخط', background: AppColors.red);
+      return;
+    }
+    final phone = raw.replaceFirst(RegExp(r'^0'), '20');
+    final name = (g.ownerName != null && g.ownerName!.isNotEmpty)
+        ? g.ownerName!
+        : 'حضرتك';
+    final msg = StringBuffer()
+      ..writeln('مرحباً $name 👋')
+      ..writeln('فاتورة خط ${g.phone} عن شهر ${b.month}:')
+      ..writeln('• الإجمالي: ${b.actualAmount.toStringAsFixed(0)} ج')
+      ..writeln('• المدفوع: ${b.paidAmount.toStringAsFixed(0)} ج')
+      ..writeln('• المتبقي: ${b.remaining.toStringAsFixed(0)} ج');
+    if (b.isDeferred) msg.writeln('• مؤجَّل لـ: ${b.deferDate}');
+    final url = Uri.parse(
+        'https://wa.me/$phone?text=${Uri.encodeComponent(msg.toString())}');
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } else if (context.mounted) {
+      AppSnackbar.show(context, 'مش قادر يفتح واتساب', background: AppColors.red);
+    }
   }
 
   void _confirmPayAccount(BuildContext context, Group g, double accRem) {
