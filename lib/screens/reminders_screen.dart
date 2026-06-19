@@ -546,6 +546,26 @@ class _ScheduleTab extends StatelessWidget {
       }
     }
 
+    // ── فواتير مؤجَّلة (ميعاد سماح من الشركة) ──────────────────
+    for (final b in prov.db.companyBills) {
+      if (!b.isDeferred) continue;
+      final d = _pd(b.deferDate!);
+      if (d == null || !d.isBefore(limit)) continue;
+      final g = prov.db.groups.firstWhere((x) => x.id == b.groupId,
+          orElse: () => Group(id: '', phone: b.groupId));
+      final overdue = d.isBefore(DateTime(now.year, now.month, now.day));
+      events.add(_UpcomingEvent(
+        type: 'defer',
+        date: d,
+        icon: overdue ? '🔴' : '⏸',
+        title: '${overdue ? "فات ميعاد سماح" : "سماح مؤجَّل"} ${g.phone}',
+        subtitle:
+            'فاتورة ${b.month} — متبقي: ${b.remaining.toStringAsFixed(0)} ج'
+            '${b.deferNote != null ? " • ${b.deferNote}" : ""}',
+        color: overdue ? AppColors.red : AppColors.orange,
+      ));
+    }
+
     events.sort((a, b) => a.date.compareTo(b.date));
     return events;
   }
@@ -627,11 +647,13 @@ class _EventRow extends StatelessWidget {
               color: urgentColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(8)),
           child: Text(
-            diff == 0
-                ? 'اليوم'
-                : diff == 1
-                    ? 'غداً'
-                    : 'بعد $diff يوم',
+            diff < 0
+                ? 'متأخر ${-diff} يوم'
+                : diff == 0
+                    ? 'اليوم'
+                    : diff == 1
+                        ? 'غداً'
+                        : 'بعد $diff يوم',
             style: GoogleFonts.cairo(
                 fontSize: 11, fontWeight: FontWeight.w700, color: urgentColor),
           ),
