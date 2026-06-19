@@ -2514,6 +2514,41 @@ class AppProvider extends ChangeNotifier {
     save(); notifyListeners();
   }
 
+  /// إجمالي المتبقي على حساب (الخط الأب + توابعه) عبر كل الشهور.
+  double accountRemaining(String gid) {
+    final ids = <String>{gid};
+    for (final c in db.groups) {
+      if (c.parentGroupId == gid) ids.add(c.id);
+    }
+    return db.companyBills
+        .where((b) => ids.contains(b.groupId))
+        .fold(0.0, (s, b) => s + b.remaining);
+  }
+
+  /// سداد كل فواتير الحساب (الأب + توابعه) المتبقية دفعة واحدة.
+  /// بيرجّع [إجمالي اللي اتدفع, عدد الفواتير].
+  (double, int) payAccountBills(String gid, {String? note}) {
+    final ids = <String>{gid};
+    for (final c in db.groups) {
+      if (c.parentGroupId == gid) ids.add(c.id);
+    }
+    final unpaid = db.companyBills
+        .where((b) => ids.contains(b.groupId) && !b.isPaid)
+        .toList();
+    if (unpaid.isEmpty) return (0.0, 0);
+    var total = 0.0;
+    for (final b in unpaid) {
+      final rem = b.remaining;
+      if (rem <= 0) continue;
+      total += rem;
+      payCompanyBill(b.id, rem, note: note ?? 'سداد جماعي للحساب');
+    }
+    _addLog(null, 'bill_pay',
+        'سداد جماعي لحساب: ${total.toStringAsFixed(0)} ج (${unpaid.length} فاتورة)',
+        targetId: gid, targetType: 'group');
+    return (total, unpaid.length);
+  }
+
   /// حذف فاتورة وعكس تأثيرها على المديونية
   void deleteCompanyBill(String billId) {
     final bi = db.companyBills.indexWhere((b) => b.id == billId);

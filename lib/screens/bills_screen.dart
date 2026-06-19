@@ -561,6 +561,34 @@ class _BillCardState extends State<_BillCard> {
             ]),
           ),
         ),
+        // ── سداد جماعي للحساب (لو الخط أب وعليه متبقي أكتر من الفاتورة دي) ──
+        Builder(builder: (_) {
+          final hasChildren =
+              db.groups.any((x) => x.parentGroupId == g.id);
+          if (!hasChildren) return const SizedBox.shrink();
+          final accRem = widget.prov.accountRemaining(g.id);
+          if (accRem <= b.remaining + 0.5) return const SizedBox.shrink();
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+            child: GestureDetector(
+              onTap: () => _confirmPayAccount(context, g, accRem),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                decoration: BoxDecoration(
+                    color: AppColors.blue2,
+                    borderRadius: BorderRadius.circular(10)),
+                child: Text(
+                    '🏦 سدّد الحساب كله — ${accRem.toStringAsFixed(0)} ج',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.cairo(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white)),
+              ),
+            ),
+          );
+        }),
         // ── Action buttons ─────────────────────────────────────────
         if (!b.isPaid)
           Padding(
@@ -904,6 +932,42 @@ class _BillCardState extends State<_BillCard> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _confirmPayAccount(BuildContext context, Group g, double accRem) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('🏦 سداد الحساب كله',
+            style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 16)),
+        content: Text(
+            'هيتسدّد كل المتبقي على حساب ${g.phone} (الخط + توابعه) عبر كل الشهور: '
+            '${accRem.toStringAsFixed(0)} ج. تمام؟',
+            style: GoogleFonts.cairo(height: 1.5)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('إلغاء', style: GoogleFonts.cairo())),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.green),
+            onPressed: () {
+              final (total, count) = widget.prov.payAccountBills(g.id);
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                backgroundColor: AppColors.green,
+                content: Text(
+                    'تم سداد ${total.toStringAsFixed(0)} ج على $count فاتورة ✅',
+                    style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+              ));
+            },
+            child: Text('سدّد الكل',
+                style: GoogleFonts.cairo(
+                    fontWeight: FontWeight.w700, color: Colors.white)),
+          ),
+        ],
       ),
     );
   }
