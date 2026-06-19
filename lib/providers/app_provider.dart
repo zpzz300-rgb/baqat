@@ -722,6 +722,27 @@ class AppProvider extends ChangeNotifier {
     save(); notifyListeners();
   }
 
+  /// تسجيل اتصال اليوم لكل الأرقام المحتاجة اتصال/المتأخرة دفعة واحدة. بيرجّع العدد.
+  int recordAllPendingWorkNumContacts() {
+    final today =
+        () { final n = DateTime.now(); return '${n.year}-${n.month.toString().padLeft(2, '0')}-${n.day.toString().padLeft(2, '0')}'; }();
+    var n = 0;
+    for (final w in db.workNums) {
+      final rem = worknumDaysUntilDeactivation(w);
+      final pending = worknumNeedsReminder(w) || (rem != null && rem <= 0);
+      if (pending) {
+        w.lastContactDate = today;
+        n++;
+      }
+    }
+    if (n > 0) {
+      _addLog(null, 'service', 'تسجيل اتصال جماعي على $n رقم عمل');
+      save();
+      notifyListeners();
+    }
+    return n;
+  }
+
   // ── Notification setters ────────────────────────────────────────
   void setNotifDailyDebt(bool v, {String? time}) {
     _notifDailyDebt = v;

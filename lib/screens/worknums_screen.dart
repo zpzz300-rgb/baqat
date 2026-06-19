@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
 import '../models/models.dart';
@@ -21,6 +23,7 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
   String _providerFilter = 'all'; // all/etisalat/orange/vodafone/we
   String _statusFilter = 'all';   // all/available/reserved/needsRenewal/damaged
   String _urgencyFilter = 'all';  // all/needsContact/overdue
+  String _sort = 'urgent';        // urgent/lastContact/alpha
 
   static const _statusLabel = {
     'available': '✅ متاح',
@@ -61,11 +64,21 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
       return true;
     }).toList();
 
-    // sort: overdue first, then needs-contact, then by daysSinceContact desc
+    // sort حسب الاختيار
     filtered.sort((a, b) {
-      final ra = prov.worknumDaysUntilDeactivation(a) ?? 9999;
-      final rb = prov.worknumDaysUntilDeactivation(b) ?? 9999;
-      return ra.compareTo(rb);
+      switch (_sort) {
+        case 'lastContact':
+          // الأقدم اتصالاً الأول (محتاج متابعة)
+          return (b.daysSinceContact ?? 99999)
+              .compareTo(a.daysSinceContact ?? 99999);
+        case 'alpha':
+          return a.phone.compareTo(b.phone);
+        case 'urgent':
+        default:
+          final ra = prov.worknumDaysUntilDeactivation(a) ?? 9999;
+          final rb = prov.worknumDaysUntilDeactivation(b) ?? 9999;
+          return ra.compareTo(rb);
+      }
     });
 
     // ── Stats ──
@@ -127,6 +140,77 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
                 border: Border.all(color: const Color(0xFF90CAF9)),
               ),
               child: const Icon(Icons.tune, size: 18, color: AppColors.blue2),
+            ),
+          ),
+        ]),
+      ),
+
+      // ── Action row: تسجيل جماعي + مشاركة + فرز ──
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+        child: Row(children: [
+          if (needsContact + overdue > 0)
+            Expanded(
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.green2,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10))),
+                icon: const Icon(Icons.done_all, size: 16),
+                label: Text('سجّل اتصال للكل (${needsContact + overdue})',
+                    style: GoogleFonts.cairo(
+                        fontSize: 11, fontWeight: FontWeight.w800)),
+                onPressed: () => _confirmBulkContact(prov, needsContact + overdue),
+              ),
+            ),
+          if (needsContact + overdue > 0) const SizedBox(width: 6),
+          GestureDetector(
+            onTap: () => _sharePendingList(prov),
+            child: Container(
+              padding: const EdgeInsets.all(9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F5E9),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF66BB6A)),
+              ),
+              child: const Icon(Icons.share, size: 18, color: Color(0xFF2E7D32)),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              color: AppColors.blueLight,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.blueMid),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _sort,
+                isDense: true,
+                icon: const Icon(Icons.sort, size: 16, color: AppColors.blue2),
+                style: GoogleFonts.cairo(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.blue2),
+                items: [
+                  DropdownMenuItem(
+                      value: 'urgent',
+                      child: Text('الأقرب تقفيل',
+                          style: GoogleFonts.cairo(fontSize: 11))),
+                  DropdownMenuItem(
+                      value: 'lastContact',
+                      child: Text('الأقدم اتصالاً',
+                          style: GoogleFonts.cairo(fontSize: 11))),
+                  DropdownMenuItem(
+                      value: 'alpha',
+                      child: Text('بالرقم',
+                          style: GoogleFonts.cairo(fontSize: 11))),
+                ],
+                onChanged: (v) => setState(() => _sort = v ?? 'urgent'),
+              ),
             ),
           ),
         ]),
@@ -254,12 +338,24 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
             // Row: phone + badges
             Row(children: [
               Expanded(
-                child: Text(w.phone,
-                    textDirection: TextDirection.ltr,
-                    style: GoogleFonts.cairo(
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.blue2,
-                        fontSize: 17)),
+                child: InkWell(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: w.phone));
+                    AppSnackbar.show(context, '✅ تم نسخ الرقم ${w.phone}');
+                  },
+                  child: Row(children: [
+                    Flexible(
+                      child: Text(w.phone,
+                          textDirection: TextDirection.ltr,
+                          style: GoogleFonts.cairo(
+                              fontWeight: FontWeight.w900,
+                              color: AppColors.blue2,
+                              fontSize: 17)),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.copy, size: 13, color: AppColors.muted),
+                  ]),
+                ),
               ),
               _badge(statusTxt, statusColor.withValues(alpha: 0.12), statusColor),
             ]),
@@ -327,14 +423,30 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                  icon: const Icon(Icons.phone, size: 16),
-                  label: Text('سجّل اتصال اليوم',
+                  icon: const Icon(Icons.call, size: 16),
+                  label: Text('اتصل وسجّل',
                       style: GoogleFonts.cairo(fontSize: 11, fontWeight: FontWeight.w700)),
-                  onPressed: () {
-                    Provider.of<AppProvider>(context, listen: false).recordWorkNumContact(w.id);
-                    AppSnackbar.show(context, '✅ تم تسجيل الاتصال');
-                  },
+                  onPressed: () => _callAndRecord(context, w),
                 ),
+              ),
+              const SizedBox(width: 6),
+              // تسجيل اتصال بدون مكالمة (لو اتصلت من تليفون تاني)
+              OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.green2),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8))),
+                onPressed: () {
+                  Provider.of<AppProvider>(context, listen: false)
+                      .recordWorkNumContact(w.id);
+                  AppSnackbar.show(context, '✅ تم تسجيل الاتصال');
+                },
+                child: Text('✔ سجّل',
+                    style: GoogleFonts.cairo(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.green2)),
               ),
               const SizedBox(width: 6),
               IconButton(
@@ -512,6 +624,76 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
             style: GoogleFonts.cairo(
                 fontSize: 10, fontWeight: FontWeight.w700, color: color)),
       );
+
+  // ── اتصال مباشر + تسجيل الاتصال في نفس الوقت ──
+  Future<void> _callAndRecord(BuildContext context, WorkNum w) async {
+    final prov = context.read<AppProvider>();
+    prov.recordWorkNumContact(w.id);
+    final uri = Uri.parse('tel:${w.phone}');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else if (context.mounted) {
+      AppSnackbar.show(context, '✅ اتسجّل الاتصال (الاتصال مش متاح من الجهاز)');
+    }
+  }
+
+  // ── تسجيل اتصال جماعي لكل المحتاج/المتأخر ──
+  void _confirmBulkContact(AppProvider prov, int count) {
+    showDialog(
+      context: context,
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('✅ تسجيل اتصال جماعي',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 15)),
+          content: Text(
+              'هيتسجّل اتصال النهارده لـ $count رقم (المحتاج اتصال + المتأخر). '
+              'استخدمها بعد ما تتصل بيهم فعلاً. تمام؟',
+              style: GoogleFonts.cairo(height: 1.5)),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('إلغاء', style: GoogleFonts.cairo())),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.green2),
+              onPressed: () {
+                final n = prov.recordAllPendingWorkNumContacts();
+                Navigator.pop(context);
+                AppSnackbar.show(context, '✅ تم تسجيل اتصال لـ $n رقم');
+              },
+              child: Text('سجّل الكل',
+                  style: GoogleFonts.cairo(
+                      fontWeight: FontWeight.w700, color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── مشاركة قائمة المحتاج اتصال (نص للمراجعة/واتساب) ──
+  void _sharePendingList(AppProvider prov) {
+    final pending = prov.db.workNums.where((w) {
+      final r = prov.worknumDaysUntilDeactivation(w);
+      return prov.worknumNeedsReminder(w) || (r != null && r <= 0);
+    }).toList()
+      ..sort((a, b) => (prov.worknumDaysUntilDeactivation(a) ?? 9999)
+          .compareTo(prov.worknumDaysUntilDeactivation(b) ?? 9999));
+    if (pending.isEmpty) {
+      AppSnackbar.show(context, 'مفيش أرقام محتاجة اتصال 👍');
+      return;
+    }
+    final sb = StringBuffer('📋 أرقام عمل محتاجة اتصال (${pending.length}):\n');
+    for (final w in pending) {
+      final r = prov.worknumDaysUntilDeactivation(w);
+      final tag = (r != null && r <= 0)
+          ? '🔴 متأخر ${-r} يوم'
+          : '⚠️ باقي ${r ?? '?'} يوم';
+      sb.writeln('• ${w.phone}${w.label.isNotEmpty ? ' (${w.label})' : ''} — $tag');
+    }
+    Share.share(sb.toString());
+  }
 
   // ── Reminder settings dialog ──
   void _showReminderSettings(AppProvider prov) {
