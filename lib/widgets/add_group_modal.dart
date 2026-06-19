@@ -756,6 +756,34 @@ class _AddGroupModalState extends State<AddGroupModal> {
                         style: GoogleFonts.cairo(
                             fontSize: 10, color: AppColors.muted)),
                   ],
+                  const SizedBox(height: 12),
+                  Text('🌐 نوع خط WE',
+                      style: GoogleFonts.cairo(
+                          fontSize: 12,
+                          color: AppColors.muted,
+                          fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 6),
+                  Row(children: [
+                    Expanded(
+                      child: _GroupTierBtn(
+                        label: '📡 هوم 4G',
+                        value: 'home4g',
+                        selected: _lineType.key,
+                        onTap: (v) => setState(
+                            () => _lineType = LineTypeX.fromString(v)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _GroupTierBtn(
+                        label: '🌐 ADSL/فايبر',
+                        value: 'adsl',
+                        selected: _lineType.key,
+                        onTap: (v) => setState(
+                            () => _lineType = LineTypeX.fromString(v)),
+                      ),
+                    ),
+                  ]),
                 ],
                 // Vodafone conditional
                 if (_provider == 'vodafone') ...[
