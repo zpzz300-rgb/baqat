@@ -761,6 +761,9 @@ class _AnalysisTab extends StatelessWidget {
           _trendChart(snaps),
         ],
         const SizedBox(height: 16),
+        _sectionTitle('💵 جرد الكاش والموقف المالي'),
+        _cashReconciliation(db),
+        const SizedBox(height: 16),
         _sectionTitle('🥧 توزيع مصادر الدخل'),
         _distribution(),
         const SizedBox(height: 16),
@@ -773,6 +776,83 @@ class _AnalysisTab extends StatelessWidget {
         _sectionTitle('🧾 أعلى ١٠ عملاء مديونية'),
         ..._topDebtors(db),
       ],
+    );
+  }
+
+  // ── #1 متوقّع/موقف + #9 جرد الكاش (عرض شفّاف — مايغيّرش أي حساب) ──
+  Widget _cashReconciliation(AppDB db) {
+    final prepaid = db.members
+        .where((m) => m.balance > 0)
+        .fold<double>(0, (s, m) => s + m.balance);
+    final debts = db.members
+        .where((m) => m.balance < 0)
+        .fold<double>(0, (s, m) => s + (-m.balance));
+    final companyOwed =
+        db.companyBills.fold<double>(0, (s, b) => s + b.remaining);
+    final cashPosition = prepaid - companyOwed;
+
+    Widget line(String label, double v, Color c, {String? hint}) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          child: Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(label,
+                    style: GoogleFonts.cairo(
+                        fontSize: 12, fontWeight: FontWeight.w700)),
+                if (hint != null)
+                  Text(hint,
+                      style: GoogleFonts.cairo(fontSize: 9, color: AppColors.muted)),
+              ]),
+            ),
+            Text('${v.toStringAsFixed(0)} ج',
+                style: GoogleFonts.cairo(
+                    fontSize: 14, fontWeight: FontWeight.w900, color: c)),
+          ]),
+        );
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(children: [
+        line('📥 متوقّع شهري (لو الكل دفع)', monthlyIncome, AppColors.blue2,
+            hint: 'مجموع اشتراكات العملاء'),
+        const Divider(height: 14),
+        line('🟢 مدفوع مقدّم (فلوس معاك)', prepaid, AppColors.green,
+            hint: 'أرصدة العملاء الموجبة'),
+        line('🔴 ديون على العملاء (ليك برّه)', debts, AppColors.red2,
+            hint: 'فلوس لسه ما اتحصّلتش'),
+        line('🔴 متبقّي عليك للشركات', companyOwed, AppColors.red2,
+            hint: 'فواتير الخطوط غير المسددة'),
+        const Divider(height: 14),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          decoration: BoxDecoration(
+            color: (cashPosition >= 0 ? AppColors.greenLight : AppColors.redLight),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('💼 المفروض في الخزنة (تقديري)',
+                  style: GoogleFonts.cairo(
+                      fontSize: 13, fontWeight: FontWeight.w900)),
+              Text('المدفوع مقدّم − المتبقّي للشركات',
+                  style: GoogleFonts.cairo(fontSize: 9, color: AppColors.muted)),
+            ]),
+            Text('${cashPosition.toStringAsFixed(0)} ج',
+                style: GoogleFonts.cairo(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    color: cashPosition >= 0 ? AppColors.green : AppColors.red2)),
+          ]),
+        ),
+        const SizedBox(height: 6),
+        Text('قارن الرقم ده بالكاش الفعلي اللي معاك — أي فرق يبقى محتاج مراجعة.',
+            style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),
+      ]),
     );
   }
 
