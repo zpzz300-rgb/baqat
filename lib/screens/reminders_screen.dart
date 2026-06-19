@@ -544,6 +544,46 @@ class _ScheduleTab extends StatelessWidget {
           ));
         }
       }
+      // 🔵 WE — قسيمة الـ5000
+      if (g.provider == 'we' && g.weCouponEnabled && g.weCouponDate != null) {
+        final d = _pd(g.weCouponDate!);
+        if (d != null && d.isBefore(limit)) {
+          events.add(_UpcomingEvent(
+            type: 'we_coupon',
+            date: d,
+            icon: '🎫',
+            title: 'قسيمة WE ${g.phone}',
+            subtitle: 'قسيمة الـ5000 — ${g.weCouponDate}',
+            color: const Color(0xFF5e35b1),
+          ));
+        }
+      }
+      // 🟢 اتصالات — المطالبة بالتأمين المسترد (تاريخ محدد أو بعد 6 شهور من العرض)
+      if (g.provider == 'etisalat' && g.refundableInsurance > 0) {
+        final claimStr = g.insuranceClaimDate ??
+            (g.offerStartDate != null
+                ? () {
+                    final s = _pd(g.offerStartDate!);
+                    return s == null
+                        ? null
+                        : '${DateTime(s.year, s.month + 6, s.day).year}-'
+                            '${DateTime(s.year, s.month + 6, s.day).month.toString().padLeft(2, '0')}-'
+                            '${DateTime(s.year, s.month + 6, s.day).day.toString().padLeft(2, '0')}';
+                  }()
+                : null);
+        final d = claimStr != null ? _pd(claimStr) : null;
+        if (d != null && d.isBefore(limit)) {
+          events.add(_UpcomingEvent(
+            type: 'insurance',
+            date: d,
+            icon: '💰',
+            title: 'مطالبة تأمين ${g.phone}',
+            subtitle:
+                'تأمين مسترد: ${g.refundableInsurance.toStringAsFixed(0)} ج',
+            color: const Color(0xFF43a047),
+          ));
+        }
+      }
     }
 
     // ── فواتير مؤجَّلة (ميعاد سماح من الشركة) ──────────────────
