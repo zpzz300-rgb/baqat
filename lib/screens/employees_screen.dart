@@ -294,7 +294,12 @@ class _AssignSheetState extends State<_AssignSheet> {
     }
     if (!mounted) return;
     setState(() => _busy = false);
-    if (!ok) AppSnackbar.show(context, '⚠️ فشل — تأكد من النت');
+    if (!ok) {
+      AppSnackbar.show(context, '⚠️ فشل — تأكد من النت');
+    } else {
+      // حدّث مؤشر «المسؤول» على كروت المجموعات
+      context.read<AppProvider>().loadAssignmentsOverview();
+    }
   }
 
   @override

@@ -43,6 +43,32 @@ class AppProvider extends ChangeNotifier {
   bool canSeeGroup(String gid) =>
       !SupabaseService.isEmployee || (_assignedGroupIds?.contains(gid) ?? false);
 
+  /// خريطة (group_id → اسم الموظف المسؤول) — للمالك، لعرض مؤشر المسؤول.
+  Map<String, String> _groupAssignee = {};
+  String? assigneeOf(String gid) => _groupAssignee[gid];
+
+  /// تحميل نظرة عامة على التعيينات (للمالك): مين مسؤول عن كل مجموعة.
+  Future<void> loadAssignmentsOverview() async {
+    if (SupabaseService.isEmployee) return;
+    try {
+      final emps = await SupabaseService.fetchEmployees();
+      final nameById = <String, String>{
+        for (final e in emps) e['id'].toString(): (e['name'] ?? '').toString()
+      };
+      final rows = await SupabaseService.fetchAssignments();
+      final map = <String, String>{};
+      for (final r in rows) {
+        final gid = r['group_id']?.toString();
+        final eid = r['employee_id']?.toString();
+        if (gid != null && eid != null && nameById[eid] != null) {
+          map[gid] = nameById[eid]!;
+        }
+      }
+      _groupAssignee = map;
+      notifyListeners();
+    } catch (_) {/* تجاهل — مؤشر تجميلي */}
+  }
+
   /// تحميل تعيينات الموظف الحالي من السيرفر (المجموعات الموكلة له).
   Future<void> loadMyAssignments() async {
     if (!SupabaseService.isEmployee) {
@@ -227,7 +253,11 @@ class AppProvider extends ChangeNotifier {
     _loading = false;
     _initConnectivity();
     _flushAudit(); // حاول ترحّل أي حركات معلّقة من جلسة سابقة
-    if (SupabaseService.isEmployee) loadMyAssignments(); // مجموعات الموظف الموكلة له
+    if (SupabaseService.isEmployee) {
+      loadMyAssignments(); // مجموعات الموظف الموكلة له
+    } else {
+      loadAssignmentsOverview(); // المالك: مين مسؤول عن كل مجموعة
+    }
     _autoMonthlyBilling();
     _addMonthlyPoints();
     _autoGroupNotes();

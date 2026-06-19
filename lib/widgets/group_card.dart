@@ -264,6 +264,10 @@ class _GroupCardState extends State<GroupCard> {
                         _buildOfferEndBadge(group),
                       _buildExpiryBadge(prov),
                       _buildDeferBadge(prov),
+                      if (prov.assigneeOf(group.id) != null)
+                        _badge('👤 ${prov.assigneeOf(group.id)}',
+                            const Color(0xFFEDE7F6), const Color(0xFF4527A0),
+                            const Color(0xFFB39DDB)),
                       if (group.billCredit > 0)
                         _badge('💰 رصيد ${group.billCredit.toStringAsFixed(0)} ج',
                             const Color(0xFFE8F5E9), const Color(0xFF00695c),
