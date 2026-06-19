@@ -67,6 +67,22 @@ class _GroupCardState extends State<GroupCard> {
     }
   }
 
+  // لون مميِّز للشركة (للبوردر والظل) — null للخطوط بدون شركة
+  Color? _providerAccent(String? provider) {
+    switch (provider) {
+      case 'vodafone':
+        return const Color(0xFFe53935);
+      case 'etisalat':
+        return const Color(0xFF43a047);
+      case 'orange':
+        return const Color(0xFFef6c00);
+      case 'we':
+        return const Color(0xFF5e35b1);
+      default:
+        return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final prov = context.watch<AppProvider>();
@@ -112,18 +128,20 @@ class _GroupCardState extends State<GroupCard> {
             ? Colors.white
             : _providerTextColor(group.provider);
 
+    final accent = _providerAccent(group.provider);
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
         color: isSpecialLine ? const Color(0xFFFFFDE7) : Colors.white,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-            color:
-                isSpecialLine ? const Color(0xFFFFC107) : AppColors.border,
+            color: isSpecialLine
+                ? const Color(0xFFFFC107)
+                : (accent?.withValues(alpha: 0.45) ?? AppColors.border),
             width: isSpecialLine ? 2 : 1.5),
         boxShadow: [
           BoxShadow(
-            color: AppColors.blue2.withValues(alpha: 0.10),
+            color: (accent ?? AppColors.blue2).withValues(alpha: 0.12),
             blurRadius: 20,
             offset: const Offset(0, 4),
           ),
