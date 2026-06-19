@@ -80,6 +80,25 @@ class _AddGroupModalState extends State<AddGroupModal> {
     'orange': 'أورنج',
     'we': 'WE',
   };
+  // قوالب جاهزة لكل شركة — قيم ابتدائية قابلة للتعديل بعد الاختيار
+  // المفاتيح: clients, minutes, gb, points, pointPrice, bill, extra
+  static const _presets = <String, List<Map<String, String>>>{
+    'etisalat': [
+      {'name': '4250', 'clients': '7', 'minutes': '12000', 'gb': '200', 'points': '2000', 'pointPrice': '0.04', 'bill': '4250', 'extra': '125'},
+      {'name': '2250', 'clients': '5', 'minutes': '10000', 'gb': '130', 'points': '1000', 'pointPrice': '0.04', 'bill': '2250', 'extra': '125'},
+    ],
+    'vodafone': [
+      {'name': 'كبيرة', 'clients': '5', 'minutes': '10000', 'gb': '200', 'points': '0', 'pointPrice': '0', 'bill': '4000', 'extra': '100'},
+      {'name': 'صغيرة', 'clients': '3', 'minutes': '6000', 'gb': '130', 'points': '0', 'pointPrice': '0', 'bill': '2000', 'extra': '100'},
+    ],
+    'orange': [
+      {'name': 'باقة', 'clients': '5', 'minutes': '10000', 'gb': '150', 'points': '0', 'pointPrice': '0', 'bill': '3000', 'extra': '100'},
+    ],
+    'we': [
+      {'name': 'هوم 4G', 'clients': '1', 'minutes': '0', 'gb': '200', 'points': '0', 'pointPrice': '0', 'bill': '500', 'extra': '0'},
+      {'name': 'ADSL/فايبر', 'clients': '1', 'minutes': '0', 'gb': '0', 'points': '0', 'pointPrice': '0', 'bill': '400', 'extra': '0'},
+    ],
+  };
   static const _cycleLabels = {
     'day4': 'اليوم 4',
     'cycle1': 'سيكل 1 — يتجدد يوم 1',
@@ -450,6 +469,40 @@ class _AddGroupModalState extends State<AddGroupModal> {
               ),
             );
           }).toList()),
+          // ── قوالب جاهزة حسب الشركة ──────────────────────────────
+          if (_provider != null && _presets[_provider] != null) ...[
+            const SizedBox(height: 10),
+            Text('⚡ قالب جاهز (اضغط واعدّل)',
+                style: GoogleFonts.cairo(
+                    fontSize: 11,
+                    color: AppColors.muted,
+                    fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: _presets[_provider]!.map((p) {
+                final c = _providerColors[_provider]!;
+                return GestureDetector(
+                  onTap: () => _applyPreset(p),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: c.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: c.withValues(alpha: 0.5)),
+                    ),
+                    child: Text('${p['name']} • ${p['bill']} ج',
+                        style: GoogleFonts.cairo(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: c)),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
           const SizedBox(height: 14),
 
           // Numbers row
@@ -742,6 +795,19 @@ class _AddGroupModalState extends State<AddGroupModal> {
         ],
       ),
     );
+  }
+
+  void _applyPreset(Map<String, String> p) {
+    setState(() {
+      _maxClientsCtrl.text = p['clients'] ?? _maxClientsCtrl.text;
+      _totalMinutesCtrl.text = p['minutes'] ?? _totalMinutesCtrl.text;
+      _mainLineGbCtrl.text = p['gb'] ?? _mainLineGbCtrl.text;
+      _pointsMonthlyCtrl.text = p['points'] ?? _pointsMonthlyCtrl.text;
+      _pointPriceCtrl.text = p['pointPrice'] ?? _pointPriceCtrl.text;
+      _actualBillCtrl.text = p['bill'] ?? _actualBillCtrl.text;
+      _manualBillCtrl.text = p['bill'] ?? _manualBillCtrl.text;
+      _extraFeeCtrl.text = p['extra'] ?? _extraFeeCtrl.text;
+    });
   }
 
   Future<void> _pickContractPhoto(ImageSource src) async {
