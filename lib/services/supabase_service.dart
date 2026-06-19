@@ -316,9 +316,18 @@ class SupabaseService {
       }
       final err = (data is Map ? data['error'] : null) ?? 'فشل التسجيل';
       return (ok: false, msg: err.toString());
+    } on FunctionException catch (e) {
+      return (ok: false, msg: _fnError(e));
     } catch (_) {
       return (ok: false, msg: 'تعذّر الاتصال بالسيرفر');
     }
+  }
+
+  /// استخراج رسالة الخطأ الحقيقية من رد الدالة (بدل رسالة الاتصال العامة)
+  static String _fnError(FunctionException e) {
+    final d = e.details;
+    if (d is Map && d['error'] != null) return d['error'].toString();
+    return 'تعذّر الاتصال بالسيرفر';
   }
 
   /// دخول موظف — يرجع status: 'active' | 'pending' | 'disabled' | 'error'
@@ -344,15 +353,20 @@ class SupabaseService {
         final session = data['session'];
         final refresh = session is Map ? session['refresh_token']?.toString() : null;
         if (refresh == null) return (status: 'error', msg: 'فشل تجهيز الجلسة');
-        await client.auth.setSession(refresh);
+        // مهم: نظبط سياق الموظف ونحفظه قبل setSession، عشان حدث «تسجيل الدخول»
+        // اللي بيطلقه setSession يلاقي isEmployee=true فيحمّل مجموعات الموظف بس
+        // (مش يعامله كمالك ويوريه كل المجموعات).
         _employeeOwnerId = data['ownerId']?.toString();
         employeeId       = data['employeeId']?.toString();
         employeeName     = data['employeeName']?.toString() ?? name.trim();
         await _persistEmployeeContext();
+        await client.auth.setSession(refresh);
         return (status: 'active', msg: '');
       }
       final err = data['error']?.toString() ?? 'فشل الدخول';
       return (status: 'error', msg: err);
+    } on FunctionException catch (e) {
+      return (status: 'error', msg: _fnError(e));
     } catch (_) {
       return (status: 'error', msg: 'تعذّر الاتصال بالسيرفر');
     }
