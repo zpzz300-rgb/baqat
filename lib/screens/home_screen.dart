@@ -70,7 +70,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // "المزيد" menu items
   final List<Map<String, dynamic>> _moreTabs = [
-    {'icon': '🧾', 'label': 'الفواتير والخطوط', 'key': 'billing', 'tab': 22},
+    {'icon': '🧾', 'label': 'الفواتير', 'key': 'billing', 'tab': 22},
     {'icon': '📝', 'label': 'الملاحظات', 'key': 'notes', 'tab': 18},
     {'icon': '📢', 'label': 'الشكاوى', 'key': 'complaints', 'tab': 21},
     {'icon': '📦', 'label': 'الأرشيف', 'key': 'archive', 'tab': 7},
