@@ -818,12 +818,42 @@ class _AddGroupModalState extends State<AddGroupModal> {
                 ],
                 // Orange conditional
                 if (_provider == 'orange') ...[
-                  const SizedBox(height: 10),
-                  Text('🟠 سعر النقطة في أورانج بيختلف — اضبطه فوق في خانة «سعر النقطة».',
+                  const SizedBox(height: 12),
+                  Text('🟠 نظام نقاط أورانج — قيمة النقطة سريعة',
                       style: GoogleFonts.cairo(
-                          fontSize: 11,
-                          color: const Color(0xFFE65100),
+                          fontSize: 12,
+                          color: AppColors.muted,
                           fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 6),
+                  Wrap(spacing: 6, runSpacing: 6, children: [
+                    for (final v in ['0.04', '0.05', '0.06'])
+                      GestureDetector(
+                        onTap: () => setState(() {
+                          _pointPriceCtrl.text = v;
+                        }),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFef6c00)
+                                .withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                                color: const Color(0xFFef6c00)
+                                    .withValues(alpha: 0.5)),
+                          ),
+                          child: Text('$v ج/نقطة',
+                              style: GoogleFonts.cairo(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: const Color(0xFFE65100))),
+                        ),
+                      ),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text('بيملّى خانة «سعر النقطة» فوق — تقدر تعدّلها.',
+                      style: GoogleFonts.cairo(
+                          fontSize: 10, color: AppColors.muted)),
                 ],
                 const SizedBox(height: 14),
                 // Contract photo
