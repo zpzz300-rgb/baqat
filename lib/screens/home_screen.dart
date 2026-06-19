@@ -53,6 +53,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _searching = false;
   List<Map<String, dynamic>> _searchResults = [];
   bool _headerExpanded = true;
+  bool _empViewAll = false; // الموظف: false=شغلي، true=القائمة العامة
 
   // Main nav tabs (always visible)
   final List<Map<String, dynamic>> _tabs = [
@@ -824,12 +825,51 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
+        // الموظف: تبديل بين «شغلي» و«القائمة العامة»
+        if (SupabaseService.isEmployee && !_searching) _buildEmpViewToggle(prov),
         // Content
         Expanded(
           child:
               _searching ? _buildSearchResults(prov) : _buildGroupsList(prov),
         ),
       ],
+    );
+  }
+
+  Widget _buildEmpViewToggle(AppProvider prov) {
+    final mine = prov.visibleGroups.length;
+    final all = prov.db.groups.length;
+    Widget btn(bool all_, String label, int count) {
+      final sel = _empViewAll == all_;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => setState(() => _empViewAll = all_),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 4),
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: sel ? AppColors.blue2 : Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                  color: sel ? AppColors.blue2 : AppColors.border, width: 1.5),
+            ),
+            child: Text('$label ($count)',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.cairo(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: sel ? Colors.white : AppColors.text)),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+      child: Row(children: [
+        btn(false, '👤 شغلي', mine),
+        btn(true, '🌐 القائمة العامة', all),
+      ]),
     );
   }
 
@@ -909,7 +949,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildGroupsList(AppProvider prov) {
-    final groups = prov.visibleGroups; // الموظف يشوف الموكلة له فقط
+    // الموالك يشوف الكل؛ الموظف: «شغلي» = الموكلة، «القائمة العامة» = الكل
+    final showAll = !SupabaseService.isEmployee || _empViewAll;
+    final groups = showAll ? prov.db.groups : prov.visibleGroups;
     if (groups.isEmpty) {
       final isEmp = SupabaseService.isEmployee;
       return Center(
