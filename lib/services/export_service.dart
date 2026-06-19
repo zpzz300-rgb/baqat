@@ -41,6 +41,117 @@ class ExportService {
     return (now.year - start.year) * 12 + (now.month - start.month);
   }
 
+  // ── أعمدة قالب الاستيراد (ثابتة — يعتمد عليها الاستيراد) ──────────
+  static const importHeaders = [
+    'الاسم',
+    'رقم العميل',
+    'رقم الخط/المجموعة',
+    'الباقة',
+    'مبلغ الباقة',
+    'مديونية قديمة',
+    'الشركة',
+    'ملاحظات',
+  ];
+
+  // ── تصدير قالب فاضي للأونبوردنج (عملاء + مثال + تعليمات + باقات) ──
+  static Future<void> exportTemplateExcel(
+      BuildContext context, AppProvider prov) async {
+    final excel = Excel.createExcel();
+    excel.delete('Sheet1');
+
+    // شيت العملاء: عناوين + صف مثال
+    final sheet = excel['العملاء'];
+    sheet.appendRow(importHeaders.map((h) => TextCellValue(h)).toList());
+    sheet.appendRow(<CellValue>[
+      TextCellValue('محمد أحمد (مثال — امسح الصف)'),
+      TextCellValue('01000000000'),
+      TextCellValue('01111111111'),
+      TextCellValue('فليكس 200'),
+      const DoubleCellValue(250),
+      const DoubleCellValue(0),
+      TextCellValue('vodafone'),
+      TextCellValue('عميل تجريبي'),
+    ]);
+
+    // شيت التعليمات
+    final help = excel['تعليمات'];
+    final lines = [
+      'إزاي تملأ الملف:',
+      '• كل صف = عميل واحد.',
+      '• «رقم الخط/المجموعة» = الخط الرئيسي اللي العميل تحته؛ لو رقم جديد البرنامج هيعمل المجموعة تلقائياً.',
+      '• «مبلغ الباقة» = اشتراك العميل الشهري بالجنيه.',
+      '• «مديونية قديمة» = اللي على العميل من قبل (موجب) — هتتسجّل كمديونية.',
+      '• «الشركة» = vodafone / etisalat / orange / we (اختياري).',
+      '• امسح صف المثال قبل الاستيراد.',
+      '• الباقات المتاحة عندك مكتوبة في شيت «الباقات».',
+    ];
+    for (final l in lines) {
+      help.appendRow([TextCellValue(l)]);
+    }
+
+    // شيت الباقات (مرجع — تقدر تربط Data Validation عليه)
+    final pkgSheet = excel['الباقات'];
+    pkgSheet.appendRow([TextCellValue('الباقات المتاحة')]);
+    final packages = <String>{
+      for (final m in prov.db.members)
+        if (m.package.trim().isNotEmpty) m.package.trim()
+    }.toList()
+      ..sort();
+    for (final p in packages) {
+      pkgSheet.appendRow([TextCellValue(p)]);
+    }
+
+    final bytes = excel.save();
+    if (bytes == null) {
+      _snack(context, 'فشل إنشاء القالب');
+      return;
+    }
+    final dir = await getApplicationDocumentsDirectory();
+    final ts = intl.DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
+    final file = File('${dir.path}/telecom_template_$ts.xlsx');
+    await file.writeAsBytes(bytes);
+    await Share.shareXFiles([XFile(file.path)],
+        text: '📄 قالب استيراد العملاء — باقات الاتصالات');
+  }
+
+  /// قراءة ملف قالب وإرجاع صفوف منظّمة (للمعاينة قبل الاستيراد).
+  /// كل صف: {name, phone, groupPhone, package, price, debt, provider, notes}
+  static List<Map<String, dynamic>> parseTemplate(List<int> bytes) {
+    final excel = Excel.decodeBytes(bytes);
+    // نفضّل شيت «العملاء»، وإلا أول شيت
+    final sheet = excel.tables['العملاء'] ?? excel.tables.values.first;
+    final rows = sheet.rows;
+    if (rows.isEmpty) return [];
+    String cell(List<Data?> r, int i) =>
+        (i < r.length ? r[i]?.value : null)?.toString().trim() ?? '';
+    double num_(List<Data?> r, int i) {
+      final v = cell(r, i).replaceAll(',', '');
+      return double.tryParse(v) ?? 0;
+    }
+
+    final out = <Map<String, dynamic>>[];
+    for (var ri = 1; ri < rows.length; ri++) {
+      // تخطّي الهيدر (0) + صف المثال
+      final r = rows[ri];
+      final name = cell(r, 0);
+      final phone = cell(r, 1);
+      final groupPhone = cell(r, 2);
+      if (name.isEmpty && phone.isEmpty && groupPhone.isEmpty) continue;
+      if (name.contains('مثال')) continue;
+      out.add({
+        'name': name,
+        'phone': phone,
+        'groupPhone': groupPhone,
+        'package': cell(r, 3),
+        'price': num_(r, 4),
+        'debt': num_(r, 5),
+        'provider': cell(r, 6),
+        'notes': cell(r, 7),
+      });
+    }
+    return out;
+  }
+
   // ── Excel export ─────────────────────────────────────────────────
   static Future<void> exportExcel(
       BuildContext context, AppProvider prov) async {

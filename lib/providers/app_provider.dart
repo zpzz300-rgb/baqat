@@ -811,6 +811,71 @@ class AppProvider extends ChangeNotifier {
     save();
   }
 
+  /// استيراد عملاء من صفوف قالب Excel (دمج — يضيف للموجود، مايستبدلش).
+  /// بيرجّع: عدد المجموعات الجديدة، العملاء الجدد، المتخطّى (مكرر/فاضي).
+  ({int groups, int members, int skipped}) importMembersMerge(
+      List<Map<String, dynamic>> rows) {
+    var newGroups = 0, newMembers = 0, skipped = 0;
+    final base = DateTime.now().millisecondsSinceEpoch;
+    var seq = 0;
+    String newId() => '${base}_${seq++}';
+
+    for (final row in rows) {
+      final name = (row['name'] ?? '').toString().trim();
+      final phone = (row['phone'] ?? '').toString().trim();
+      final gp = (row['groupPhone'] ?? '').toString().trim();
+      if (name.isEmpty && phone.isEmpty) {
+        skipped++;
+        continue;
+      }
+      // إيجاد/إنشاء المجموعة برقم الخط
+      Group? g;
+      if (gp.isNotEmpty) {
+        final idx = db.groups.indexWhere((x) => x.phone == gp);
+        if (idx >= 0) {
+          g = db.groups[idx];
+        } else {
+          final prov = (row['provider'] ?? '').toString().trim();
+          g = Group(
+            id: newId(),
+            phone: gp,
+            type: 'manual',
+            provider: prov.isNotEmpty ? prov : null,
+          );
+          db.groups.add(g);
+          db.gid++;
+          newGroups++;
+        }
+      }
+      // تخطّي العميل المكرر (نفس الرقم موجود)
+      if (phone.isNotEmpty && db.members.any((m) => m.phone == phone)) {
+        skipped++;
+        continue;
+      }
+      final debt = (row['debt'] as num?)?.toDouble() ?? 0;
+      final price = (row['price'] as num?)?.toDouble() ?? 0;
+      db.members.add(Member(
+        id: newId(),
+        gid: g?.id ?? '',
+        name: name,
+        phone: phone,
+        package: (row['package'] ?? '').toString().trim(),
+        price: price,
+        balance: debt > 0 ? -debt : 0, // مديونية قديمة = رصيد سالب
+        notes: (row['notes'] ?? '').toString().trim().isEmpty
+            ? null
+            : (row['notes']).toString().trim(),
+      ));
+      db.mid++;
+      newMembers++;
+    }
+    _addLog(null, 'import',
+        'استيراد Excel: $newMembers عميل + $newGroups مجموعة جديدة');
+    save();
+    notifyListeners();
+    return (groups: newGroups, members: newMembers, skipped: skipped);
+  }
+
   void editGroup(Group g) {
     final i = db.groups.indexWhere((x) => x.id == g.id);
     if (i >= 0) db.groups[i] = g;

@@ -10,6 +10,7 @@ import 'package:share_plus/share_plus.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
 import '../services/supabase_service.dart';
+import '../services/export_service.dart';
 import '../widgets/common.dart';
 import '../widgets/pin_dialog.dart';
 
@@ -70,6 +71,8 @@ class DataIOScreen extends StatelessWidget {
                   const SizedBox(height: 10),
                   _exportBtn(context, '📊 تصدير Excel (كل البيانات)', [const Color(0xFF2e7d32), const Color(0xFF43a047)], () => _exportExcel(context)),
                   const SizedBox(height: 10),
+                  _exportBtn(context, '📄 تصدير قالب فاضي (للإضافة)', [const Color(0xFF6a1b9a), const Color(0xFF8e24aa)], () => _exportTemplate(context)),
+                  const SizedBox(height: 10),
                   _exportBtn(context, '🖨️ تصدير PDF للطباعة', [AppColors.red2, AppColors.red], () => _exportPDF(context)),
                 ],
               ),
@@ -88,6 +91,11 @@ class DataIOScreen extends StatelessWidget {
                   Text('⚠️ هيستبدل كل البيانات الحالية بالملف المستورد', style: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted)),
                   const SizedBox(height: 12),
                   _exportBtn(context, '📥 استيراد ملف JSON', [const Color(0xFF00695c), AppColors.green], () => _importJSON(context)),
+                  const SizedBox(height: 10),
+                  Text('📊 استيراد العملاء من قالب Excel (بيضيف للموجود — مايستبدلش)',
+                      style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted)),
+                  const SizedBox(height: 6),
+                  _exportBtn(context, '📊 استيراد من Excel', [const Color(0xFF6a1b9a), const Color(0xFF8e24aa)], () => _importExcel(context)),
                 ],
               ),
             ),
@@ -183,7 +191,99 @@ class DataIOScreen extends StatelessWidget {
 
   Future<void> _exportExcel(BuildContext context) async {
     AppSnackbar.show(context, '📊 جاري تصدير Excel...');
-    // TODO: implement excel export with excel package
+    await ExportService.exportExcel(context, context.read<AppProvider>());
+  }
+
+  Future<void> _exportTemplate(BuildContext context) async {
+    AppSnackbar.show(context, '📄 جاري تجهيز القالب...');
+    await ExportService.exportTemplateExcel(
+        context, context.read<AppProvider>());
+  }
+
+  Future<void> _importExcel(BuildContext context) async {
+    final prov = context.read<AppProvider>();
+    final res = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['xlsx'],
+      withData: true,
+    );
+    if (res == null || res.files.isEmpty) return;
+    final bytes = res.files.single.bytes ??
+        (res.files.single.path != null
+            ? await File(res.files.single.path!).readAsBytes()
+            : null);
+    if (bytes == null) {
+      if (context.mounted) AppSnackbar.show(context, '⚠️ مش قادر يقرأ الملف');
+      return;
+    }
+    List<Map<String, dynamic>> rows;
+    try {
+      rows = ExportService.parseTemplate(bytes);
+    } catch (_) {
+      if (context.mounted) {
+        AppSnackbar.show(context, '⚠️ الملف مش بصيغة القالب الصح');
+      }
+      return;
+    }
+    if (rows.isEmpty) {
+      if (context.mounted) AppSnackbar.show(context, 'مفيش صفوف للاستيراد');
+      return;
+    }
+    if (!context.mounted) return;
+    // معاينة قبل الحفظ
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('📊 معاينة الاستيراد',
+            style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 16)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('هيتضاف ${rows.length} عميل (بيضيف للموجود — مايمسحش حاجة).',
+                style: GoogleFonts.cairo(fontSize: 13)),
+            const SizedBox(height: 10),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: rows.take(8).map((r) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Text(
+                        '• ${r['name']} — ${r['phone']} → خط ${r['groupPhone']}'
+                        '${(r['price'] as num) > 0 ? ' (${r['price']} ج)' : ''}',
+                        style: GoogleFonts.cairo(fontSize: 11),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                  );
+                }).toList(),
+              ),
+            ),
+            if (rows.length > 8)
+              Text('... و${rows.length - 8} غيرهم',
+                  style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted)),
+          ]),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('إلغاء', style: GoogleFonts.cairo())),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.green),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('استيراد',
+                style: GoogleFonts.cairo(
+                    fontWeight: FontWeight.w700, color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    final r = prov.importMembersMerge(rows);
+    if (!context.mounted) return;
+    AppSnackbar.show(context,
+        '✅ تم استيراد ${r.members} عميل + ${r.groups} مجموعة جديدة'
+        '${r.skipped > 0 ? ' (تخطّى ${r.skipped})' : ''}');
   }
 
   Future<void> _exportPDF(BuildContext context) async {
