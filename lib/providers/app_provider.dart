@@ -2492,14 +2492,17 @@ class AppProvider extends ChangeNotifier {
     final bi = db.companyBills.indexWhere((b) => b.id == billId);
     if (bi < 0) return;
     final maxPay = db.companyBills[bi].remaining;
+    if (amount <= 0) return;
     final paid = amount > maxPay ? maxPay : amount;
-    if (paid <= 0) return;
-    db.companyBills[bi].payments.add(BillPayment(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      amount: paid,
-      date: _today(),
-      note: note,
-    ));
+    final overpay = amount > maxPay ? amount - maxPay : 0.0; // دفع زيادة
+    if (paid > 0) {
+      db.companyBills[bi].payments.add(BillPayment(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        amount: paid,
+        date: _today(),
+        note: note,
+      ));
+    }
     final gid = db.companyBills[bi].groupId;
     final gi = db.groups.indexWhere((g) => g.id == gid);
     if (gi >= 0) {
@@ -2509,8 +2512,17 @@ class AppProvider extends ChangeNotifier {
         'date': _today(),
         'type': 'bill',
       });
+      if (overpay > 0) {
+        db.groups[gi].billCredit += overpay;
+        db.groups[gi].groupNotes.insert(0, {
+          'text': '💰 دفع زيادة ${overpay.toStringAsFixed(0)} ج — اتسجّل رصيد دائن (الإجمالي: ${db.groups[gi].billCredit.toStringAsFixed(0)} ج)',
+          'date': _today(),
+          'type': 'bill',
+        });
+      }
     }
-    _addLog(null, 'bill_pay', 'سداد فاتورة: ${paid.toStringAsFixed(0)} ج');
+    _addLog(null, 'bill_pay',
+        'سداد فاتورة: ${paid.toStringAsFixed(0)} ج${overpay > 0 ? ' + رصيد دائن ${overpay.toStringAsFixed(0)} ج' : ''}');
     save(); notifyListeners();
   }
 
@@ -2596,6 +2608,24 @@ class AppProvider extends ChangeNotifier {
       'date': _today(),
       'type': 'bill',
     });
+    // خصم الرصيد الدائن (دفع زيادة سابق) تلقائياً من الفاتورة الجديدة
+    final credit = db.groups[i].billCredit;
+    if (credit > 0) {
+      final apply = credit > amount ? amount : credit;
+      db.groups[i].billCredit -= apply;
+      bill.payments.add(BillPayment(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        amount: apply,
+        date: _today(),
+        note: 'خصم رصيد دائن',
+      ));
+      db.groups[i].billDebt = (db.groups[i].billDebt - apply).clamp(0, double.infinity);
+      db.groups[i].groupNotes.insert(0, {
+        'text': '💰 خصم رصيد دائن ${apply.toStringAsFixed(0)} ج من فاتورة $month — متبقي رصيد: ${db.groups[i].billCredit.toStringAsFixed(0)} ج',
+        'date': _today(),
+        'type': 'bill',
+      });
+    }
     save(); notifyListeners();
   }
 

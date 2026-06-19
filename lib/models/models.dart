@@ -149,6 +149,7 @@ class Group {
   // ── آخر فاتورة + مفكرة الخط ────────────────────────────────
   double lastBillAmount; // قيمة آخر فاتورة من الشركة
   double billDebt; // إجمالي الفواتير غير المسددة للشركة
+  double billCredit; // رصيد دائن من دفع زيادة — يُخصم من الفواتير الجاية
   List<Map<String, dynamic>> groupNotes; // [{text, date, type:'auto'/'manual'}]
   String? lastNotesMonth; // tracking key for auto-notes
 
@@ -226,6 +227,7 @@ class Group {
     this.stickyNote,
     this.lastBillAmount = 0,
     this.billDebt = 0,
+    this.billCredit = 0,
     List<Map<String, dynamic>>? groupNotes,
     this.lastNotesMonth,
     this.pendingPointsProfit = 0,
@@ -297,6 +299,7 @@ class Group {
         stickyNote: j['stickyNote'],
         lastBillAmount: (j['lastBillAmount'] as num?)?.toDouble() ?? 0,
         billDebt: (j['billDebt'] as num?)?.toDouble() ?? 0,
+        billCredit: (j['billCredit'] as num?)?.toDouble() ?? 0,
         groupNotes: List<Map<String, dynamic>>.from(j['groupNotes'] ?? []),
         lastNotesMonth: j['lastNotesMonth'],
         pendingPointsProfit: (j['pendingPointsProfit'] as num?)?.toDouble() ?? 0,
@@ -364,6 +367,7 @@ class Group {
         'stickyNote': stickyNote,
         'lastBillAmount': lastBillAmount,
         'billDebt': billDebt,
+        'billCredit': billCredit,
         'groupNotes': groupNotes,
         'lastNotesMonth': lastNotesMonth,
         'pendingPointsProfit': pendingPointsProfit,
