@@ -514,6 +514,11 @@ class _BillCardState extends State<_BillCard> {
                 _infoChip('فعلي: ${b.actualAmount.toStringAsFixed(0)} ج',
                     AppColors.redLight, AppColors.red2),
               ]),
+              if (b.isDeferred) ...[
+                const SizedBox(height: 6),
+                _infoChip('⏸ مؤجَّل لـ ${b.deferDate}',
+                    const Color(0xFFFFF3E0), const Color(0xFFE65100)),
+              ],
               const SizedBox(height: 8),
               // Progress bar
               if (!b.isPaid) ...[
@@ -596,6 +601,25 @@ class _BillCardState extends State<_BillCard> {
                             fontWeight: FontWeight.w700,
                             color: AppColors.green)),
                   ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () => _showDeferDialog(context),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                      color: b.isDeferred
+                          ? const Color(0xFFE65100)
+                          : const Color(0xFFFFF3E0),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFE65100))),
+                  child: Icon(Icons.pause_circle_outline,
+                      size: 16,
+                      color: b.isDeferred
+                          ? Colors.white
+                          : const Color(0xFFE65100)),
                 ),
               ),
               const SizedBox(width: 8),
@@ -787,6 +811,99 @@ class _BillCardState extends State<_BillCard> {
                     fontWeight: FontWeight.w700, color: Colors.white)),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showDeferDialog(BuildContext context) {
+    final b = widget.bill;
+    final noteCtrl = TextEditingController(text: b.deferNote ?? '');
+    String? picked = b.deferDate;
+    showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('⏸ تأجيل الفاتورة',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 16)),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('سماح من الشركة لحد ميعاد معيّن. هيظهر على هيدر الخط.',
+                style: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted)),
+            const SizedBox(height: 12),
+            GestureDetector(
+              onTap: () async {
+                final now = DateTime.now();
+                final d = await showDatePicker(
+                  context: ctx,
+                  initialDate: picked != null
+                      ? DateTime.tryParse(picked!) ?? now
+                      : now.add(const Duration(days: 7)),
+                  firstDate: now.subtract(const Duration(days: 1)),
+                  lastDate: DateTime(2035),
+                  locale: const Locale('ar'),
+                );
+                if (d != null) {
+                  setLocal(() => picked =
+                      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}');
+                }
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.calendar_today, size: 15, color: Color(0xFFE65100)),
+                  const SizedBox(width: 8),
+                  Text(picked ?? 'اختر ميعاد السماح',
+                      style: GoogleFonts.cairo(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: picked != null ? AppColors.text : AppColors.muted)),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: noteCtrl,
+              style: GoogleFonts.cairo(fontSize: 13),
+              decoration: InputDecoration(
+                labelText: 'سبب التأجيل (اختياري)',
+                labelStyle: GoogleFonts.cairo(fontSize: 12),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ]),
+          actions: [
+            if (b.isDeferred)
+              TextButton(
+                onPressed: () {
+                  widget.prov.deferCompanyBill(b.id, null);
+                  Navigator.pop(context);
+                },
+                child: Text('إلغاء التأجيل',
+                    style: GoogleFonts.cairo(color: AppColors.red)),
+              ),
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('إغلاق', style: GoogleFonts.cairo())),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFE65100)),
+              onPressed: picked == null
+                  ? null
+                  : () {
+                      widget.prov.deferCompanyBill(b.id, picked,
+                          note: noteCtrl.text.trim());
+                      Navigator.pop(context);
+                    },
+              child: Text('تأجيل',
+                  style: GoogleFonts.cairo(
+                      fontWeight: FontWeight.w700, color: Colors.white)),
+            ),
+          ],
+        ),
       ),
     );
   }

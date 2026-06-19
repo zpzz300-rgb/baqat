@@ -2587,6 +2587,42 @@ class AppProvider extends ChangeNotifier {
     save(); notifyListeners();
   }
 
+  /// تأجيل فاتورة لميعاد سماح من الشركة (أو إلغاء التأجيل بتمرير date=null)
+  void deferCompanyBill(String billId, String? date, {String? note}) {
+    final bi = db.companyBills.indexWhere((b) => b.id == billId);
+    if (bi < 0) return;
+    final b = db.companyBills[bi];
+    b.deferDate = (date == null || date.isEmpty) ? null : date;
+    b.deferNote = (note == null || note.trim().isEmpty) ? null : note.trim();
+    final gid = b.groupId;
+    final gi = db.groups.indexWhere((g) => g.id == gid);
+    if (gi >= 0) {
+      final txt = b.deferDate != null
+          ? '⏸ تأجيل فاتورة ${b.month} لـ ${b.deferDate}${b.deferNote != null ? ' — ${b.deferNote}' : ''}'
+          : '▶️ إلغاء تأجيل فاتورة ${b.month}';
+      db.groups[gi].groupNotes.insert(0, {
+        'text': txt,
+        'date': _today(),
+        'type': 'bill',
+      });
+    }
+    _addLog(null, 'bill_defer',
+        b.deferDate != null
+            ? 'تأجيل فاتورة لـ ${b.deferDate}'
+            : 'إلغاء تأجيل فاتورة',
+        targetId: gid, targetType: 'group');
+    save(); notifyListeners();
+  }
+
+  /// أقرب فاتورة مؤجَّلة وغير مسددة لمجموعة (للبادچ على الهيدر)
+  CompanyBill? activeDeferredBill(String gid) {
+    final list = db.companyBills
+        .where((b) => b.groupId == gid && b.isDeferred)
+        .toList()
+      ..sort((a, c) => (a.deferDate ?? '').compareTo(c.deferDate ?? ''));
+    return list.isEmpty ? null : list.first;
+  }
+
   /// سداد جزئي أو كلي من مديونية المجموعة (legacy — للتوافق)
   void payGroupBillDebt(String gid, double amount) {
     final i = db.groups.indexWhere((g) => g.id == gid);

@@ -989,6 +989,8 @@ class CompanyBill {
   List<BillPayment> payments;
   String? note;
   String date;         // تاريخ الإضافة dd/mm/yyyy
+  String? deferDate;   // YYYY-MM-DD — ميعاد السماح المؤجَّل من الشركة
+  String? deferNote;   // سبب/ملاحظة التأجيل
 
   CompanyBill({
     required this.id,
@@ -1000,7 +1002,12 @@ class CompanyBill {
     List<BillPayment>? payments,
     this.note,
     required this.date,
+    this.deferDate,
+    this.deferNote,
   }) : payments = payments ?? [];
+
+  /// مؤجَّلة فعلاً (فيها ميعاد سماح لسه ما عداش وغير مسددة)
+  bool get isDeferred => deferDate != null && deferDate!.isNotEmpty && !isPaid;
 
   double get paidAmount  => payments.fold(0.0, (s, p) => s + p.amount);
   double get remaining   => (actualAmount - paidAmount).clamp(0, double.infinity);
@@ -1025,6 +1032,8 @@ class CompanyBill {
             .toList(),
         note: j['note'],
         date: j['date'] ?? '',
+        deferDate: j['deferDate'],
+        deferNote: j['deferNote'],
       );
 
   Map<String, dynamic> toJson() => {
@@ -1037,6 +1046,8 @@ class CompanyBill {
         'payments': payments.map((p) => p.toJson()).toList(),
         'note': note,
         'date': date,
+        'deferDate': deferDate,
+        'deferNote': deferNote,
       };
 }
 

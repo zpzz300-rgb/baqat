@@ -245,6 +245,7 @@ class _GroupCardState extends State<GroupCard> {
                       if (group.offerEndDate != null)
                         _buildOfferEndBadge(group),
                       _buildExpiryBadge(prov),
+                      _buildDeferBadge(prov),
                       _buildPointsBadge(context, prov, group),
                     ],
                   ),
@@ -1220,6 +1221,25 @@ class _GroupCardState extends State<GroupCard> {
               fontSize: 10,
               fontWeight: info.critical ? FontWeight.w900 : FontWeight.w800,
               color: info.color)),
+    );
+  }
+
+  // ── Defer Badge — فاتورة مؤجَّلة لميعاد سماح ──────────────────
+  Widget _buildDeferBadge(AppProvider prov) {
+    final bill = prov.activeDeferredBill(widget.group.id);
+    if (bill == null) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF3E0),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE65100), width: 1.2),
+      ),
+      child: Text('⏸ مؤجل لـ ${bill.deferDate}',
+          style: GoogleFonts.cairo(
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              color: const Color(0xFFE65100))),
     );
   }
 
