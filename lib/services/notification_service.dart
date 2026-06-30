@@ -41,6 +41,9 @@ class NotificationService {
   static const _chGeneralNote = 'general_notes_alerts';
   static const int _generalNoteBase = 6000; // 6000–6999
 
+  static const _chBillDue = 'bill_due_reminders';
+  static const int _billDueBase = 7000; // 7000–7099
+
   // ── Shared helper ─────────────────────────────────────────────
   // Phase 4: Importance.max + Priority.high + exactAllowWhileIdle + vibration/sound
   static Future<void> _scheduleOnce({
@@ -290,6 +293,47 @@ class NotificationService {
   static Future<void> cancelDeferralReminder(String memberId) async {
     await init();
     await _plugin.cancel(_deferralId(memberId));
+  }
+
+  // ── 7b. Bill-due reminders (مواعيد دفع فواتير الشركات) ──────────
+  // bills: لكل فاتورة غير مدفوعة (رقم الخط، تاريخ آخر موعد، المتبقّي)
+  static Future<void> scheduleBillDueAlerts({
+    required List<({String phone, DateTime deadline, double remaining})> bills,
+    required int daysBefore,
+  }) async {
+    await init();
+    for (var i = 0; i < 100; i++) {
+      await _plugin.cancel(_billDueBase + i);
+    }
+    final now = DateTime.now();
+    int count = 0;
+    // الأقرب موعداً الأول
+    final sorted = [...bills]..sort((a, b) => a.deadline.compareTo(b.deadline));
+    for (final b in sorted) {
+      if (count >= 100) break;
+      // التذكير قبل آخر موعد بـ daysBefore يوم، الساعة 9 صباحاً
+      final alert = DateTime(b.deadline.year, b.deadline.month, b.deadline.day, 9)
+          .subtract(Duration(days: daysBefore));
+      if (alert.isBefore(now)) continue;
+      final t = tz.TZDateTime.from(alert, tz.local);
+      await _scheduleOnce(
+        id: _billDueBase + count,
+        channelId: _chBillDue,
+        channelName: 'تذكير مواعيد دفع الفواتير',
+        title: '🗓️ قرب موعد دفع فاتورة',
+        body: 'فاتورة خط ${b.phone} آخر موعد دفعها '
+            '${b.deadline.day}/${b.deadline.month} — متبقّي ${b.remaining.toStringAsFixed(0)} ج',
+        when: t,
+      );
+      count++;
+    }
+  }
+
+  static Future<void> cancelBillDueAlerts() async {
+    await init();
+    for (var i = 0; i < 100; i++) {
+      await _plugin.cancel(_billDueBase + i);
+    }
   }
 
   // ── 8. General Notes (Phase 5) ─────────────────────────────────

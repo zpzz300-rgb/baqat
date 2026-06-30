@@ -169,14 +169,35 @@ class _DeletedRow extends StatelessWidget {
   void _showDetails(BuildContext context) {
     final m = member;
     final debt = m.balance < 0 ? -m.balance : 0.0;
-    final instapay = prov.instapayPhone.isNotEmpty ? '\n📲 InstaPay: ${prov.instapayPhone}' : '';
-    final vodafone = prov.vodafoneCash.isNotEmpty ? '\n📱 فودافون كاش: ${prov.vodafoneCash}' : '';
+    final g = prov.db.groups.firstWhere((x) => x.id == m.gid, orElse: () => Group(id: '', phone: '—'));
+    final pay = [
+      ...[prov.instapayPhone, prov.instapayPhone2].where((s) => s.trim().isNotEmpty).map((s) => '📲 إنستا باي: $s'),
+      ...[prov.vodafoneCash, prov.vodafoneCash2].where((s) => s.trim().isNotEmpty).map((s) => '📱 فودافون كاش: $s'),
+      if (prov.bankInfo.trim().isNotEmpty) '🏦 تحويل بنكي: ${prov.bankInfo.trim()}',
+    ].join('\n');
 
     final debtMsg = debt > 0
-        ? 'السلام عليكم ${m.name} 👋\nلا تزال لديك مديونية: 🔴 ${debt.toStringAsFixed(0)} ج\nباقة: ${m.package} — ${m.price.toStringAsFixed(0)} ج/شهر$instapay$vodafone\nنرجو التسوية، شكراً 🙏'
-        : 'السلام عليكم ${m.name} 👋\n✅ حسابك مسدّد، شكراً لك 🙏';
+        ? 'السلام عليكم ${m.salutation} 👋\n\n'
+            '🔴 تذكير بمديونية متبقّية\n'
+            '━━━━━━━━━━━━━\n'
+            '📱 رقمك: ${m.phone}\n'
+            '🛰️ الخط الرئيسي: ${g.phone}\n'
+            '━━━━━━━━━━━━━\n'
+            '🔴 المطلوب: ${debt.toStringAsFixed(0)} ج\n'
+            '💳 باقة: ${m.package} — ${m.price.toStringAsFixed(0)} ج/شهر\n'
+            '${pay.isNotEmpty ? '━━━━━━━━━━━━━\n💳 طرق الدفع:\n$pay\n' : ''}'
+            '\nنرجو التسوية، شكراً لتعاونك 🙏'
+        : 'السلام عليكم ${m.salutation} 👋\n\n✅ حسابك مسدّد بالكامل، شكراً لك 🙏';
     final msgCtrl = TextEditingController(text: debtMsg);
     final phone = m.waPhone.replaceFirst(RegExp(r'^0'), '20');
+
+    // ── حساب بيانات المتابعة ──
+    final monthsStayed = m.log.where((l) => (l['desc'] ?? '').toString().contains('اشتراك')).length;
+    final totalPaid = m.log
+        .where((l) => ((l['amount'] ?? 0) as num) > 0)
+        .fold<double>(0, (s, l) => s + ((l['amount'] ?? 0) as num).toDouble());
+    final giftCount = m.log.where((l) => (l['desc'] ?? '').toString().contains('هدية')).length;
+    final delDate = prov.deletedDateOf(m);
 
     showModalBottomSheet(useRootNavigator: true,
       context: context,
@@ -213,10 +234,52 @@ class _DeletedRow extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text('${m.phone}  •  ${m.package}  •  ${m.price.toStringAsFixed(0)} ج/شهر',
                       style: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted)),
+
+                  // ── بطاقة متابعة العميل المحذوف (للمحاسبة) ──
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF7F9FC),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Wrap(spacing: 14, runSpacing: 8, children: [
+                      _track('📅 انضم', m.date ?? '—'),
+                      _track('🗑 اتحذف', delDate ?? '—'),
+                      _track('⏳ قعد', monthsStayed > 0 ? '$monthsStayed شهر' : '—'),
+                      _track('💰 إجمالي دفع', '${totalPaid.toStringAsFixed(0)} ج'),
+                      _track('🎁 هدايا', giftCount > 0 ? '$giftCount' : 'لا'),
+                      _track('🔴 متبقّي', '${debt.toStringAsFixed(0)} ج'),
+                    ]),
+                  ),
+
+                  // ── تسجيل دفعة/تحصيل بعد الحذف ──
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    Expanded(child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                      icon: const Icon(Icons.payments, size: 16),
+                      label: Text('💰 تسجيل دفعة', style: GoogleFonts.cairo(fontWeight: FontWeight.w700, fontSize: 12)),
+                      onPressed: () => _recordPayment(ctx, setSt),
+                    )),
+                    const SizedBox(width: 8),
+                    Expanded(child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(foregroundColor: AppColors.red2),
+                      icon: const Icon(Icons.remove_circle_outline, size: 16),
+                      label: Text('خصم/زيادة', style: GoogleFonts.cairo(fontWeight: FontWeight.w700, fontSize: 12)),
+                      onPressed: () => _recordPayment(ctx, setSt, isCharge: true),
+                    )),
+                  ]),
+
                   if (m.log.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    Text('📌 آخر الحركات:', style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.blue2)),
-                    ...m.log.take(5).map((log) {
+                    const SizedBox(height: 12),
+                    Text('📋 السجل الكامل (${m.log.length}):', style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.blue2)),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 180),
+                      child: SingleChildScrollView(child: Column(children: m.log.map((log) {
                       final amount = ((log['amount'] ?? 0) as num).toDouble();
                       return Padding(
                         padding: const EdgeInsets.only(top: 3),
@@ -236,7 +299,7 @@ class _DeletedRow extends StatelessWidget {
                           ],
                         ]),
                       );
-                    }),
+                    }).toList()))),
                   ],
                   if (debt > 0) ...[
                     const SizedBox(height: 16),
@@ -290,6 +353,55 @@ class _DeletedRow extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _track(String label, String value) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),
+          Text(value, style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.blue2)),
+        ],
+      );
+
+  void _recordPayment(BuildContext sheetCtx, StateSetter setSt, {bool isCharge = false}) {
+    final amtCtrl = TextEditingController();
+    final noteCtrl = TextEditingController();
+    showDialog(
+      context: sheetCtx,
+      builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(isCharge ? '➕ زيادة دين / خصم' : '💰 تسجيل دفعة',
+            style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 15,
+                color: isCharge ? AppColors.red2 : const Color(0xFF2E7D32))),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: amtCtrl, keyboardType: TextInputType.number, textDirection: TextDirection.ltr,
+              decoration: InputDecoration(hintText: 'المبلغ (ج)', hintStyle: GoogleFonts.cairo(fontSize: 13))),
+          const SizedBox(height: 8),
+          TextField(controller: noteCtrl,
+              decoration: InputDecoration(
+                  hintText: isCharge ? 'سبب الزيادة' : 'ملاحظة (مثال: دفع نقدي)',
+                  hintStyle: GoogleFonts.cairo(fontSize: 13))),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dCtx), child: Text('إلغاء', style: GoogleFonts.cairo())),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: isCharge ? AppColors.red : const Color(0xFF2E7D32), foregroundColor: Colors.white),
+            onPressed: () {
+              final amt = double.tryParse(amtCtrl.text.trim()) ?? 0;
+              if (amt <= 0) return;
+              prov.addDeletedPayment(member.id, isCharge ? -amt : amt, noteCtrl.text.trim());
+              Navigator.pop(dCtx);        // اقفل الديالوج
+              Navigator.pop(sheetCtx);    // اقفل تفاصيل المحذوف (هتفتح بأرقام محدّثة)
+              AppSnackbar.show(sheetCtx,
+                  isCharge ? '✅ تمت إضافة ${amt.toStringAsFixed(0)} ج' : '✅ تم تحصيل ${amt.toStringAsFixed(0)} ج');
+            },
+            child: Text(isCharge ? 'إضافة' : 'تحصيل', style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+          ),
+        ],
       ),
     );
   }

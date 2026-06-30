@@ -156,6 +156,16 @@ class AppProvider extends ChangeNotifier {
   String _bankInfo      = '';
   String _ownerName     = 'ابو عمر';
   String _ownerPhone    = '01001005891';
+  // يوم استحقاق سداد فاتورة الشركة (ثابت في الشهر) — مختلف لكل سيكل
+  int _cycle1DueDay     = 20;
+  int _cycle2DueDay     = 5;
+  // فترة سماح الشركة (أيام من نزول الفاتورة) — مختلفة لكل شركة، قابلة للتعديل
+  Map<String, int> _companyGrace = {
+    'etisalat': 20,
+    'vodafone': 15,
+    'orange': 20,
+    'we': 20,
+  };
 
   // ── لقطات الجرد الشهري (snapshots للأرباح) ──────────────────────
   List<Map<String, dynamic>> _profitSnapshots = [];
@@ -185,6 +195,8 @@ class AppProvider extends ChangeNotifier {
   bool   _notifWeekly        = false;
   bool   _notifMonthly       = false;
   int    _notifMonthlyDay    = 1;
+  bool   _notifBillDue       = true; // تذكير قبل آخر موعد دفع فاتورة الشركة
+  int    _notifBillDueDays   = 3;
 
   // ── إعدادات تليجرام ────────────────────────────────────────────
   String _telegramToken    = '8832497646:AAHltc6_2pazsuocddFd1tqLXRs2RyEW7CI';
@@ -207,8 +219,96 @@ class AppProvider extends ChangeNotifier {
   String get vodafoneCash    => _vodafoneCash;
   String get vodafoneCash2   => _vodafoneCash2;
   String get bankInfo        => _bankInfo;
+  int    get cycle1DueDay    => _cycle1DueDay;
+  int    get cycle2DueDay    => _cycle2DueDay;
   String get ownerName      => _ownerName;
   String get ownerPhone     => _ownerPhone;
+
+  /// يوم الاستحقاق حسب سيكل المجموعة (1 أو 2)
+  int dueDayForGroup(Group g) {
+    final isCycle2 = g.billingCycle == 'cycle2' || g.cycle == '2';
+    return isCycle2 ? _cycle2DueDay : _cycle1DueDay;
+  }
+
+  void setCycleDueDay(int cycle, int day) {
+    final d = day.clamp(1, 28);
+    if (cycle == 2) { _cycle2DueDay = d; } else { _cycle1DueDay = d; }
+    saveSettings();
+    notifyListeners();
+  }
+
+  // سماح خاص بسيكل 2 لكل شركة (لو مش موجود نستخدم السماح العام للشركة)
+  Map<String, int> _companyGraceCycle2 = {};
+
+  /// فترة سماح الشركة (أيام) — افتراضي 20 لو الشركة مش متعرّفة
+  int graceForProvider(String? provider) =>
+      _companyGrace[provider] ?? 20;
+
+  /// سماح حسب الخط: لو الخط سيكل 2 وفيه سماح خاص للسيكل ده نستخدمه،
+  /// غير كده نستخدم السماح العام للشركة.
+  int graceForGroup(Group g) {
+    final isCycle2 = g.billingCycle == 'cycle2' || g.cycle == '2';
+    if (isCycle2 && _companyGraceCycle2.containsKey(g.provider)) {
+      return _companyGraceCycle2[g.provider]!;
+    }
+    return graceForProvider(g.provider);
+  }
+
+  Map<String, int> get companyGrace => Map.unmodifiable(_companyGrace);
+  Map<String, int> get companyGraceCycle2 => Map.unmodifiable(_companyGraceCycle2);
+  void setCompanyGraceCycle2(String provider, int? days) {
+    if (days == null) {
+      _companyGraceCycle2.remove(provider);
+    } else {
+      _companyGraceCycle2[provider] = days.clamp(0, 120);
+    }
+    saveSettings();
+    notifyListeners();
+  }
+  void setCompanyGrace(String provider, int days) {
+    // سماح ممكن يبقى لحد 120 يوم (شهر و20 يوم وأكتر) حسب طلب المستخدم
+    _companyGrace[provider] = days.clamp(0, 120);
+    saveSettings();
+    notifyListeners();
+  }
+
+  /// تاريخ آخر موعد دفع لفاتورة = تاريخ نزولها + سماح الشركة.
+  /// بيرجّع null لو التاريخ غير صالح.
+  DateTime? billDeadlineDate(CompanyBill b) {
+    final g = db.groups.firstWhere((x) => x.id == b.groupId,
+        orElse: () => Group(id: '', phone: ''));
+    final grace = graceForGroup(g);
+    final parts = b.date.split('/');
+    if (parts.length != 3) return null;
+    final day = int.tryParse(parts[0]);
+    final month = int.tryParse(parts[1]);
+    final year = int.tryParse(parts[2]);
+    if (day == null || month == null || year == null) return null;
+    return DateTime(year, month, day).add(Duration(days: grace));
+  }
+
+  /// الأيام المتبقية في سماح الشركة لفاتورة = (تاريخ نزولها + سماح الشركة) − النهارده.
+  /// بيرجّع null لو الفاتورة مسددة أو التاريخ غير صالح.
+  int? billGraceDaysLeft(CompanyBill b) {
+    if (b.isPaid) return null;
+    final deadline = billDeadlineDate(b);
+    if (deadline == null) return null;
+    final now = DateTime.now();
+    return deadline.difference(DateTime(now.year, now.month, now.day)).inDays;
+  }
+
+  /// أقرب فاتورة غير مسددة لمجموعة (للعرض على كارت المجموعة بره).
+  /// بترجّع (الفاتورة, الأيام المتبقية) أو null.
+  (CompanyBill, int)? nearestUnpaidBill(String gid) {
+    (CompanyBill, int)? best;
+    for (final b in db.companyBills) {
+      if (b.groupId != gid || b.isPaid) continue;
+      final d = billGraceDaysLeft(b);
+      if (d == null) continue;
+      if (best == null || d < best.$2) best = (b, d);
+    }
+    return best;
+  }
   bool   get debtNoteEnabled => _debtNoteEnabled;
   String get debtNoteText    => _debtNoteText;
   bool   get compactMembers  => _compactMembers;
@@ -241,6 +341,8 @@ class AppProvider extends ChangeNotifier {
   bool   get notifWeekly        => _notifWeekly;
   bool   get notifMonthly       => _notifMonthly;
   int    get notifMonthlyDay    => _notifMonthlyDay;
+  bool   get notifBillDue       => _notifBillDue;
+  int    get notifBillDueDays   => _notifBillDueDays;
 
   String get telegramToken   => _telegramToken;
   String get telegramChatId  => _telegramChatId;
@@ -270,6 +372,22 @@ class AppProvider extends ChangeNotifier {
     _vodafoneCash   = prefs.getString('tcm_vodafone_cash') ?? '';
     _vodafoneCash2  = prefs.getString('tcm_vodafone_cash2') ?? '';
     _bankInfo       = prefs.getString('tcm_bank_info')    ?? '';
+    _cycle1DueDay   = prefs.getInt('tcm_cycle1_due')      ?? 20;
+    _cycle2DueDay   = prefs.getInt('tcm_cycle2_due')      ?? 5;
+    final graceRaw = prefs.getString('tcm_company_grace');
+    if (graceRaw != null && graceRaw.isNotEmpty) {
+      try {
+        final m = jsonDecode(graceRaw) as Map<String, dynamic>;
+        _companyGrace = m.map((k, v) => MapEntry(k, (v as num).toInt()));
+      } catch (_) {}
+    }
+    final grace2Raw = prefs.getString('tcm_company_grace_c2');
+    if (grace2Raw != null && grace2Raw.isNotEmpty) {
+      try {
+        final m = jsonDecode(grace2Raw) as Map<String, dynamic>;
+        _companyGraceCycle2 = m.map((k, v) => MapEntry(k, (v as num).toInt()));
+      } catch (_) {}
+    }
     _ownerName      = prefs.getString('tcm_owner_name')   ?? 'ابو عمر';
     _ownerPhone     = prefs.getString('tcm_owner_phone')  ?? '01001005891';
     final snapRaw = prefs.getString('tcm_profit_snapshots');
@@ -296,6 +414,8 @@ class AppProvider extends ChangeNotifier {
     _notifWeekly        = prefs.getBool('tcm_notif_weekly')      ?? false;
     _notifMonthly       = prefs.getBool('tcm_notif_monthly')     ?? false;
     _notifMonthlyDay    = prefs.getInt('tcm_notif_monthly_day')  ?? 1;
+    _notifBillDue       = prefs.getBool('tcm_notif_billdue')     ?? true;
+    _notifBillDueDays   = prefs.getInt('tcm_notif_billdue_days') ?? 3;
     _telegramToken      = prefs.getString('tcm_tg_token')  ?? '8832497646:AAHltc6_2pazsuocddFd1tqLXRs2RyEW7CI';
     _telegramChatId     = prefs.getString('tcm_tg_chatid') ?? '974113917';
     _telegramEnabled    = prefs.getBool('tcm_tg_enabled')  ?? false;
@@ -621,6 +741,10 @@ class AppProvider extends ChangeNotifier {
     await prefs.setString('tcm_vodafone_cash',  _vodafoneCash);
     await prefs.setString('tcm_vodafone_cash2', _vodafoneCash2);
     await prefs.setString('tcm_bank_info',     _bankInfo);
+    await prefs.setInt('tcm_cycle1_due',       _cycle1DueDay);
+    await prefs.setInt('tcm_cycle2_due',       _cycle2DueDay);
+    await prefs.setString('tcm_company_grace', jsonEncode(_companyGrace));
+    await prefs.setString('tcm_company_grace_c2', jsonEncode(_companyGraceCycle2));
     await prefs.setString('tcm_owner_name',    _ownerName);
     await prefs.setString('tcm_owner_phone',   _ownerPhone);
     await prefs.setString('tcm_profit_snapshots', jsonEncode(_profitSnapshots));
@@ -640,6 +764,8 @@ class AppProvider extends ChangeNotifier {
     await prefs.setBool('tcm_notif_weekly',       _notifWeekly);
     await prefs.setBool('tcm_notif_monthly',      _notifMonthly);
     await prefs.setInt('tcm_notif_monthly_day',   _notifMonthlyDay);
+    await prefs.setBool('tcm_notif_billdue',      _notifBillDue);
+    await prefs.setInt('tcm_notif_billdue_days',  _notifBillDueDays);
     await prefs.setString('tcm_tg_token',  _telegramToken);
     await prefs.setString('tcm_tg_chatid', _telegramChatId);
     await prefs.setBool('tcm_tg_enabled',  _telegramEnabled);
@@ -807,6 +933,8 @@ class AppProvider extends ChangeNotifier {
   void setNotifWeekly(bool v)     { _notifWeekly = v; saveSettings(); applyAllNotifications(); }
   void setNotifMonthly(bool v, {int? day}) { _notifMonthly = v; if (day != null) _notifMonthlyDay = day; saveSettings(); applyAllNotifications(); }
   void setNotifMonthlyDay(int v)  { _notifMonthlyDay = v; saveSettings(); applyAllNotifications(); }
+  void setNotifBillDue(bool v, {int? days}) { _notifBillDue = v; if (days != null) _notifBillDueDays = days; saveSettings(); applyAllNotifications(); }
+  void setNotifBillDueDays(int v) { _notifBillDueDays = v.clamp(0, 30); saveSettings(); applyAllNotifications(); }
 
   void applyAllNotifications() {
     _scheduleVoucherNotifications();
@@ -827,6 +955,22 @@ class AppProvider extends ChangeNotifier {
     if (_notifOffer)  NotificationService.scheduleOfferAlerts(groups: db.groups, daysBefore: _notifOfferDays);
     if (_notifWeekly) NotificationService.scheduleWeeklySummary(db: db);
     if (_notifMonthly) NotificationService.scheduleMonthlyCollection(dayOfMonth: _notifMonthlyDay, db: db);
+    if (_notifBillDue) {
+      // تذكير قبل آخر موعد دفع كل فاتورة شركة غير مدفوعة (التاريخ + سماح الشركة)
+      final items = <({String phone, DateTime deadline, double remaining})>[];
+      for (final bl in db.companyBills) {
+        if (bl.isPaid) continue;
+        final dl = billDeadlineDate(bl);
+        if (dl == null) continue;
+        final g = db.groups.firstWhere((x) => x.id == bl.groupId,
+            orElse: () => Group(id: '', phone: ''));
+        items.add((phone: g.phone, deadline: dl, remaining: bl.remaining));
+      }
+      NotificationService.scheduleBillDueAlerts(
+          bills: items, daysBefore: _notifBillDueDays);
+    } else {
+      NotificationService.cancelBillDueAlerts();
+    }
   }
 
   // ─── AUTO BACKUP ─────────────────────────────────────────────
@@ -1087,10 +1231,43 @@ class AppProvider extends ChangeNotifier {
 
   void deleteMember(String mid) {
     final m = db.members.firstWhere((x) => x.id == mid);
+    final grp = db.groups.firstWhere((g) => g.id == m.gid,
+        orElse: () => Group(id: '', phone: '—'));
+    // نختم تاريخ الحذف + المجموعة اللي كان فيها في سجل العميل نفسه للمتابعة بعد الحذف.
+    m.log.insert(0, {
+      'date': _today(),
+      'desc': '🗑 تم حذف العميل (كان في مجموعة ${grp.phone})',
+      'amount': 0,
+      'type': 'deleted',
+    });
     db.deleted.add(m);
     db.members.removeWhere((x) => x.id == mid);
     _addLog(m, 'delete', 'تم حذف العميل ${m.name}');
     save();
+  }
+
+  /// تسجيل دفعة/خصم لعميل محذوف (تحصيل مديونية بعد الحذف). موجب=دفعة، سالب=خصم.
+  void addDeletedPayment(String mid, double amount, String note) {
+    final i = db.deleted.indexWhere((x) => x.id == mid);
+    if (i < 0) return;
+    db.deleted[i].balance += amount;
+    db.deleted[i].log.insert(0, {
+      'date': _today(),
+      'desc': note.trim().isNotEmpty ? note.trim() : (amount >= 0 ? 'دفعة بعد الحذف' : 'خصم بعد الحذف'),
+      'amount': amount,
+    });
+    _addLog(db.deleted[i], 'pay',
+        'تحصيل ${amount.toStringAsFixed(0)} ج من عميل محذوف - ${db.deleted[i].name}',
+        targetId: mid, targetType: 'member');
+    save();
+    notifyListeners();
+  }
+
+  /// تاريخ حذف العميل (من سجله)، أو null.
+  String? deletedDateOf(Member m) {
+    final e = m.log.cast<Map<String, dynamic>?>().firstWhere(
+        (x) => x?['type'] == 'deleted', orElse: () => null);
+    return e?['date']?.toString();
   }
 
   void restoreMember(String mid) {
@@ -1150,6 +1327,31 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// تعديل حركة في كشف العميل: البيان + المبلغ (موجب=دفعة، سالب=مديونية) + التاريخ والوقت.
+  /// الرصيد بيتظبط بفرق المبلغ (الجديد − القديم) عشان يفضل متسق.
+  void editMemberLogEntry(String mid, int index,
+      {required String desc, required double amount, String? date, String? time}) {
+    final i = db.members.indexWhere((x) => x.id == mid);
+    if (i < 0 || index < 0 || index >= db.members[i].log.length) return;
+    final entry = db.members[i].log[index];
+    final oldAmount = (entry['amount'] ?? 0).toDouble();
+    db.members[i].balance += (amount - oldAmount); // فرق التعديل
+    entry['desc'] = desc.trim().isNotEmpty ? desc.trim() : (entry['desc'] ?? 'حركة');
+    entry['amount'] = amount;
+    if (date != null && date.trim().isNotEmpty) entry['date'] = date.trim();
+    if (time != null) {
+      if (time.trim().isEmpty) {
+        entry.remove('time');
+      } else {
+        entry['time'] = time.trim();
+      }
+    }
+    _addLog(db.members[i], 'edit',
+        'تعديل حركة في كشف ${db.members[i].name} (${oldAmount.toStringAsFixed(0)} ← ${amount.toStringAsFixed(0)} ج)');
+    save();
+    notifyListeners();
+  }
+
   void addService(String mid, String desc, double amount, bool isPaid) {
     final i = db.members.indexWhere((x) => x.id == mid);
     if (i < 0) return;
@@ -1170,6 +1372,127 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// إضافة هدية/خدمة منظَّمة (جيجا + دقائق + خدمة) — تُسجَّل في كشف العميل
+  /// مع وسوم (kind/gb/minutes) عشان نقدر نجمّعها في كشف شهري ويتصفّر كل شهر.
+  /// amount=0 أو isPaid=false ⇒ هدية مجانية (لا تمسّ الرصيد).
+  void addGiftService(String mid,
+      {double gb = 0,
+      double minutes = 0,
+      String desc = '',
+      double amount = 0,
+      bool isPaid = false}) {
+    final i = db.members.indexWhere((x) => x.id == mid);
+    if (i < 0) return;
+    final parts = <String>[];
+    if (gb > 0) parts.add('${_numFmt(gb)} جيجا');
+    if (minutes > 0) parts.add('${_numFmt(minutes)} دقيقة');
+    if (desc.trim().isNotEmpty) parts.add(desc.trim());
+    final label = parts.isEmpty ? (isPaid ? 'خدمة' : 'هدية') : parts.join(' + ');
+    final paid = isPaid && amount > 0;
+    if (paid) db.members[i].balance -= amount;
+    db.members[i].log.insert(0, {
+      'date': _today(),
+      'desc': label,
+      'amount': paid ? -amount : 0,
+      'kind': 'gift',
+      'gb': gb,
+      'minutes': minutes,
+      'paid': paid,
+    });
+    _addLog(
+        db.members[i],
+        'service',
+        paid
+            ? 'خدمة "$label" بـ ${amount.toStringAsFixed(0)} ج للعميل ${db.members[i].name}'
+            : 'هدية "$label" (مجانية) للعميل ${db.members[i].name}');
+    save();
+    notifyListeners();
+  }
+
+  String _numFmt(double v) => v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+
+  /// ملخّص هدايا الشهر الحالي لعميل: مجموع الجيجا/الدقائق + قائمة البنود.
+  /// التصفير شهري تلقائي لأننا بنفلتر بشهر/سنة النهارده.
+  Map<String, dynamic> monthlyGiftSummary(String mid) {
+    final i = db.members.indexWhere((x) => x.id == mid);
+    final res = {'gb': 0.0, 'minutes': 0.0, 'items': <String>[], 'count': 0};
+    if (i < 0) return res;
+    final now = DateTime.now();
+    double gb = 0, minutes = 0;
+    final items = <String>[];
+    for (final e in db.members[i].log) {
+      if (e['kind'] != 'gift') continue;
+      final d = (e['date'] ?? '').toString().split('/');
+      if (d.length == 3 &&
+          int.tryParse(d[1]) == now.month &&
+          int.tryParse(d[2]) == now.year) {
+        gb += (e['gb'] ?? 0).toDouble();
+        minutes += (e['minutes'] ?? 0).toDouble();
+        items.add((e['desc'] ?? '').toString());
+      }
+    }
+    return {'gb': gb, 'minutes': minutes, 'items': items, 'count': items.length};
+  }
+
+  // ─── قسائم/منح دورية على الخط الرئيسي ─────────────────────────
+  /// إضافة قسيمة: اسم + قيمة + ميعاد النزول + التكرار ('6m'|'1y'|'once').
+  void addCoupon(String gid, String name, double value, String dueDate,
+      String every) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    db.groups[i].coupons.insert(0, {
+      'id': DateTime.now().millisecondsSinceEpoch.toString(),
+      'name': name.trim().isEmpty ? 'قسيمة' : name.trim(),
+      'value': value,
+      'dueDate': dueDate,
+      'every': every,
+      'log': <Map<String, dynamic>>[],
+    });
+    _addLog(null, 'coupon',
+        'إضافة قسيمة "$name" بقيمة ${value.toStringAsFixed(0)} ج على الخط ${db.groups[i].phone}',
+        targetId: gid, targetType: 'group');
+    save();
+    notifyListeners();
+  }
+
+  void deleteCoupon(String gid, String couponId) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    db.groups[i].coupons.removeWhere((c) => c['id'] == couponId);
+    save();
+    notifyListeners();
+  }
+
+  /// تسجيل استلام القسيمة: يضيف للسجل ويقدّم ميعاد النزول الجاي حسب التكرار.
+  void markCouponReceived(String gid, String couponId,
+      {double? amount, String? note}) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    final ci = db.groups[i].coupons.indexWhere((c) => c['id'] == couponId);
+    if (ci < 0) return;
+    final c = db.groups[i].coupons[ci];
+    final amt = amount ?? (c['value'] as num?)?.toDouble() ?? 0;
+    (c['log'] as List).insert(0, {
+      'date': _today(),
+      'amount': amt,
+      'note': note ?? '',
+    });
+    // تقديم ميعاد النزول الجاي حسب التكرار
+    final every = (c['every'] ?? 'once').toString();
+    final cur = DateTime.tryParse((c['dueDate'] ?? '').toString());
+    if (cur != null && every != 'once') {
+      final months = every == '1y' ? 12 : 6;
+      final next = DateTime(cur.year, cur.month + months, cur.day);
+      c['dueDate'] =
+          '${next.year}-${next.month.toString().padLeft(2, '0')}-${next.day.toString().padLeft(2, '0')}';
+    }
+    _addLog(null, 'coupon',
+        'استلام قسيمة "${c['name']}" بقيمة ${amt.toStringAsFixed(0)} ج',
+        targetId: gid, targetType: 'group');
+    save();
+    notifyListeners();
+  }
+
   void moveMember(String mid, String newGid) {
     final i = db.members.indexWhere((x) => x.id == mid);
     if (i < 0) return;
@@ -1178,6 +1501,13 @@ class AppProvider extends ChangeNotifier {
     final newG = db.groups.firstWhere((g) => g.id == newGid,
         orElse: () => Group(id: '', phone: '—'));
     db.members[i].gid = newGid;
+    // نسجّل النقل في سجل العميل نفسه (بالتاريخ) عشان يفضل في ملفه حتى بعد الحذف.
+    db.members[i].log.insert(0, {
+      'date': _today(),
+      'desc': '🔀 نقل من ${oldG.phone} إلى ${newG.phone}',
+      'amount': 0,
+      'type': 'move',
+    });
     _addLog(db.members[i], 'move',
         'نقل العميل ${db.members[i].name} من ${oldG.phone} إلى ${newG.phone}');
     save();
@@ -1200,7 +1530,8 @@ class AppProvider extends ChangeNotifier {
     for (final g in db.groups) {
       final mems = db.membersOf(g.id);
       for (final m in mems) {
-        if (m.price > 0) {
+        // حارس: مايتحاسبش العميل مرتين في نفس الشهر
+        if (m.price > 0 && !_memberBilledThisMonth(m)) {
           final i = db.members.indexWhere((x) => x.id == m.id);
           if (i >= 0) {
             db.members[i].balance -= m.price;
@@ -1251,7 +1582,8 @@ class AppProvider extends ChangeNotifier {
       if (!matches(g)) continue;
       final mems = db.membersOf(g.id);
       for (final m in mems) {
-        if (m.price > 0) {
+        // حارس مهم: مايتحاسبش العميل مرتين في نفس الشهر (يا إما سيكل 1 يا سيكل 2)
+        if (m.price > 0 && !_memberBilledThisMonth(m)) {
           final i = db.members.indexWhere((x) => x.id == m.id);
           if (i >= 0) {
             db.members[i].balance -= m.price;
@@ -1268,6 +1600,59 @@ class AppProvider extends ChangeNotifier {
     db.billingLocks[cycleKey] = _currentYearMonth;
     _addLog(null, 'bill', 'اشتراك $monthLabel — $cycleLabel');
     save();
+  }
+
+  /// هل العميل اتحاسب اشتراك في الشهر الحالي بالفعل؟ (يمنع الفاتورتين في شهر واحد)
+  bool _memberBilledThisMonth(Member m) {
+    final now = DateTime.now();
+    for (final e in m.log) {
+      final desc = (e['desc'] ?? '').toString();
+      if (!desc.startsWith('اشتراك')) continue;
+      final d = (e['date'] ?? '').toString().split('/');
+      if (d.length == 3 &&
+          int.tryParse(d[1]) == now.month &&
+          int.tryParse(d[2]) == now.year) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// حذف/تراجع عن اشتراك سيكل معيّن لهذا الشهر عن جميع العملاء (لو اتضاف بالغلط).
+  /// بيعكس الرصيد ويمسح القفل عشان تقدر تعيد لو حبيت. بيرجّع (عدد الحركات، الإجمالي).
+  (int, double) undoCycleBillingThisMonth(String cycleKey) {
+    final now = DateTime.now();
+    final tag = switch (cycleKey) {
+      'cycle1' => 'سيكل 1',
+      'cycle2' => 'سيكل 2',
+      'cycle4' => 'سيكل 4',
+      _ => '', // 'all' → كل الاشتراكات
+    };
+    int count = 0;
+    double total = 0;
+    for (final m in db.members) {
+      m.log.removeWhere((e) {
+        final desc = (e['desc'] ?? '').toString();
+        if (!desc.startsWith('اشتراك')) return false;
+        if (tag.isNotEmpty && !desc.contains(tag)) return false;
+        final d = (e['date'] ?? '').toString().split('/');
+        final inMonth = d.length == 3 &&
+            int.tryParse(d[1]) == now.month &&
+            int.tryParse(d[2]) == now.year;
+        if (!inMonth) return false;
+        final amt = (e['amount'] ?? 0).toDouble(); // سالب
+        m.balance -= amt; // عكس: amt سالب → يرجّع الرصيد
+        total += -amt;
+        count++;
+        return true;
+      });
+    }
+    db.billingLocks.remove(cycleKey);
+    _addLog(null, 'bill',
+        'حذف اشتراك ${tag.isEmpty ? "كل السيكلات" : tag} لهذا الشهر ($count حركة، ${total.toStringAsFixed(0)} ج)');
+    save();
+    notifyListeners();
+    return (count, total);
   }
 
   void _autoMonthlyBilling() {
@@ -1296,7 +1681,8 @@ class AppProvider extends ChangeNotifier {
       final mems = db.membersOf(g.id);
       final monthLabel = '${_monthName(now.month)} ${now.year}';
       for (final m in mems) {
-        if (m.price > 0) {
+        // حارس: مايتحاسبش مرتين في نفس الشهر (أوتو + يدوي أو سيكل مكرر)
+        if (m.price > 0 && !_memberBilledThisMonth(m)) {
           final i = db.members.indexWhere((x) => x.id == m.id);
           if (i >= 0) {
             db.members[i].balance -= m.price;
@@ -1417,6 +1803,31 @@ class AppProvider extends ChangeNotifier {
         targetId: rid, targetType: 'rental');
     save(); notifyListeners();
   }
+  /// تأجيل دفع الإيجار حتى تاريخ معيّن (أو إلغاء التأجيل بتمرير null).
+  void setRentalDeferral(String rid, String? date, String? note) {
+    final i = db.rentals.indexWhere((x) => x.id == rid);
+    if (i < 0) return;
+    db.rentals[i].deferralDate = date;
+    db.rentals[i].deferralNote = (note?.trim().isNotEmpty == true) ? note!.trim() : null;
+    db.rentals[i].log.insert(0, {
+      'date': _today(),
+      'desc': date == null ? '⏰ إلغاء تأجيل الدفع' : '⏰ تأجيل الدفع حتى $date',
+      'amount': 0,
+      'type': 'deferral',
+    });
+    save(); notifyListeners();
+  }
+
+  /// حذف حركة من سجل الإيجار (ويرجّع تأثيرها على الرصيد).
+  void deleteRentalLogEntry(String rid, int index) {
+    final i = db.rentals.indexWhere((x) => x.id == rid);
+    if (i < 0 || index < 0 || index >= db.rentals[i].log.length) return;
+    final amount = (db.rentals[i].log[index]['amount'] ?? 0).toDouble();
+    db.rentals[i].balance -= amount;
+    db.rentals[i].log.removeAt(index);
+    save(); notifyListeners();
+  }
+
   void toggleRentalStatus(String rid) {
     final i = db.rentals.indexWhere((x) => x.id == rid);
     if (i < 0) return;
@@ -1768,6 +2179,14 @@ class AppProvider extends ChangeNotifier {
   }
   void deleteGuarantor(String id) {
     db.guarantors.removeWhere((g) => g.id == id);
+    save(); notifyListeners();
+  }
+
+  /// تسجيل أن الكفيل اتذكّر دلوقتي (للكفلاء الرسميين اللي ليهم سجل).
+  void markGuarantorReminded(String id) {
+    final i = db.guarantors.indexWhere((g) => g.id == id);
+    if (i < 0) return;
+    db.guarantors[i].lastRemindedAt = DateTime.now().toIso8601String();
     save(); notifyListeners();
   }
 
@@ -2210,6 +2629,15 @@ class AppProvider extends ChangeNotifier {
     final i = db.groups.indexWhere((g) => g.id == gid);
     if (i < 0) return;
     db.groups[i].billingSystem = system; // 'fixed' | 'bimonthly'
+    save();
+    notifyListeners();
+  }
+
+  /// ضبط المبلغ الثابت (التقديري) لخط — يُستخدم في شاشة تقسيم فاتورة الحساب المدموج.
+  void setGroupFixedBill(String gid, double amount) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    db.groups[i].fixedBillAmount = amount < 0 ? 0 : amount;
     save();
     notifyListeners();
   }
@@ -2661,7 +3089,7 @@ class AppProvider extends ChangeNotifier {
 
   /// إضافة فاتورة جديدة — تُسجَّل في CompanyBills وتُحدَّث المديونية.
   /// المبلغ هو الإجمالي المُجمَّع للخط الرئيسي + خطوطه المضمومة (فاتورة واحدة).
-  void addGroupBill(String gid, double amount, {String? note}) {
+  void addGroupBill(String gid, double amount, {String? note, String? issueDate}) {
     final i = db.groups.indexWhere((g) => g.id == gid);
     if (i < 0) return;
     final now = DateTime.now();
@@ -2682,7 +3110,9 @@ class AppProvider extends ChangeNotifier {
       actualAmount: amount,
       isActual: true,
       note: fullNote.isEmpty ? null : fullNote,
-      date: _today(),
+      date: (issueDate != null && issueDate.trim().isNotEmpty)
+          ? issueDate.trim()
+          : _today(),
     );
     db.companyBills.insert(0, bill);
     db.groups[i].lastBillAmount = amount;
@@ -2698,8 +3128,91 @@ class AppProvider extends ChangeNotifier {
     save(); notifyListeners();
   }
 
+  /// تعديل تاريخ نزول فاتورة (يأثّر على عدّاد آخر موعد دفع = التاريخ + سماح الشركة)
+  void setBillIssueDate(String billId, String dmy) {
+    final bi = db.companyBills.indexWhere((b) => b.id == billId);
+    if (bi < 0) return;
+    db.companyBills[bi].date = dmy.trim();
+    _addLog(null, 'bill_edit', 'تعديل تاريخ فاتورة → $dmy');
+    save(); notifyListeners();
+  }
+
+  /// تعديل مبلغ فاتورة فعلية (تحكّم كامل + تصحيح الأخطاء مع الشركة)
+  void editBillAmount(String billId, double newAmount) {
+    final bi = db.companyBills.indexWhere((b) => b.id == billId);
+    if (bi < 0 || newAmount < 0) return;
+    final bill = db.companyBills[bi];
+    final old = bill.actualAmount;
+    final diff = newAmount - old;
+    bill.actualAmount = newAmount;
+    bill.isActual = true;
+    final gi = db.groups.indexWhere((g) => g.id == bill.groupId);
+    if (gi >= 0) {
+      db.groups[gi].billDebt = (db.groups[gi].billDebt + diff).clamp(0, double.infinity);
+      db.groups[gi].actualBillAmount = newAmount;
+    }
+    _addLog(null, 'bill_edit',
+        'تعديل مبلغ فاتورة ${old.toStringAsFixed(0)} → ${newAmount.toStringAsFixed(0)} ج');
+    save(); notifyListeners();
+  }
+
+  /// معاينة الفواتير غير المسددة لشركة في شهر (عدد + إجمالي المتبقّي)
+  (int, double) previewProviderUnpaid(String provider, String month) {
+    int count = 0;
+    double total = 0;
+    for (final b in db.companyBills) {
+      if (b.isPaid || b.month != month) continue;
+      final g = db.groups.firstWhere((x) => x.id == b.groupId,
+          orElse: () => Group(id: '', phone: ''));
+      if (g.provider != provider) continue;
+      final rem = b.remaining;
+      if (rem > 0) { count++; total += rem; }
+    }
+    return (count, total);
+  }
+
+  /// سداد كل الفواتير غير المسددة لشركة معيّنة في شهر (دفعة جماعية)
+  (int, double) payProviderBills(String provider, String month) {
+    final targets = db.companyBills.where((b) {
+      if (b.isPaid || b.month != month) return false;
+      final g = db.groups.firstWhere((x) => x.id == b.groupId,
+          orElse: () => Group(id: '', phone: ''));
+      return g.provider == provider && b.remaining > 0;
+    }).toList();
+    int count = 0;
+    double total = 0;
+    for (final b in targets) {
+      final rem = b.remaining;
+      payCompanyBill(b.id, rem, note: 'دفعة جماعية');
+      count++;
+      total += rem;
+    }
+    return (count, total);
+  }
+
+  /// مقارنة شهرية لإجمالي فواتير كل شركة عبر آخر N شهور (للمراجعة مع الشركات).
+  /// بترجّع: { provider: { 'yyyy-mm': total, ... } }
+  Map<String, Map<String, double>> providerMonthlySpend({int months = 6}) {
+    final now = DateTime.now();
+    final keys = <String>[];
+    for (int i = months - 1; i >= 0; i--) {
+      final d = DateTime(now.year, now.month - i);
+      keys.add('${d.year}-${d.month.toString().padLeft(2, '0')}');
+    }
+    final result = <String, Map<String, double>>{};
+    for (final b in db.companyBills) {
+      if (!keys.contains(b.month)) continue;
+      final g = db.groups.firstWhere((x) => x.id == b.groupId,
+          orElse: () => Group(id: '', phone: ''));
+      final p = g.provider ?? 'unknown';
+      result.putIfAbsent(p, () => {for (final k in keys) k: 0.0});
+      result[p]![b.month] = (result[p]![b.month] ?? 0) + b.actualAmount;
+    }
+    return result;
+  }
+
   /// سداد جزئي أو كلي على فاتورة محددة
-  void payCompanyBill(String billId, double amount, {String? note}) {
+  void payCompanyBill(String billId, double amount, {String? note, String? payDate}) {
     final bi = db.companyBills.indexWhere((b) => b.id == billId);
     if (bi < 0) return;
     final maxPay = db.companyBills[bi].remaining;
@@ -2707,10 +3220,12 @@ class AppProvider extends ChangeNotifier {
     final paid = amount > maxPay ? maxPay : amount;
     final overpay = amount > maxPay ? amount - maxPay : 0.0; // دفع زيادة
     if (paid > 0) {
+      final now = DateTime.now();
       db.companyBills[bi].payments.add(BillPayment(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        id: now.millisecondsSinceEpoch.toString(),
         amount: paid,
-        date: _today(),
+        date: (payDate != null && payDate.trim().isNotEmpty) ? payDate.trim() : _today(),
+        time: '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
         note: note,
       ));
     }

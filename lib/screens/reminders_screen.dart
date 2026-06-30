@@ -89,6 +89,12 @@ class _SettingsTab extends StatelessWidget {
     final expiringLines = _countExpiring(prov.db.groups, 30);
     final endingOffers = _countOffersEnding(prov.db.groups, 30);
     final vouchersDue = _countVouchersDue(prov.db.groups, 30);
+    // فواتير شركات قرب موعد دفعها (خلال 7 أيام) أو فات
+    final billsDueSoon = prov.db.companyBills.where((b) {
+      if (b.isPaid) return false;
+      final d = prov.billGraceDaysLeft(b);
+      return d != null && d <= 7;
+    }).length;
 
     return ListView(
       padding: const EdgeInsets.all(12),
@@ -118,6 +124,8 @@ class _SettingsTab extends StatelessWidget {
             const SizedBox(height: 6),
             Row(children: [
               _statPill('$vouchersDue قسيمة قادمة', '🎫', vouchersDue > 0),
+              const SizedBox(width: 8),
+              _statPill('$billsDueSoon فاتورة قرب موعدها', '🗓️', billsDueSoon > 0),
             ]),
           ]),
         ),
@@ -249,6 +257,31 @@ class _SettingsTab extends StatelessWidget {
               value: prov.notifMonthlyDay,
               onChanged: (d) {
                 prov.setNotifMonthlyDay(d);
+                onChanged();
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        // ── 7. Bill-due reminder (فواتير الشركات) ──────────
+        _NotifCard(
+          emoji: '🗓️',
+          title: 'تذكير مواعيد دفع الفواتير',
+          subtitle: 'إشعار قبل آخر موعد دفع فاتورة الشركة (التاريخ + السماح)',
+          active: prov.notifBillDue,
+          badge: billsDueSoon > 0 ? '$billsDueSoon فاتورة' : null,
+          onToggle: (v) {
+            prov.setNotifBillDue(v);
+            onChanged();
+          },
+          children: [
+            _DaysRow(
+              label: 'التنبيه قبل',
+              value: prov.notifBillDueDays,
+              options: const [0, 1, 2, 3, 5, 7],
+              onChanged: (d) {
+                prov.setNotifBillDueDays(d);
                 onChanged();
               },
             ),
@@ -775,7 +808,9 @@ class _DebtorsTab extends StatelessWidget {
                         ? AppColors.green
                         : AppColors.muted;
 
-            return Container(
+            return GestureDetector(
+              onTap: () => _openMember(context, m, g),
+              child: Container(
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -815,20 +850,73 @@ class _DebtorsTab extends StatelessWidget {
                           style: GoogleFonts.cairo(
                               fontSize: 11, color: AppColors.muted)),
                       const SizedBox(height: 6),
-                      GestureDetector(
-                        onTap: () => _sendWA(m.waPhone, m.name, debt, m.price),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                              color: AppColors.waGreen,
-                              borderRadius: BorderRadius.circular(16)),
-                          child: Text('💬 تذكير واتساب',
-                              style: GoogleFonts.cairo(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 11)),
-                        ),
+                      // شارات: واتساب + كفيل + تأجيل — عشان الموظف يفرّق بسرعة
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          GestureDetector(
+                            onTap: () {
+                              prov.recordReminderSent(m.id, 'wa');
+                              _sendWA(m.waPhone, m.name, debt, m.price);
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                  color: AppColors.waGreen,
+                                  borderRadius: BorderRadius.circular(16)),
+                              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                Text('💬 تذكير واتساب',
+                                    style: GoogleFonts.cairo(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 11)),
+                                // عدّاد الرسائل المبعوتة (إجمالي)
+                                if (m.reminderLog.isNotEmpty) ...[
+                                  const SizedBox(width: 5),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 1),
+                                    decoration: BoxDecoration(
+                                        color: Colors.white.withValues(alpha: 0.3),
+                                        borderRadius: BorderRadius.circular(10)),
+                                    child: Text('✉️ ${m.reminderLog.length}',
+                                        style: GoogleFonts.cairo(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w900,
+                                            fontSize: 10)),
+                                  ),
+                                ],
+                              ]),
+                            ),
+                          ),
+                          // 🤝 كفيل — يظهر فقط لو العميل تحت كفيل، ادوس تعرف مين
+                          if (m.guarantorName != null &&
+                              m.guarantorName!.trim().isNotEmpty)
+                            GestureDetector(
+                              onTap: () => _showGuarantor(context, m),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                    color: const Color(0xFFEDE7F6),
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                        color: const Color(0xFFB39DDB))),
+                                child: Text('🤝 كفيل',
+                                    style: GoogleFonts.cairo(
+                                        color: const Color(0xFF4527A0),
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 11)),
+                              ),
+                            ),
+                          // ⏳ تأجيل — دايرة بعدّاد تنازلي للميعاد
+                          if (m.deferralDate != null &&
+                              m.deferralDate!.isNotEmpty)
+                            _deferralChip(m),
+                        ],
                       ),
                     ])),
                 Container(
@@ -849,11 +937,22 @@ class _DebtorsTab extends StatelessWidget {
                   ]),
                 ),
               ]),
+            ),
             );
           },
         ),
       ),
     ]);
+  }
+
+  void _openMember(BuildContext context, Member m, Group g) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (_) => MemberDrawer(member: m, group: g),
+    );
   }
 
   Future<void> _sendWA(
@@ -863,6 +962,90 @@ class _DebtorsTab extends StatelessWidget {
         'السلام عليكم $name 👋\nإجمالي مديونيتك: ${debt.toStringAsFixed(0)} ج\nالاشتراك الشهري: ${price.toStringAsFixed(0)} ج\nيرجى السداد 🙏');
     final url = 'https://wa.me/$p?text=$msg';
     if (await canLaunchUrl(Uri.parse(url))) launchUrl(Uri.parse(url));
+  }
+
+  // كارت يعرض اسم الكفيل ورقمه — «العميل ده تحت مين»
+  void _showGuarantor(BuildContext context, Member m) {
+    final phone = m.guarantorPhone ?? '';
+    showDialog(
+      context: context,
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(children: [
+            const Text('🤝', style: TextStyle(fontSize: 20)),
+            const SizedBox(width: 8),
+            Text('الكفيل', style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 16)),
+          ]),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${m.name} تحت كفالة:',
+                style: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted)),
+            const SizedBox(height: 6),
+            Text(m.guarantorName ?? '-',
+                style: GoogleFonts.cairo(fontSize: 16, fontWeight: FontWeight.w900, color: const Color(0xFF4527A0))),
+            if (phone.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(phone,
+                  style: GoogleFonts.cairo(fontSize: 13, color: AppColors.text),
+                  textDirection: TextDirection.ltr),
+            ],
+          ]),
+          actions: [
+            if (phone.isNotEmpty)
+              TextButton.icon(
+                icon: const Icon(Icons.chat, color: AppColors.waGreen, size: 18),
+                label: Text('واتساب الكفيل', style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+                onPressed: () {
+                  final p = phone.replaceFirst(RegExp(r'^0'), '20');
+                  launchUrl(Uri.parse('https://wa.me/$p'),
+                      mode: LaunchMode.externalApplication);
+                },
+              ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('تمام', style: GoogleFonts.cairo()),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // شارة التأجيل: دايرة + عدّاد تنازلي للميعاد (أو «انتهى» لو فات)
+  Widget _deferralChip(Member m) {
+    final d = _parseYmd(m.deferralDate!);
+    final now = DateTime.now();
+    int? daysLeft;
+    if (d != null) {
+      daysLeft = d.difference(DateTime(now.year, now.month, now.day)).inDays;
+    }
+    final over = daysLeft != null && daysLeft < 0;
+    final bg = over ? const Color(0xFFFFEBEE) : const Color(0xFFFFF3E0);
+    final fg = over ? const Color(0xFFC62828) : const Color(0xFFE65100);
+    final label = daysLeft == null
+        ? '⏳ مؤجّل'
+        : over
+            ? '⏳ التأجيل انتهى من ${-daysLeft} يوم'
+            : (daysLeft == 0 ? '⏳ التأجيل ينتهي النهارده' : '⏳ مؤجّل · باقي $daysLeft يوم');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: fg.withValues(alpha: 0.4))),
+      child: Text(label,
+          style: GoogleFonts.cairo(
+              color: fg, fontWeight: FontWeight.w800, fontSize: 11)),
+    );
+  }
+
+  static DateTime? _parseYmd(String s) {
+    final p = s.split('-');
+    if (p.length < 3) return null;
+    final y = int.tryParse(p[0]), mo = int.tryParse(p[1]), d = int.tryParse(p[2]);
+    if (y == null || mo == null || d == null) return null;
+    return DateTime(y, mo, d);
   }
 }
 

@@ -37,6 +37,9 @@ class SupabaseService {
   // ── User Data Sync ────────────────────────────────────────────
   static String? get userId => client.auth.currentUser?.id;
 
+  /// إيميل المستخدم الحالي (للمالك). الموظف بيستخدم اسمه من [employeeName].
+  static String? get userEmail => client.auth.currentUser?.email;
+
   // ── سياق الموظف (RBAC) ────────────────────────────────────────
   // لو المستخدم موظف: بياناته الفعّالة هي بيانات المالك (ownerId)،
   // مش بياناته هو. ده اللي بيخلّيه يشتغل على نفس داتا المحل.
@@ -352,7 +355,10 @@ class SupabaseService {
       if (status == 'active') {
         final session = data['session'];
         final refresh = session is Map ? session['refresh_token']?.toString() : null;
-        if (refresh == null) return (status: 'error', msg: 'فشل تجهيز الجلسة');
+        final access  = session is Map ? session['access_token']?.toString() : null;
+        if (refresh == null || access == null) {
+          return (status: 'error', msg: 'فشل تجهيز الجلسة');
+        }
         // مهم: نظبط سياق الموظف ونحفظه قبل setSession، عشان حدث «تسجيل الدخول»
         // اللي بيطلقه setSession يلاقي isEmployee=true فيحمّل مجموعات الموظف بس
         // (مش يعامله كمالك ويوريه كل المجموعات).
@@ -360,7 +366,11 @@ class SupabaseService {
         employeeId       = data['employeeId']?.toString();
         employeeName     = data['employeeName']?.toString() ?? name.trim();
         await _persistEmployeeContext();
-        await client.auth.setSession(refresh);
+        // نمرّر الـ access token مع الـ refresh: لما يكون موجود وصالح، gotrue
+        // بيبني الجلسة من التوكنات مباشرة بدل ما يعمل refresh شبكي — المسار ده
+        // كان بيفشل أحياناً ويمسح الجلسة (signedOut) فيرجّع الموظف لشاشة الدخول.
+        // كمان المسار ده بيطلق حدث signedIn اللي بيشغّل تحميل بيانات المحل.
+        await client.auth.setSession(refresh, accessToken: access);
         return (status: 'active', msg: '');
       }
       final err = data['error']?.toString() ?? 'فشل الدخول';

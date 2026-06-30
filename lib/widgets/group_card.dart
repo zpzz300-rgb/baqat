@@ -17,14 +17,24 @@ import '../services/notification_service.dart';
 
 class GroupCard extends StatefulWidget {
   final Group group;
-  const GroupCard({super.key, required this.group});
+  final bool initiallyExpanded; // يتفتح تلقائياً (مثلاً بعد البحث عن عميل)
+  const GroupCard({super.key, required this.group, this.initiallyExpanded = false});
 
   @override
   State<GroupCard> createState() => _GroupCardState();
 }
 
 class _GroupCardState extends State<GroupCard> {
-  bool _expanded = false;
+  late bool _expanded = widget.initiallyExpanded;
+
+  @override
+  void didUpdateWidget(GroupCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // لو اتطلب فتحها بعد البحث وهي كانت مقفولة → افتحها
+    if (!oldWidget.initiallyExpanded && widget.initiallyExpanded && !_expanded) {
+      setState(() => _expanded = true);
+    }
+  }
 
   // Provider-based header gradient
   LinearGradient _providerGradient(String? provider) {
@@ -110,6 +120,9 @@ class _GroupCardState extends State<GroupCard> {
     final landlineCount = members.where((m) => m.type == 'landline').length;
     final home4gCount = members.where((m) => m.type == 'homeforgee').length;
     final isSpecialLine = landlineCount > 0 || home4gCount > 0;
+    // عدد العملاء العاديين فقط (بدون الأرضي/الهوم فور جي — دول اكسبشن إضافي
+    // وبيظهروا برموز بارزة منفصلة، فلا يُحسبوا مع عدد العملاء).
+    final regularCount = members.length - landlineCount - home4gCount;
     final unresolvedComplaints =
         group.complaints.where((c) => c['resolved'] != true).length;
 
@@ -179,7 +192,7 @@ class _GroupCardState extends State<GroupCard> {
                       context,
                       prov,
                       group,
-                      members.length,
+                      regularCount,
                       landlineCount,
                       home4gCount,
                       unresolvedComplaints,
@@ -247,16 +260,14 @@ class _GroupCardState extends State<GroupCard> {
                       _buildRentalIndicator(context, prov),
                       _badge(_cycleLabel(group), AppColors.blueLight,
                           AppColors.blue3, AppColors.blueMid),
-                      _buildClientsBadge(members.length, group),
+                      _buildClientsBadge(regularCount, debtors, group),
                       ..._buildMemberTypeBadges(members),
-                      if (debtors > 0)
-                        _badge('$debtors مديون', AppColors.redLight,
-                            AppColors.red2, const Color(0xFFef9a9a)),
                       if (debt == 0 && members.isNotEmpty)
                         _badge('✅ سداد تام', AppColors.greenLight,
                             const Color(0xFF00695c), const Color(0xFF80cbc4)),
                       if (group.lastBillAmount > 0 || group.billDebt > 0)
                         _buildBillBadge(context, prov, group),
+                      _buildNearestBillBadge(prov),
                       if (group.type == 'manual' && group.manualDueDate != null)
                         _buildManualDueDateBadge(group),
                       _buildProfitBadge(prov),
@@ -616,8 +627,6 @@ class _GroupCardState extends State<GroupCard> {
         : freePercent < 0.30
             ? AppColors.orange
             : AppColors.green;
-    final mainLineGb = widget.group.mainLineAllocationGb;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -690,16 +699,6 @@ class _GroupCardState extends State<GroupCard> {
               'الإجمالي: $total GB',
               style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted),
             ),
-            if (mainLineGb > 0) ...[
-              const SizedBox(width: 8),
-              Text(
-                '(الخط الرئيسي: $mainLineGb)',
-                style: GoogleFonts.cairo(
-                    fontSize: 10,
-                    color: AppColors.blue2,
-                    fontWeight: FontWeight.w700),
-              ),
-            ],
             const Spacer(),
             GestureDetector(
               onTap: () => _showExtraBundleDialog(prov),
@@ -1166,7 +1165,7 @@ class _GroupCardState extends State<GroupCard> {
                                           fontSize: 13),
                                       overflow: TextOverflow.ellipsis)),
                               _miniUsage('📶', '${m.gb}'),
-                              _miniUsage('📞', '${m.minutesAllocation}'),
+                              _miniUsage('📞', '${m.effectiveMinutes}'),
                               _miniUsage('🌍', '${m.internationalAllocation}'),
                             ]),
                           );
@@ -1256,6 +1255,39 @@ class _GroupCardState extends State<GroupCard> {
     );
   }
 
+  // ── Nearest Bill Badge — أقرب فاتورة شركة غير مدفوعة (موعد الدفع) ──
+  // بره على الكارت بيبان أقرب فاتورة بس؛ التفاصيل الكاملة لكل فاتورة في شاشة الفواتير.
+  Widget _buildNearestBillBadge(AppProvider prov) {
+    final nearest = prov.nearestUnpaidBill(widget.group.id);
+    if (nearest == null) return const SizedBox.shrink();
+    final (bill, days) = nearest;
+    final deadline = prov.billDeadlineDate(bill);
+    if (deadline == null) return const SizedBox.shrink();
+    final dd = '${deadline.day}/${deadline.month}';
+    final over = days < 0;
+    final urgent = !over && days <= 3;
+    final bg = over
+        ? const Color(0xFFFFEBEE)
+        : (urgent ? const Color(0xFFFFF3E0) : const Color(0xFFE8F5E9));
+    final fg = over
+        ? const Color(0xFFC62828)
+        : (urgent ? const Color(0xFFE65100) : const Color(0xFF00695C));
+    final label = over
+        ? '🔴 فاتورة فات موعدها بـ ${-days} يوم'
+        : (days == 0 ? '🟠 فاتورة آخر يوم دفع' : '🗓️ أقرب فاتورة: $dd ($days يوم)');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: fg.withValues(alpha: 0.4)),
+      ),
+      child: Text(label,
+          style: GoogleFonts.cairo(
+              fontSize: 10, fontWeight: FontWeight.w900, color: fg)),
+    );
+  }
+
   // ── Defer Badge — فاتورة مؤجَّلة لميعاد سماح ──────────────────
   Widget _buildDeferBadge(AppProvider prov) {
     final bill = prov.activeDeferredBill(widget.group.id);
@@ -1292,7 +1324,7 @@ class _GroupCardState extends State<GroupCard> {
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Text(
-            pts > 0 ? '🏆 $pts نقطة = $value ج' : '🏆 نقاط: 0',
+            pts > 0 ? '🏆 $value ج' : '🏆 0',
             style: GoogleFonts.cairo(
               fontSize: 10,
               fontWeight: FontWeight.w800,
@@ -1360,25 +1392,125 @@ class _GroupCardState extends State<GroupCard> {
 
   // ── Profit Badge ─────────────────────────────────────────────
   Widget _buildProfitBadge(AppProvider prov) {
-    final profit = prov.db.groupProfit(widget.group.id);
-    if (widget.group.actualBillAmount == null) return const SizedBox.shrink();
+    final profit = prov.db.groupNetProfit(widget.group.id, prov.db.rentals);
+    // يظهر لو فيه فاتورة ثابتة متكتوبة أو فاتورة فعلية أو مجموعة يدوية
+    final show = widget.group.fixedBillAmount > 0 ||
+        widget.group.actualBillAmount != null ||
+        widget.group.type == 'manual';
+    if (!show) return const SizedBox.shrink();
     final isPos = profit >= 0;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: isPos ? AppColors.greenLight : AppColors.redLight,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-            color: (isPos ? AppColors.green : AppColors.red)
-                .withValues(alpha: 0.4)),
+    return GestureDetector(
+      onTap: () => _showProfitBreakdown(prov),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: isPos ? AppColors.greenLight : AppColors.redLight,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+              color: (isPos ? AppColors.green : AppColors.red)
+                  .withValues(alpha: 0.4)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(
+            '${isPos ? "💰" : "📉"} ربح: ${profit.toStringAsFixed(0)} ج',
+            style: GoogleFonts.cairo(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                color: isPos ? AppColors.green2 : AppColors.red2),
+          ),
+          const SizedBox(width: 3),
+          Icon(Icons.info_outline,
+              size: 11, color: isPos ? AppColors.green2 : AppColors.red2),
+        ]),
       ),
-      child: Text(
-        '${isPos ? "💰" : "📉"} ربح: ${profit.toStringAsFixed(0)} ج',
-        style: GoogleFonts.cairo(
-            fontSize: 10,
-            fontWeight: FontWeight.w800,
-            color: isPos ? AppColors.green2 : AppColors.red2),
+    );
+  }
+
+  void _showProfitBreakdown(AppProvider prov) {
+    final b = prov.db.groupProfitBreakdown(widget.group.id, prov.db.rentals);
+    final hasFixed = (b['hasFixed'] ?? 0) == 1;
+    final net = b['net'] ?? 0;
+    String f(double? v) => (v ?? 0).toStringAsFixed(0);
+    showDialog(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Row(children: [
+            const Text('💰', style: TextStyle(fontSize: 20)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('تفصيل ربح المجموعة',
+                  style: GoogleFonts.cairo(
+                      fontWeight: FontWeight.w900, fontSize: 16)),
+            ),
+          ]),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            if (!hasFixed)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF3E0),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFFB74D)),
+                ),
+                child: Text(
+                    '⚠️ مفيش «فاتورة ثابتة» متكتوبة للخط — عشان كده ربح الاشتراكات = صفر. اكتبها من إعدادات الخط.',
+                    style: GoogleFonts.cairo(
+                        fontSize: 11, color: const Color(0xFFE65100))),
+              ),
+            _pRow('➕ إيرادات العملاء', f(b['income']), AppColors.green2),
+            if (hasFixed)
+              _pRow('➖ الفاتورة الثابتة', '−${f(b['fixedBill'])}', AppColors.red2),
+            if (hasFixed && (b['extraFee'] ?? 0) > 0)
+              _pRow('➖ عملاء زيادة', '−${f(b['extraFee'])}', AppColors.red2),
+            if (hasFixed && (b['extraBundle'] ?? 0) > 0)
+              _pRow('➖ باقات إضافية للشهر', '−${f(b['extraBundle'])}',
+                  AppColors.red2),
+            if ((b['points'] ?? 0) > 0)
+              _pRow('➕ نقاط الشهر', '+${f(b['points'])}', AppColors.green2),
+            if ((b['rental'] ?? 0) > 0)
+              _pRow('➕ إيجار الخط الرئيسي', '+${f(b['rental'])}',
+                  AppColors.green2),
+            if ((b['gift'] ?? 0) > 0)
+              _pRow('➕ هدايا الشهر', '+${f(b['gift'])}', AppColors.green2),
+            const Divider(height: 18),
+            _pRow('= صافي ربح المجموعة', '${f(net)} ج',
+                net >= 0 ? AppColors.green2 : AppColors.red2,
+                bold: true),
+          ]),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('تمام',
+                  style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
       ),
+    );
+  }
+
+  Widget _pRow(String label, String value, Color color, {bool bold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(children: [
+        Expanded(
+          child: Text(label,
+              style: GoogleFonts.cairo(
+                  fontSize: bold ? 14 : 12.5,
+                  fontWeight: bold ? FontWeight.w900 : FontWeight.w600)),
+        ),
+        Text(value,
+            style: GoogleFonts.cairo(
+                fontSize: bold ? 15 : 13,
+                fontWeight: FontWeight.w900,
+                color: color)),
+      ]),
     );
   }
 
@@ -1615,6 +1747,8 @@ class _GroupCardState extends State<GroupCard> {
   // ── LineType Badge ────────────────────────────────────────────
   Widget _buildLineTypeBadge([Group? g]) {
     final lt = (g ?? widget.group).lineType;
+    // كل مجموعة أصلاً تحت رقم موبايل — فالبادچ ده زيادة للموبايل، نخفيه.
+    if (lt == LineType.mobile) return const SizedBox.shrink();
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
@@ -1628,24 +1762,51 @@ class _GroupCardState extends State<GroupCard> {
     );
   }
 
-  // ── Clients Badge (red excess indicator) ─────────────────────
-  Widget _buildClientsBadge(int count, [Group? g]) {
+  // ── Clients Badge (عدد العملاء + نقاط حمرا للمدينين + تنبيه الزيادة) ──
+  Widget _buildClientsBadge(int count, int debtors, [Group? g]) {
     final group = g ?? widget.group;
     final max = group.maxClients;
     final isExempt =
         group.lineType == LineType.home4g || group.lineType == LineType.adsl;
-    if (max == null || count <= max || isExempt) {
-      return _badge('$count عميل', AppColors.blueLight, AppColors.blue3,
-          AppColors.blueMid);
-    }
-    final excess = count - max;
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      _badge(
-          '$max عميل', AppColors.blueLight, AppColors.blue3, AppColors.blueMid),
-      const SizedBox(width: 4),
-      _badge('+$excess زيادة', AppColors.redLight, AppColors.red2,
-          const Color(0xFFef9a9a)),
-    ]);
+    final excess = (max != null && !isExempt && count > max) ? count - max : 0;
+    final hasExcess = excess > 0;
+    // صف النقاط: حمرا بعدد المدينين، رمادي للباقي (بحد أقصى 12 نقطة للوضوح)
+    final dotCount = count.clamp(0, 12);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: hasExcess ? AppColors.redLight : AppColors.blueLight,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: hasExcess ? const Color(0xFFef9a9a) : AppColors.blueMid),
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.people, size: 12, color: hasExcess ? AppColors.red2 : AppColors.blue3),
+          const SizedBox(width: 3),
+          Text('$count عميل',
+              style: GoogleFonts.cairo(fontSize: 10, fontWeight: FontWeight.w800,
+                  color: hasExcess ? AppColors.red2 : AppColors.blue3)),
+          if (hasExcess) ...[
+            const SizedBox(width: 4),
+            Text('+$excess زيادة',
+                style: GoogleFonts.cairo(fontSize: 9, fontWeight: FontWeight.w900, color: AppColors.red2)),
+          ],
+        ]),
+        if (dotCount > 0) ...[
+          const SizedBox(height: 3),
+          Wrap(spacing: 3, runSpacing: 3, children: List.generate(dotCount, (i) {
+            final isDebtor = i < debtors;
+            return Container(
+              width: 7, height: 7,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isDebtor ? AppColors.red : const Color(0xFFBBD3EA),
+              ),
+            );
+          })),
+        ],
+      ]),
+    );
   }
 
   // ── Member Type Badges ────────────────────────────────────────
@@ -1653,12 +1814,13 @@ class _GroupCardState extends State<GroupCard> {
     final landline = members.where((m) => m.type == 'landline').length;
     final home4g = members.where((m) => m.type == 'homeforgee').length;
     final widgets = <Widget>[];
+    // أيقونة فقط بدون كلمة — الشكل بيوضّح النوع
     if (landline > 0) {
-      widgets.add(_badge('☎️ أرضي: $landline', const Color(0xFFE3F2FD),
+      widgets.add(_badge(landline > 1 ? '☎️ $landline' : '☎️', const Color(0xFFE3F2FD),
           const Color(0xFF1565C0), const Color(0xFF42A5F5)));
     }
     if (home4g > 0) {
-      widgets.add(_badge('🏠 هوم فور جي: $home4g', const Color(0xFFF3E5F5),
+      widgets.add(_badge(home4g > 1 ? '🏠 $home4g' : '🏠', const Color(0xFFF3E5F5),
           const Color(0xFF6A1B9A), const Color(0xFFAB47BC)));
     }
     return widgets;

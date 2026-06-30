@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
@@ -10,6 +11,26 @@ import '../services/notification_service.dart';
 import 'common.dart';
 import 'edit_member_modal.dart';
 import 'pin_dialog.dart';
+
+// ─── قوالب رسائل الهدايا (قابلة للتعديل وتُحفظ في SharedPreferences) ───
+// المتغيّرات: {اسم} {الهدية} {جيجا} {دقائق} {الخدمات} {الشهر} {العدد} {رقم} {الخط}
+const String _kDefaultGiftNow =
+    '🎁 هدية ليك يا {اسم} 🎁\n'
+    'ـــــــــــــــــــــ\n'
+    '✨ {الهدية}\n'
+    'ـــــــــــــــــــــ\n'
+    'دي هدية مننا 🤍 شكراً لتعاملك معانا 🌟';
+
+const String _kDefaultGiftMonth =
+    '📊 كشف هدايا شهر {الشهر} 🎁\n'
+    'أهلاً يا {اسم} 👋\n'
+    'ـــــــــــــــــــــ\n'
+    '🌐 نت: {جيجا} جيجا\n'
+    '⏱️ دقائق: {دقائق} دقيقة\n'
+    '🎁 عدد الهدايا: {العدد}\n'
+    '{الخدمات}'
+    'ـــــــــــــــــــــ\n'
+    'كل ده هدية مننا خلال الشهر 🤍 ربنا يخليك معانا 🌟';
 
 class MemberCard extends StatelessWidget {
   final Member member;
@@ -292,12 +313,21 @@ class CompactMemberCard extends StatelessWidget {
     else if (flag == 'yellow') { flagColor = const Color(0xFFFFCA28); }
     else if (flag == 'green') { flagColor = const Color(0xFF66BB6A); }
 
+    // أنواع خاصة: أرضي (أزرق) / هوم فور جي (بنفسجي) — لون وحدود مميزة وسط المربعات
+    final isLandline = member.type == 'landline';
+    final isHome4g = member.type == 'homeforgee';
+    final isSpecial = isLandline || isHome4g;
+    final specialColor = isLandline ? const Color(0xFF1565C0) : const Color(0xFF6A1B9A);
+    final specialBg = isLandline ? const Color(0xFFEAF4FF) : const Color(0xFFF7EEFB);
+
     final borderColor = highDebt
         ? AppColors.red
         : (flag == 'red'
             ? const Color(0xFFEF5350)
-            : (isStockNumber ? Colors.orange : AppColors.border));
-    final borderWidth = (highDebt || flag == 'red' || isStockNumber) ? 2.0 : 1.5;
+            : (isStockNumber
+                ? Colors.orange
+                : (isSpecial ? specialColor : AppColors.border)));
+    final borderWidth = (highDebt || flag == 'red' || isStockNumber || isSpecial) ? 2.0 : 1.5;
 
     final displayName = isStockNumber ? 'رقم متاح' : member.name;
     final balanceTxt = member.balance == 0
@@ -310,7 +340,9 @@ class CompactMemberCard extends StatelessWidget {
       onTap: () => MemberCard(member: member, group: group)._openDrawer(context),
       child: Container(
         decoration: BoxDecoration(
-          color: highDebt ? const Color(0xFFFFF5F5) : Colors.white,
+          color: highDebt
+              ? const Color(0xFFFFF5F5)
+              : (isSpecial ? specialBg : Colors.white),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: borderColor, width: borderWidth),
           boxShadow: [
@@ -407,30 +439,42 @@ class MemberDrawer extends StatefulWidget {
 }
 
 class _MemberDrawerState extends State<MemberDrawer> {
-  // Payment
-  final _payCtrl = TextEditingController();
-  final _payNoteCtrl = TextEditingController();
-  // Service (GB/minutes/other)
+  // Gift / Service (GB / minutes / other)
+  final _gbCtrl = TextEditingController();
+  final _minCtrl = TextEditingController();
   final _svcDescCtrl = TextEditingController();
   final _svcAmtCtrl = TextEditingController();
   bool _svcIsPaid = false;
-  // Manual adjustment
+  // Manual adjustment / payment (merged)
   final _manAmt = TextEditingController();
   final _manReason = TextEditingController();
   // Notes
   final _noteCtrl = TextEditingController();
   bool _noteDirty = false;
+  // Editable message templates
+  String _giftNowTpl = _kDefaultGiftNow;
+  String _giftMonthTpl = _kDefaultGiftMonth;
 
   @override
   void initState() {
     super.initState();
     _noteCtrl.text = widget.member.notes ?? '';
+    _loadTemplates();
+  }
+
+  Future<void> _loadTemplates() async {
+    final p = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _giftNowTpl = p.getString('tcm_gift_now_tpl') ?? _kDefaultGiftNow;
+      _giftMonthTpl = p.getString('tcm_gift_month_tpl') ?? _kDefaultGiftMonth;
+    });
   }
 
   @override
   void dispose() {
-    _payCtrl.dispose();
-    _payNoteCtrl.dispose();
+    _gbCtrl.dispose();
+    _minCtrl.dispose();
     _svcDescCtrl.dispose();
     _svcAmtCtrl.dispose();
     _manAmt.dispose();
@@ -473,32 +517,28 @@ class _MemberDrawerState extends State<MemberDrawer> {
             child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // 1. Info boxes
+                  // 1. Info boxes (المديونية + قيمة الاشتراك)
                   _buildInfoRow(member),
                   const SizedBox(height: 10),
 
-                  // 2. Join date + notes
+                  // 2. Payment / manual debt adjustment — مرفوع لفوق تحت المديونية مباشرة
+                  _buildManualAdjustment(prov),
+                  const SizedBox(height: 12),
+
+                  // 3. Join date + notes
                   _buildDateAndNotes(member, prov),
                   const SizedBox(height: 12),
 
-                  // 2b. Deferral status
+                  // 3b. Deferral status
                   _buildDeferralSection(member, prov),
                   const SizedBox(height: 12),
 
-                  // 3. Quick action buttons
+                  // 4. Quick action buttons
                   _buildQuickButtons(member, prov),
                   const SizedBox(height: 12),
 
-                  // 4. Payment registration
-                  _buildPaySection(prov),
-                  const SizedBox(height: 12),
-
-                  // 5. Add service/GB/minutes
-                  _buildServiceSection(prov),
-                  const SizedBox(height: 12),
-
-                  // 6. Manual debt adjustment
-                  _buildManualAdjustment(prov),
+                  // 5. Gift / service (GB / minutes) + messages
+                  _buildServiceSection(member, prov),
                   const SizedBox(height: 12),
 
                   // 7. Full log
@@ -1049,47 +1089,39 @@ class _MemberDrawerState extends State<MemberDrawer> {
     );
   }
 
-  // ── PAYMENT FORM ────────────────────────────────────────────
-  Widget _buildPaySection(AppProvider prov) {
+  // ── GIFT / SERVICE SECTION (GB / minutes) ───────────────────
+  Widget _buildServiceSection(Member member, AppProvider prov) {
+    final summary = prov.monthlyGiftSummary(member.id);
+    final mGb = (summary['gb'] as double);
+    final mMin = (summary['minutes'] as double);
+    final mCount = (summary['count'] as int);
     return _card(
-      title: '= تسجيل دفعة',
-      child: Row(children: [
-        Expanded(
-          child: _field(_payCtrl, hint: 'المبلغ المدفوع...', isNum: true),
-        ),
-        const SizedBox(width: 8),
-        Expanded(child: _field(_payNoteCtrl, hint: 'ملاحظة')),
-        const SizedBox(width: 8),
-        ElevatedButton(
-          onPressed: () {
-            final amt = double.tryParse(_payCtrl.text.trim());
-            if (amt == null || amt <= 0) return;
-            prov.addPayment(widget.member.id, amt, _payNoteCtrl.text.trim());
-            _payCtrl.clear();
-            _payNoteCtrl.clear();
-            AppSnackbar.show(context, '✅ دفع ${amt.toStringAsFixed(0)} ج');
-          },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.green2,
-            foregroundColor: Colors.white,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-          ),
-          child: Text('✓ دفع',
-              style:
-                  GoogleFonts.cairo(fontWeight: FontWeight.w700, fontSize: 13)),
-        ),
-      ]),
-    );
-  }
-
-  // ── SERVICE SECTION ─────────────────────────────────────────
-  Widget _buildServiceSection(AppProvider prov) {
-    return _card(
-      title: '➕ إضافة جيجا / دقائق / خدمة',
+      title: '🎁 هدية / جيجا / دقائق',
+      trailing: GestureDetector(
+        onTap: _openGiftTemplateEditor,
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.edit_note, size: 16, color: AppColors.muted),
+          const SizedBox(width: 2),
+          Text('القالب',
+              style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted)),
+        ]),
+      ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        _field(_svcDescCtrl, hint: 'الوصف (مثال: 5 جيجا إضافية، 100 دقيقة...)'),
+        Row(children: [
+          Expanded(
+              child: _pickerField(
+                  ctrl: _gbCtrl,
+                  hint: '🌐 جيجا',
+                  presets: const [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])),
+          const SizedBox(width: 8),
+          Expanded(
+              child: _pickerField(
+                  ctrl: _minCtrl,
+                  hint: '⏱️ دقائق',
+                  presets: const [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000])),
+        ]),
+        const SizedBox(height: 8),
+        _field(_svcDescCtrl, hint: 'خدمة أخرى (اختياري)'),
         const SizedBox(height: 8),
         Row(children: [
           Expanded(
@@ -1106,31 +1138,9 @@ class _MemberDrawerState extends State<MemberDrawer> {
         SizedBox(
           width: double.infinity,
           child: ElevatedButton.icon(
-            onPressed: () async {
-              final amt = double.tryParse(_svcAmtCtrl.text.trim()) ?? 0;
-              final desc = _svcDescCtrl.text.trim();
-              if (desc.isEmpty) {
-                AppSnackbar.show(context, '⚠️ اكتب وصف الخدمة');
-                return;
-              }
-              final isPaid = _svcIsPaid && amt > 0;
-              prov.addService(widget.member.id, desc, amt, isPaid);
-              _svcDescCtrl.clear();
-              _svcAmtCtrl.clear();
-              AppSnackbar.show(context, '✅ تمت الإضافة');
-              // فتح واتساب برسالة للعميل
-              final member = widget.member;
-              final phone = member.waPhone.replaceFirst(RegExp(r'^0'), '20');
-              final msg = isPaid
-                  ? 'مرحباً ${member.name}،\nتم إضافة: $desc\nبقيمة: ${amt.toStringAsFixed(0)} ج\nرصيدك الحالي: ${(member.balance - amt).toStringAsFixed(0)} ج'
-                  : 'مرحباً ${member.name}،\nتم إضافة: $desc\nهدية مجانية 🎁';
-              final url = Uri.parse('https://wa.me/$phone?text=${Uri.encodeComponent(msg)}');
-              if (await canLaunchUrl(url)) {
-                await launchUrl(url, mode: LaunchMode.externalApplication);
-              }
-            },
-            icon: const Icon(Icons.send, size: 16, color: Colors.white),
-            label: Text('إضافة + إرسال واتساب',
+            onPressed: () => _addGiftAndSend(member, prov),
+            icon: const Icon(Icons.card_giftcard, size: 16, color: Colors.white),
+            label: Text('إضافة + إرسال رسالة الهدية',
                 style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
             style: ElevatedButton.styleFrom(
               backgroundColor: _svcIsPaid ? AppColors.orange : AppColors.green,
@@ -1140,8 +1150,179 @@ class _MemberDrawerState extends State<MemberDrawer> {
             ),
           ),
         ),
+        const SizedBox(height: 8),
+        // ── Monthly aggregated summary ──
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEDF7ED),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFB7DFB7)),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('📅 كشف هدايا الشهر (بيتصفّر كل شهر)',
+                style: GoogleFonts.cairo(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                    color: const Color(0xFF2E7D32))),
+            const SizedBox(height: 4),
+            Text('🌐 ${_fmtGb(mGb)} جيجا  •  ⏱️ ${mMin.toStringAsFixed(0)} دقيقة  •  🎁 $mCount هدية',
+                style: GoogleFonts.cairo(
+                    fontSize: 12, color: const Color(0xFF1B5E20))),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: mCount == 0
+                    ? null
+                    : () => _sendMonthlySummary(member, prov),
+                icon: const Icon(Icons.send, size: 15),
+                label: Text('إرسال الكشف المجمّع للعميل',
+                    style: GoogleFonts.cairo(
+                        fontWeight: FontWeight.w700, fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF2E7D32),
+                  side: const BorderSide(color: Color(0xFF2E7D32)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ),
+          ]),
+        ),
       ]),
     );
+  }
+
+  // حقل رقمي + منسدل (preset) مع إمكانية الكتابة اليدوي.
+  Widget _pickerField({
+    required TextEditingController ctrl,
+    required String hint,
+    required List<int> presets,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(children: [
+        Expanded(
+          child: TextField(
+            controller: ctrl,
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.cairo(fontSize: 14, fontWeight: FontWeight.w700),
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: GoogleFonts.cairo(fontSize: 13, color: AppColors.muted),
+              border: InputBorder.none,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+              isDense: true,
+            ),
+          ),
+        ),
+        PopupMenuButton<int>(
+          icon: const Icon(Icons.arrow_drop_down, color: AppColors.muted),
+          padding: EdgeInsets.zero,
+          onSelected: (v) => setState(() => ctrl.text = v.toString()),
+          itemBuilder: (_) => presets
+              .map((v) => PopupMenuItem<int>(
+                    value: v,
+                    child: Text(v.toString(),
+                        style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
+                  ))
+              .toList(),
+        ),
+      ]),
+    );
+  }
+
+  Future<void> _addGiftAndSend(Member member, AppProvider prov) async {
+    final gb = double.tryParse(_gbCtrl.text.trim()) ?? 0;
+    final mins = double.tryParse(_minCtrl.text.trim()) ?? 0;
+    final desc = _svcDescCtrl.text.trim();
+    final amt = double.tryParse(_svcAmtCtrl.text.trim()) ?? 0;
+    if (gb <= 0 && mins <= 0 && desc.isEmpty) {
+      AppSnackbar.show(context, '⚠️ اختر جيجا أو دقائق أو اكتب خدمة');
+      return;
+    }
+    final isPaid = _svcIsPaid && amt > 0;
+    prov.addGiftService(member.id,
+        gb: gb, minutes: mins, desc: desc, amount: amt, isPaid: isPaid);
+
+    // نصّ «الهدية» للرسالة الوقتية
+    final parts = <String>[];
+    if (gb > 0) parts.add('🌐 ${_fmtGb(gb)} جيجا');
+    if (mins > 0) parts.add('⏱️ ${mins.toStringAsFixed(0)} دقيقة');
+    if (desc.isNotEmpty) parts.add('🎯 $desc');
+    if (isPaid) parts.add('💰 بقيمة ${amt.toStringAsFixed(0)} ج');
+    final giftText = parts.join('\n');
+
+    _gbCtrl.clear();
+    _minCtrl.clear();
+    _svcDescCtrl.clear();
+    _svcAmtCtrl.clear();
+    if (mounted) AppSnackbar.show(context, '✅ تمت الإضافة');
+
+    final msg = _giftNowTpl
+        .replaceAll('{اسم}', member.salutation)
+        .replaceAll('{الهدية}', giftText)
+        .replaceAll('{جيجا}', _fmtGb(gb))
+        .replaceAll('{دقائق}', mins.toStringAsFixed(0))
+        .replaceAll('{رقم}', member.phone)
+        .replaceAll('{الخط}', widget.group.phone);
+    await _sendWA(member, msg);
+  }
+
+  Future<void> _sendMonthlySummary(Member member, AppProvider prov) async {
+    final s = prov.monthlyGiftSummary(member.id);
+    final gb = s['gb'] as double;
+    final mins = s['minutes'] as double;
+    final items = (s['items'] as List).cast<String>();
+    final count = s['count'] as int;
+    const months = ['', 'يناير', 'فبراير', 'مارس', 'إبريل', 'مايو', 'يونيو',
+      'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+    final now = DateTime.now();
+    final itemsText =
+        items.isEmpty ? '' : '${items.map((e) => '• $e').join('\n')}\n';
+    final msg = _giftMonthTpl
+        .replaceAll('{اسم}', member.salutation)
+        .replaceAll('{الشهر}', months[now.month])
+        .replaceAll('{جيجا}', _fmtGb(gb))
+        .replaceAll('{دقائق}', mins.toStringAsFixed(0))
+        .replaceAll('{العدد}', count.toString())
+        .replaceAll('{الخدمات}', itemsText)
+        .replaceAll('{رقم}', member.phone)
+        .replaceAll('{الخط}', widget.group.phone);
+    await _sendWA(member, msg);
+  }
+
+  String _fmtGb(double v) =>
+      v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+
+  Future<void> _sendWA(Member member, String msg) async {
+    final phone = member.waPhone.replaceFirst(RegExp(r'^0'), '20');
+    final url =
+        Uri.parse('https://wa.me/$phone?text=${Uri.encodeComponent(msg)}');
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  Future<void> _openGiftTemplateEditor() async {
+    final changed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useRootNavigator: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _GiftTemplateSheet(
+        nowTpl: _giftNowTpl,
+        monthTpl: _giftMonthTpl,
+      ),
+    );
+    if (changed == true) _loadTemplates();
   }
 
   // ── MANUAL ADJUSTMENT ───────────────────────────────────────
@@ -1155,16 +1336,16 @@ class _MemberDrawerState extends State<MemberDrawer> {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          const Text('✏️', style: TextStyle(fontSize: 15)),
+          const Text('💵', style: TextStyle(fontSize: 15)),
           const SizedBox(width: 6),
-          Text('تعديل المديونية يدوياً',
+          Text('دفعة / تعديل رصيد',
               style: GoogleFonts.cairo(
                   fontWeight: FontWeight.w900,
                   fontSize: 13,
                   color: const Color(0xFF795548))),
         ]),
         const SizedBox(height: 4),
-        Text('أضف أو اخصم أي مبلغ يدوياً من رصيد العميل',
+        Text('سجّل دفعة (خصم من الدين) أو زوّد الدين يدوياً',
             style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted)),
         const SizedBox(height: 10),
         Row(children: [
@@ -1202,7 +1383,7 @@ class _MemberDrawerState extends State<MemberDrawer> {
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10)),
               ),
-              child: Text('➖ خصم من الدين',
+              child: Text('✓ دفعة / خصم',
                   style: GoogleFonts.cairo(
                       fontWeight: FontWeight.w700, fontSize: 12)),
             ),
@@ -1348,7 +1529,8 @@ class _MemberDrawerState extends State<MemberDrawer> {
             Text(entry['desc'] ?? '',
                 style: GoogleFonts.cairo(
                     fontSize: 12, fontWeight: FontWeight.w600)),
-            Text(entry['date'] ?? '',
+            Text(
+                '${entry['date'] ?? ''}${(entry['time'] ?? '').toString().isNotEmpty ? ' • ${entry['time']}' : ''}',
                 style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),
           ]),
         ),
@@ -1373,11 +1555,57 @@ class _MemberDrawerState extends State<MemberDrawer> {
           ),
         ),
         GestureDetector(
-          onTap: () => prov.deleteMemberLogEntry(widget.member.id, idx),
+          onTap: () => _editLogEntry(entry, idx, prov),
+          child: const Icon(Icons.edit_outlined,
+              size: 16, color: AppColors.blue2),
+        ),
+        const SizedBox(width: 10),
+        GestureDetector(
+          onTap: () => _confirmDeleteLogEntry(entry, idx, prov),
           child: const Icon(Icons.delete_outline,
               size: 16, color: AppColors.muted),
         ),
       ]),
+    );
+  }
+
+  void _confirmDeleteLogEntry(Map<String, dynamic> entry, int idx, AppProvider prov) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('حذف الحركة', style: GoogleFonts.cairo(fontWeight: FontWeight.w900)),
+        content: Text('حذف "${entry['desc'] ?? 'الحركة'}"؟ الرصيد هيترجع زي ما كان.',
+            style: GoogleFonts.cairo()),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('إلغاء', style: GoogleFonts.cairo())),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.red),
+            onPressed: () {
+              Navigator.pop(context);
+              prov.deleteMemberLogEntry(widget.member.id, idx);
+            },
+            child: Text('حذف', style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _editLogEntry(Map<String, dynamic> entry, int idx, AppProvider prov) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _LogEntryEditSheet(
+        entry: entry,
+        onSave: (desc, amount, date, time) {
+          prov.editMemberLogEntry(widget.member.id, idx,
+              desc: desc, amount: amount, date: date, time: time);
+        },
+      ),
     );
   }
 
@@ -1650,12 +1878,15 @@ class _MemberDrawerState extends State<MemberDrawer> {
           const SizedBox(width: 6),
           Expanded(
               child: _bottomBtn('✏️ تعديل', AppColors.blue2, () async {
-            final nav = widget.parentContext ?? context;
+            // نمسك كونتكست الـ root navigator (ثابت دايماً ومش بيتفصل لما نقفل
+            // درج العميل)، بدل الكونتكست المؤقت اللي كان بيخلّي التعديل «يهرب»
+            // لما نفتح العميل من البحث أو الكفلاء (مش من المجموعات).
+            final rootCtx = Navigator.of(context, rootNavigator: true).context;
             Navigator.pop(context);
             await Future.delayed(const Duration(milliseconds: 350));
-            if (!nav.mounted) return;
+            if (!rootCtx.mounted) return;
             showModalBottomSheet(useRootNavigator: true,
-              context: nav,
+              context: rootCtx,
               isScrollControlled: true,
               backgroundColor: Colors.transparent,
               barrierColor: Colors.black54,
@@ -1697,7 +1928,7 @@ class _MemberDrawerState extends State<MemberDrawer> {
   }
 
   // ── HELPERS ──────────────────────────────────────────────────
-  Widget _card({required String title, required Widget child}) {
+  Widget _card({required String title, required Widget child, Widget? trailing}) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1710,11 +1941,16 @@ class _MemberDrawerState extends State<MemberDrawer> {
         ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(title,
-            style: GoogleFonts.cairo(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: AppColors.muted)),
+        Row(children: [
+          Expanded(
+            child: Text(title,
+                style: GoogleFonts.cairo(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.muted)),
+          ),
+          if (trailing != null) trailing,
+        ]),
         const SizedBox(height: 10),
         child,
       ]),
@@ -1798,8 +2034,8 @@ class _MemberDrawerState extends State<MemberDrawer> {
         ? ' ${prov.debtNoteText.trim()}'
         : '';
     final msg = debt > 0
-        ? 'السلام عليكم ${m.name}، تذكير بمديونيتك ${debt.toStringAsFixed(0)} ج، الاشتراك الشهري ${m.price.toStringAsFixed(0)} ج. ${payLine.isNotEmpty ? 'الدفع: $payLine' : ''}$note'
-        : 'السلام عليكم ${m.name}، حسابك مسدد، شكرا لك.';
+        ? 'السلام عليكم ${m.salutation}، تذكير بمديونيتك ${debt.toStringAsFixed(0)} ج، الاشتراك الشهري ${m.price.toStringAsFixed(0)} ج. ${payLine.isNotEmpty ? 'الدفع: $payLine' : ''}$note'
+        : 'السلام عليكم ${m.salutation}، حسابك مسدد، شكرا لك.';
     final phone = m.waPhone;
     final url = 'sms:$phone?body=${Uri.encodeComponent(msg)}';
     if (await canLaunchUrl(Uri.parse(url))) {
@@ -1951,23 +2187,56 @@ class _MemberDrawerState extends State<MemberDrawer> {
     );
   }
 
+  /// كتلة طرق الدفع — كل رقم في سطر واضح بإيموجي، من غير تداخل.
+  String _payBlock(AppProvider prov) {
+    final b = StringBuffer();
+    for (final n in [prov.instapayPhone, prov.instapayPhone2].where((s) => s.trim().isNotEmpty)) {
+      b.writeln('📲 إنستا باي: $n');
+    }
+    for (final n in [prov.vodafoneCash, prov.vodafoneCash2].where((s) => s.trim().isNotEmpty)) {
+      b.writeln('📱 فودافون كاش: $n');
+    }
+    if (prov.bankInfo.trim().isNotEmpty) {
+      b.writeln('🏦 تحويل بنكي: ${prov.bankInfo.trim()}');
+    }
+    return b.toString().trimRight();
+  }
+
   void _openWADebtOnly(Member m) {
     final debt = m.balance < 0 ? -m.balance : 0.0;
     final prov = context.read<AppProvider>();
-    final instapay = [prov.instapayPhone, prov.instapayPhone2]
-        .where((s) => s.isNotEmpty)
-        .map((s) => '\n📲 InstaPay: $s')
-        .join('');
-    final vodafone = [prov.vodafoneCash, prov.vodafoneCash2]
-        .where((s) => s.isNotEmpty)
-        .map((s) => '\n📱 فودافون كاش: $s')
-        .join('');
+    final pay = _payBlock(prov);
     final note = (prov.debtNoteEnabled && prov.debtNoteText.trim().isNotEmpty)
-        ? '\n\n📢 ${prov.debtNoteText.trim()}'
+        ? prov.debtNoteText.trim()
         : '';
-    final msg = debt > 0
-        ? 'السلام عليكم ${m.name} 👋\nتذكير بمديونيتك: 🔴 ${debt.toStringAsFixed(0)} ج\nالاشتراك الشهري: ${m.price.toStringAsFixed(0)} ج$instapay$vodafone$note\nشكراً 🙏'
-        : 'السلام عليكم ${m.name} 👋\n✅ حسابك مسدّد، شكراً لك 🙏';
+    final String msg;
+    if (debt > 0) {
+      final months = m.price > 0 ? (debt / m.price).ceil() : 0;
+      final b = StringBuffer();
+      b.writeln('السلام عليكم ${m.salutation} 👋');
+      b.writeln('');
+      b.writeln('🔴 تذكير بمديونية مستحقة');
+      b.writeln('━━━━━━━━━━━━━');
+      b.writeln('📱 رقمك: ${m.phone}');
+      b.writeln('🛰️ الخط الرئيسي: ${widget.group.phone}');
+      b.writeln('━━━━━━━━━━━━━');
+      b.writeln('🔴 المطلوب: ${debt.toStringAsFixed(0)} ج${months > 0 ? '  ($months شهر)' : ''}');
+      b.writeln('💳 الاشتراك الشهري: ${m.price.toStringAsFixed(0)} ج');
+      if (pay.isNotEmpty) {
+        b.writeln('━━━━━━━━━━━━━');
+        b.writeln('💳 طرق الدفع:');
+        b.writeln(pay);
+      }
+      if (note.isNotEmpty) {
+        b.writeln('━━━━━━━━━━━━━');
+        b.writeln('📢 $note');
+      }
+      b.writeln('');
+      b.writeln('شكراً لتعاونك معنا 🙏');
+      msg = b.toString();
+    } else {
+      msg = 'السلام عليكم ${m.salutation} 👋\n\n✅ حسابك مسدّد بالكامل، شكراً لك 🙏';
+    }
     final phone = m.waPhone.replaceFirst(RegExp(r'^0'), '20');
     _showWAPreview(msg, phone, memberId: m.id, channel: 'wa_debt');
   }
@@ -1978,19 +2247,16 @@ class _MemberDrawerState extends State<MemberDrawer> {
         .where((l) => (l['amount'] ?? 0) > 0)
         .fold<double>(0, (s, l) => s + ((l['amount'] ?? 0) as num).toDouble());
     final debt = m.balance < 0 ? -m.balance : 0.0;
-    final instapay = [prov.instapayPhone, prov.instapayPhone2]
-        .where((s) => s.isNotEmpty)
-        .map((s) => '\n📲 InstaPay: $s')
-        .join('');
-    final vodafone = [prov.vodafoneCash, prov.vodafoneCash2]
-        .where((s) => s.isNotEmpty)
-        .map((s) => '\n📱 فودافون كاش: $s')
-        .join('');
+    final pay = _payBlock(prov);
 
     final lines = StringBuffer();
-    lines.writeln('السلام عليكم ${m.name} 👋');
-    lines.writeln('━━━━━━━━━━━━━━━');
-    lines.writeln('📋 كشف حساب تفصيلي:');
+    lines.writeln('السلام عليكم ${m.salutation} 👋');
+    lines.writeln('');
+    lines.writeln('📋 كشف حساب تفصيلي');
+    lines.writeln('━━━━━━━━━━━━━');
+    lines.writeln('📱 رقمك: ${m.phone}');
+    lines.writeln('🛰️ الخط الرئيسي: ${widget.group.phone}');
+    lines.writeln('━━━━━━━━━━━━━');
     lines.writeln('💳 الاشتراك الشهري: ${m.price.toStringAsFixed(0)} ج');
     lines.writeln('💰 إجمالي المدفوع: ${paid.toStringAsFixed(0)} ج');
     if (debt > 0) {
@@ -1998,8 +2264,8 @@ class _MemberDrawerState extends State<MemberDrawer> {
     } else {
       lines.writeln('✅ لا توجد مديونيات');
     }
-    lines.writeln('━━━━━━━━━━━━━━━');
     if (m.log.isNotEmpty) {
+      lines.writeln('━━━━━━━━━━━━━');
       lines.writeln('📌 آخر الحركات:');
       for (final log in m.log.take(8)) {
         final desc = log['desc'] ?? '';
@@ -2010,11 +2276,13 @@ class _MemberDrawerState extends State<MemberDrawer> {
         lines.writeln('• $desc$amtTxt');
       }
     }
-    if (instapay.isNotEmpty || vodafone.isNotEmpty) {
-      lines.writeln('━━━━━━━━━━━━━━━');
-      lines.writeln('💳 طرق الدفع:$instapay$vodafone');
+    if (pay.isNotEmpty) {
+      lines.writeln('━━━━━━━━━━━━━');
+      lines.writeln('💳 طرق الدفع:');
+      lines.writeln(pay);
     }
-    lines.writeln('━━━━━━━━━━━━━━━');
+    lines.writeln('');
+    lines.writeln('شكراً لتعاونك معنا 🙏');
 
     final phone = m.waPhone.replaceFirst(RegExp(r'^0'), '20');
     _showWAPreview(lines.toString(), phone,
@@ -2035,4 +2303,353 @@ class _MemberDrawerState extends State<MemberDrawer> {
       ),
     );
   }
+}
+
+// ── ورقة تعديل حركة في كشف العميل (بيان + مبلغ +/- + تاريخ + وقت) ──
+class _LogEntryEditSheet extends StatefulWidget {
+  final Map<String, dynamic> entry;
+  final void Function(String desc, double amount, String date, String time) onSave;
+  const _LogEntryEditSheet({required this.entry, required this.onSave});
+  @override
+  State<_LogEntryEditSheet> createState() => _LogEntryEditSheetState();
+}
+
+class _LogEntryEditSheetState extends State<_LogEntryEditSheet> {
+  late final TextEditingController _descCtrl;
+  late final TextEditingController _amtCtrl;
+  late bool _isCredit; // true = دفعة (موجب/له) ، false = مديونية (سالب/عليه)
+  DateTime? _date;
+  TimeOfDay? _time;
+
+  @override
+  void initState() {
+    super.initState();
+    final amount = (widget.entry['amount'] ?? 0).toDouble();
+    _isCredit = amount >= 0;
+    _descCtrl = TextEditingController(text: (widget.entry['desc'] ?? '').toString());
+    _amtCtrl  = TextEditingController(text: amount == 0 ? '' : amount.abs().toStringAsFixed(0));
+    _date = _parseDate((widget.entry['date'] ?? '').toString());
+    _time = _parseTime((widget.entry['time'] ?? '').toString());
+  }
+
+  @override
+  void dispose() { _descCtrl.dispose(); _amtCtrl.dispose(); super.dispose(); }
+
+  // التاريخ مخزّن "d/M/yyyy"
+  DateTime? _parseDate(String s) {
+    final p = s.split('/');
+    if (p.length != 3) return null;
+    final d = int.tryParse(p[0]), m = int.tryParse(p[1]), y = int.tryParse(p[2]);
+    if (d == null || m == null || y == null) return null;
+    try { return DateTime(y, m, d); } catch (_) { return null; }
+  }
+
+  TimeOfDay? _parseTime(String s) {
+    final p = s.split(':');
+    if (p.length != 2) return null;
+    final h = int.tryParse(p[0]), mi = int.tryParse(p[1]);
+    if (h == null || mi == null) return null;
+    return TimeOfDay(hour: h.clamp(0, 23), minute: mi.clamp(0, 59));
+  }
+
+  String get _dateLabel => _date == null
+      ? 'اختر التاريخ'
+      : '${_date!.day}/${_date!.month}/${_date!.year}';
+
+  String get _timeLabel => _time == null
+      ? 'اختر الوقت (اختياري)'
+      : '${_time!.hour.toString().padLeft(2, '0')}:${_time!.minute.toString().padLeft(2, '0')}';
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+      decoration: const BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      child: SingleChildScrollView(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+          Center(child: Container(width: 40, height: 4,
+              decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)))),
+          const SizedBox(height: 14),
+          Text('✏️ تعديل الحركة',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 16, color: AppColors.blue2)),
+          const SizedBox(height: 14),
+
+          // البيان / الملاحظة
+          TextField(
+            controller: _descCtrl,
+            style: GoogleFonts.cairo(fontSize: 14),
+            decoration: InputDecoration(
+              labelText: 'البيان / الملاحظة', labelStyle: GoogleFonts.cairo(),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // نوع الحركة: دفعة (له +) أو مديونية (عليه −)
+          Text('نوع الحركة', style: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          Row(children: [
+            Expanded(child: _typeBtn('➕ دفعة (له)', _isCredit, AppColors.green, () => setState(() => _isCredit = true))),
+            const SizedBox(width: 10),
+            Expanded(child: _typeBtn('➖ مديونية (عليه)', !_isCredit, AppColors.red2, () => setState(() => _isCredit = false))),
+          ]),
+          const SizedBox(height: 14),
+
+          // المبلغ
+          TextField(
+            controller: _amtCtrl,
+            keyboardType: TextInputType.number,
+            textDirection: TextDirection.ltr,
+            style: GoogleFonts.cairo(fontSize: 15, fontWeight: FontWeight.w700),
+            decoration: InputDecoration(
+              labelText: 'المبلغ (ج)', labelStyle: GoogleFonts.cairo(), suffixText: 'ج',
+              helperText: _isCredit ? 'هيتسجّل موجب (+) للعميل' : 'هيتسجّل سالب (−) على العميل',
+              helperStyle: GoogleFonts.cairo(fontSize: 10, color: _isCredit ? AppColors.green : AppColors.red2),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // التاريخ + الوقت
+          Row(children: [
+            Expanded(child: _pickerBtn(Icons.calendar_today, _dateLabel, () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _date ?? DateTime.now(),
+                firstDate: DateTime(2020), lastDate: DateTime(2100),
+              );
+              if (picked != null) setState(() => _date = picked);
+            })),
+            const SizedBox(width: 10),
+            Expanded(child: _pickerBtn(Icons.access_time, _timeLabel, () async {
+              final picked = await showTimePicker(
+                context: context, initialTime: _time ?? TimeOfDay.now(),
+              );
+              if (picked != null) setState(() => _time = picked);
+            })),
+          ]),
+          if (_time != null) ...[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => setState(() => _time = null),
+                icon: const Icon(Icons.close, size: 14, color: AppColors.muted),
+                label: Text('شيل الوقت', style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted)),
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+
+          Row(children: [
+            Expanded(child: OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('إلغاء', style: GoogleFonts.cairo()))),
+            const SizedBox(width: 10),
+            Expanded(child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.blue2, foregroundColor: Colors.white),
+              onPressed: _save,
+              child: Text('💾 حفظ', style: GoogleFonts.cairo(fontWeight: FontWeight.w900)),
+            )),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  void _save() {
+    final abs = double.tryParse(_amtCtrl.text.trim()) ?? 0;
+    final amount = _isCredit ? abs : -abs;
+    final dateStr = _date == null ? '' : '${_date!.day}/${_date!.month}/${_date!.year}';
+    final timeStr = _time == null
+        ? ''
+        : '${_time!.hour.toString().padLeft(2, '0')}:${_time!.minute.toString().padLeft(2, '0')}';
+    widget.onSave(_descCtrl.text, amount, dateStr, timeStr);
+    Navigator.pop(context);
+  }
+
+  Widget _typeBtn(String label, bool active, Color color, VoidCallback onTap) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: active ? color.withValues(alpha: 0.12) : Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: active ? color : AppColors.border, width: active ? 1.5 : 1),
+      ),
+      child: Center(child: Text(label, style: GoogleFonts.cairo(
+          fontSize: 12, fontWeight: FontWeight.w700, color: active ? color : AppColors.muted))),
+    ),
+  );
+
+  Widget _pickerBtn(IconData icon, String label, VoidCallback onTap) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F9FC),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(children: [
+        Icon(icon, size: 15, color: AppColors.blue2),
+        const SizedBox(width: 6),
+        Expanded(child: Text(label,
+            style: GoogleFonts.cairo(fontSize: 11.5, color: AppColors.text),
+            overflow: TextOverflow.ellipsis)),
+      ]),
+    ),
+  );
+}
+
+// ─── محرّر قوالب رسائل الهدايا ───────────────────────────────────
+class _GiftTemplateSheet extends StatefulWidget {
+  final String nowTpl;
+  final String monthTpl;
+  const _GiftTemplateSheet({required this.nowTpl, required this.monthTpl});
+
+  @override
+  State<_GiftTemplateSheet> createState() => _GiftTemplateSheetState();
+}
+
+class _GiftTemplateSheetState extends State<_GiftTemplateSheet> {
+  late final TextEditingController _nowCtrl;
+  late final TextEditingController _monthCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _nowCtrl = TextEditingController(text: widget.nowTpl);
+    _monthCtrl = TextEditingController(text: widget.monthTpl);
+  }
+
+  @override
+  void dispose() {
+    _nowCtrl.dispose();
+    _monthCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString('tcm_gift_now_tpl', _nowCtrl.text);
+    await p.setString('tcm_gift_month_tpl', _monthCtrl.text);
+    if (mounted) Navigator.pop(context, true);
+  }
+
+  void _reset() {
+    setState(() {
+      _nowCtrl.text = _kDefaultGiftNow;
+      _monthCtrl.text = _kDefaultGiftMonth;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFFF8FBFF),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        ),
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 14,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 18,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(2))),
+              ),
+              const SizedBox(height: 14),
+              Text('✏️ تعديل قوالب رسائل الهدايا',
+                  style: GoogleFonts.cairo(
+                      fontWeight: FontWeight.w900, fontSize: 16)),
+              const SizedBox(height: 4),
+              Text(
+                  'المتغيّرات: {اسم} {الهدية} {جيجا} {دقائق} {الخدمات} {الشهر} {العدد} {رقم} {الخط}',
+                  style:
+                      GoogleFonts.cairo(fontSize: 11, color: AppColors.muted)),
+              const SizedBox(height: 14),
+              Text('🎁 رسالة الهدية الوقتية',
+                  style: GoogleFonts.cairo(
+                      fontWeight: FontWeight.w800, fontSize: 13)),
+              const SizedBox(height: 6),
+              _tplField(_nowCtrl),
+              const SizedBox(height: 14),
+              Text('📅 رسالة الكشف الشهري المجمّع',
+                  style: GoogleFonts.cairo(
+                      fontWeight: FontWeight.w800, fontSize: 13)),
+              const SizedBox(height: 6),
+              _tplField(_monthCtrl),
+              const SizedBox(height: 16),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _reset,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.muted,
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: Text('استرجاع الافتراضي',
+                        style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton(
+                    onPressed: _save,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.green2,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: Text('💾 حفظ القوالب',
+                        style: GoogleFonts.cairo(
+                            fontWeight: FontWeight.w800, fontSize: 14)),
+                  ),
+                ),
+              ]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _tplField(TextEditingController ctrl) => TextField(
+        controller: ctrl,
+        maxLines: 6,
+        minLines: 3,
+        style: GoogleFonts.cairo(fontSize: 13, height: 1.5),
+        decoration: InputDecoration(
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding: const EdgeInsets.all(12),
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.border)),
+          enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.border)),
+        ),
+      );
 }

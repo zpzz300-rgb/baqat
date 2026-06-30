@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/app_provider.dart';
+import '../models/models.dart';
 import '../services/app_theme.dart';
 import '../services/supabase_service.dart';
 import 'employees_screen.dart';
@@ -54,6 +55,16 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Map<String, dynamic>> _searchResults = [];
   bool _headerExpanded = true;
   bool _empViewAll = false; // الموظف: false=شغلي، true=القائمة العامة
+
+  // التمرير لمجموعة معيّنة بعد البحث (يفتح/يبيّن مجموعة العميل)
+  final _groupsScrollCtrl = ScrollController();
+  final Map<String, GlobalKey> _groupKeys = {};
+  String? _focusExpandGid; // المجموعة اللي تتفتح تلقائياً بعد البحث
+
+  // الإحصائيات المالية (الربح/الديون/الملخص) تظهر فقط في تاب المجموعات.
+  // شاشة الأرباح (تاب 4) ليها ملخصها الخاص — فمنظهرش الهيدر هناك عشان
+  // مايحصلش تكرار ولا overflow.
+  bool get _showFinancialStats => _tab == 0;
 
   // Main nav tabs (always visible)
   final List<Map<String, dynamic>> _tabs = [
@@ -110,6 +121,9 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final prov = context.watch<AppProvider>();
+    // لما الكيبورد يفتح: أخفي الهيدر الكبير عشان الشاشة تاخد كل المساحة
+    // ومايحصلش overflow في أي بحث جوّه التابات.
+    final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: const Color(0xFFf5f7fa),
@@ -117,11 +131,14 @@ class _HomeScreenState extends State<HomeScreen> {
       body: LayoutBuilder(
         builder: (context, constraints) => Column(
           children: [
-            ConstrainedBox(
-              constraints:
-                  BoxConstraints(maxHeight: constraints.maxHeight * 0.55),
-              child: SingleChildScrollView(child: _buildHeader(prov)),
-            ),
+            if (!keyboardOpen)
+              ConstrainedBox(
+                constraints:
+                    BoxConstraints(maxHeight: constraints.maxHeight * 0.55),
+                child: SingleChildScrollView(child: _buildHeader(prov)),
+              )
+            else
+              SizedBox(height: MediaQuery.of(context).padding.top),
             if (!prov.isOnline) _readOnlyBanner(),
             Expanded(child: _buildBody(prov)),
           ],
@@ -337,40 +354,52 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ]),
               ),
-              const SizedBox(height: 10),
-              // 2×2 glass stats grid
-              Row(children: [
-                _glassStatCard('💰 ربح', prov.db.totalProfit, const Color(0xFF69F0AE), suffix: ' ج'),
-                const SizedBox(width: 8),
-                _glassStatCard('👥 عملاء', prov.db.members.length.toDouble(), const Color(0xFF40C4FF)),
-              ]),
-              const SizedBox(height: 8),
-              Row(children: [
-                _glassStatCard('🏘️ مجموعات', prov.db.groups.length.toDouble(), const Color(0xFFE040FB)),
-                const SizedBox(width: 8),
-                _glassStatCard('📋 ديون', prov.db.totalDebt, const Color(0xFFFF6E40),
-                    highlight: prov.db.totalDebt > 0, suffix: ' ج'),
-              ]),
-              if (prov.db.totalBillsOwed > 0) ...[
+              // 2×2 glass stats grid — تظهر فقط في التابات المالية، وكلها أزرار تفاعلية
+              if (_showFinancialStats) ...[
+                const SizedBox(height: 10),
+                Row(children: [
+                  _glassStatCard('💰 ربح', prov.db.financialSummary['netProfit']!, const Color(0xFF69F0AE),
+                      suffix: ' ج', onTap: () => setState(() => _tab = 4)),
+                  const SizedBox(width: 8),
+                  _glassStatCard('👥 عملاء', prov.db.members.length.toDouble(), const Color(0xFF40C4FF),
+                      onTap: () => setState(() => _tab = 14)),
+                ]),
                 const SizedBox(height: 8),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                Row(children: [
+                  _glassStatCard('🏘️ مجموعات', prov.db.groups.length.toDouble(), const Color(0xFFE040FB),
+                      onTap: () => setState(() => _tab = 0)),
+                  const SizedBox(width: 8),
+                  _glassStatCard('📋 ديون', prov.db.totalDebt, const Color(0xFFFF6E40),
+                      highlight: prov.db.totalDebt > 0, suffix: ' ج',
+                      onTap: () => _showDebtorsList(prov)),
+                ]),
+                if (prov.db.totalBillsOwed > 0) ...[
+                  const SizedBox(height: 8),
+                  GestureDetector(
+                    onTap: () => setState(() => _tab = 22),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(children: [
+                        const Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text('🧾 فواتير عليك: ${prov.db.totalBillsOwed.toStringAsFixed(0)} ج',
+                              style: GoogleFonts.cairo(color: Colors.redAccent, fontSize: 13, fontWeight: FontWeight.w800)),
+                        ),
+                        const Icon(Icons.chevron_left, color: Colors.redAccent, size: 18),
+                      ]),
+                    ),
                   ),
-                  child: Row(children: [
-                    const Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 18),
-                    const SizedBox(width: 8),
-                    Text('فواتير عليك: ${prov.db.totalBillsOwed.toStringAsFixed(0)} ج',
-                        style: GoogleFonts.cairo(color: Colors.redAccent, fontSize: 13, fontWeight: FontWeight.w800)),
-                  ]),
-                ),
+                ],
+                const SizedBox(height: 10),
+                _buildFinancialDashboard(prov),
               ],
-              const SizedBox(height: 10),
-              _buildFinancialDashboard(prov),
             ]),
           ),
         ],
@@ -379,36 +408,46 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _glassStatCard(String label, double value, Color accent,
-      {bool highlight = false, String suffix = ''}) {
+      {bool highlight = false, String suffix = '', VoidCallback? onTap}) {
     final display = value == value.roundToDouble()
         ? '${value.toInt()}$suffix'
         : '${value.toStringAsFixed(0)}$suffix';
     return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
-        decoration: BoxDecoration(
-          color: highlight
-              ? accent.withValues(alpha: 0.12)
-              : Colors.white.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+          decoration: BoxDecoration(
             color: highlight
-                ? accent.withValues(alpha: 0.35)
-                : Colors.white.withValues(alpha: 0.12),
+                ? accent.withValues(alpha: 0.12)
+                : Colors.white.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: highlight
+                  ? accent.withValues(alpha: 0.35)
+                  : Colors.white.withValues(alpha: 0.12),
+            ),
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label,
-                style: GoogleFonts.cairo(
-                    color: Colors.white60, fontSize: 11, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 4),
-            Text(display,
-                style: GoogleFonts.cairo(
-                    color: accent, fontSize: 20, fontWeight: FontWeight.w900),
-                overflow: TextOverflow.ellipsis),
-          ],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Expanded(
+                  child: Text(label,
+                      style: GoogleFonts.cairo(
+                          color: Colors.white60, fontSize: 11, fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis),
+                ),
+                if (onTap != null)
+                  const Icon(Icons.touch_app, color: Colors.white24, size: 13),
+              ]),
+              const SizedBox(height: 4),
+              Text(display,
+                  style: GoogleFonts.cairo(
+                      color: accent, fontSize: 20, fontWeight: FontWeight.w900),
+                  overflow: TextOverflow.ellipsis),
+            ],
+          ),
         ),
       ),
     );
@@ -485,6 +524,116 @@ class _HomeScreenState extends State<HomeScreen> {
               overflow: TextOverflow.ellipsis),
         ]),
       ),
+    );
+  }
+
+  // ─── قائمة المديونين (تظهر عند الضغط على بطاقة «ديون») ──────────
+  void _showDebtorsList(AppProvider prov) {
+    showModalBottomSheet(
+      useRootNavigator: true,
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (ctx) {
+        // كل العملاء عليهم مديونية (رصيد سالب) مرتبين تنازلياً بالأكبر
+        final debtors = prov.db.members.where((m) => m.balance < 0).toList()
+          ..sort((a, b) => a.balance.compareTo(b.balance));
+        final total = debtors.fold<double>(0, (s, m) => s + (-m.balance));
+        return Container(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.85),
+          decoration: const BoxDecoration(
+            color: Color(0xFFf5f7fa),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const SizedBox(height: 10),
+            Center(
+              child: Container(width: 40, height: 4,
+                decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(children: [
+                const Text('📋', style: TextStyle(fontSize: 20)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('المديونون (${debtors.length})',
+                      style: GoogleFonts.cairo(fontSize: 16, fontWeight: FontWeight.w900)),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(color: AppColors.redLight, borderRadius: BorderRadius.circular(10)),
+                  child: Text('${total.toStringAsFixed(0)} ج',
+                      style: GoogleFonts.cairo(fontSize: 13, fontWeight: FontWeight.w900, color: AppColors.red2)),
+                ),
+              ]),
+            ),
+            const Divider(height: 1),
+            Flexible(
+              child: debtors.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.all(40),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        const Text('🎉', style: TextStyle(fontSize: 42)),
+                        const SizedBox(height: 10),
+                        Text('مفيش مديونيات — كله سداد!',
+                            style: GoogleFonts.cairo(fontSize: 14, color: AppColors.muted)),
+                      ]),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
+                      itemCount: debtors.length,
+                      itemBuilder: (_, i) {
+                        final m = debtors[i];
+                        final g = prov.db.groups.firstWhere((x) => x.id == m.gid,
+                            orElse: () => prov.db.groups.isNotEmpty ? prov.db.groups.first : Group(id: '', phone: ''));
+                        return GestureDetector(
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            showModalBottomSheet(
+                              useRootNavigator: true,
+                              context: context,
+                              isScrollControlled: true,
+                              backgroundColor: Colors.transparent,
+                              barrierColor: Colors.black54,
+                              builder: (_) => MemberDrawer(member: m, group: g, parentContext: context),
+                            );
+                          },
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            child: Row(children: [
+                              Expanded(
+                                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Text(m.name,
+                                      style: GoogleFonts.cairo(fontSize: 13, fontWeight: FontWeight.w800),
+                                      overflow: TextOverflow.ellipsis),
+                                  Text('${m.phone}  •  📡 ${g.phone}',
+                                      style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted),
+                                      textDirection: TextDirection.ltr),
+                                ]),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(color: AppColors.redLight, borderRadius: BorderRadius.circular(9)),
+                                child: Text('${(-m.balance).toStringAsFixed(0)} ج',
+                                    style: GoogleFonts.cairo(fontSize: 13, fontWeight: FontWeight.w900, color: AppColors.red2)),
+                              ),
+                            ]),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ]),
+        );
+      },
     );
   }
 
@@ -579,6 +728,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 ]),
               ),
             ]),
+            const SizedBox(height: 14),
+            // ── هوية المستخدم الحالي: مالك ولا موظف + الاسم ──
+            _identityBadge(prov),
           ]),
         ),
         // Sections list
@@ -605,6 +757,15 @@ class _HomeScreenState extends State<HomeScreen> {
                 }),
               ],
               const Divider(height: 16),
+              // 💾 حفظ البيانات + 🖨️ طباعة — اتنقلوا هنا من الشاشة الرئيسية
+              _drawerItem('💾 حفظ البيانات', () {
+                Navigator.pop(context);
+                _showSaveOptions();
+              }),
+              _drawerItem('🖨️ طباعة المجموعات', () {
+                Navigator.pop(context);
+                _printGroups(prov);
+              }),
               _drawerItem('📊 لوحة الأصول والإكسيبشن', () {
                 Navigator.pop(context);
                 Navigator.push(
@@ -624,12 +785,113 @@ class _HomeScreenState extends State<HomeScreen> {
                 }),
               _drawerItem('⚙️ الإعدادات', () {
                 Navigator.pop(context);
-                showDialog(context: context, builder: (_) => const SettingsModal());
+                showDialog(
+                    context: context,
+                    builder: (_) => SettingsModal(
+                          onRenew: () => _showBillingMenu(prov),
+                        ));
               }),
             ],
           ),
         ),
+        // ── تسجيل الخروج ──
+        const Divider(height: 1),
+        InkWell(
+          onTap: () {
+            Navigator.pop(context); // اقفل الـ drawer
+            _confirmLogout(prov);
+          },
+          child: Container(
+            width: double.infinity,
+            padding: EdgeInsets.fromLTRB(
+                18, 14, 18, MediaQuery.of(context).padding.bottom + 14),
+            child: Row(children: [
+              const Icon(Icons.logout, size: 18, color: AppColors.red),
+              const SizedBox(width: 10),
+              Text('تسجيل الخروج',
+                  style: GoogleFonts.cairo(
+                      fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.red)),
+            ]),
+          ),
+        ),
       ]),
+    );
+  }
+
+  /// شارة هوية المستخدم الحالي داخل هيدر الـ drawer.
+  Widget _identityBadge(AppProvider prov) {
+    final isEmp = SupabaseService.isEmployee;
+    final role  = isEmp ? '👤 موظف' : '👑 المالك';
+    final name  = isEmp
+        ? (SupabaseService.employeeName?.trim().isNotEmpty == true
+            ? SupabaseService.employeeName!.trim()
+            : 'موظف')
+        : (prov.ownerName.trim().isNotEmpty
+            ? prov.ownerName.trim()
+            : (SupabaseService.userEmail ?? 'المالك'));
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.22),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(role,
+              style: GoogleFonts.cairo(
+                  color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900)),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(name,
+              style: GoogleFonts.cairo(
+                  color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w700),
+              overflow: TextOverflow.ellipsis),
+        ),
+      ]),
+    );
+  }
+
+  /// تسجيل الخروج — يأكّد أولاً، وبعدها يمسح الجلسة. الـ AuthGate بيرجّع لشاشة الدخول.
+  void _confirmLogout(AppProvider prov) {
+    final isEmp = SupabaseService.isEmployee;
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('تسجيل الخروج',
+            style: GoogleFonts.cairo(fontWeight: FontWeight.w900)),
+        content: Text(
+          isEmp
+              ? 'هتسجّل خروج من حساب الموظف. هتحتاج كود المحل واسمك والكود السري عشان تدخل تاني.'
+              : 'هتسجّل خروج من حسابك. تقدر تدخل تاني ببريدك وكلمة السر.',
+          style: GoogleFonts.cairo(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: Text('إلغاء', style: GoogleFonts.cairo()),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.red, foregroundColor: Colors.white),
+            onPressed: () async {
+              Navigator.pop(dialogCtx); // اقفل الديالوج
+              // للموظف: امسح بيانات المحل من الذاكرة فوراً (خصوصية)
+              if (SupabaseService.isEmployee) prov.wipeInMemoryData();
+              await SupabaseService.signOut();
+              // الـ _AuthGate بيسمع حدث signedOut ويرجّع لشاشة الدخول تلقائياً.
+            },
+            child: Text('خروج', style: GoogleFonts.cairo(fontWeight: FontWeight.w900)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -786,42 +1048,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       : null,
                 ),
               ),
-              const SizedBox(height: 8),
-              // Billing + Save + Print buttons
-              Row(
-                children: [
-                  Expanded(
-                    child: GradientButton(
-                      label: '📅 تجديد الاشتراكات',
-                      colors: const [Color(0xFF0d47a1), Color(0xFF1565c0)],
-                      onTap: () => _showBillingMenu(prov),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: GradientButton(
-                      label: '💾 حفظ البيانات',
-                      colors: const [Color(0xFF2e7d32), Color(0xFF43a047)],
-                      onTap: () => _showSaveOptions(),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: () => _printGroups(prov),
-                    child: Container(
-                      height: 40,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      decoration: BoxDecoration(
-                        color: AppColors.blueLight,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.blueMid),
-                      ),
-                      child: const Icon(Icons.print_outlined,
-                          color: AppColors.blue2, size: 20),
-                    ),
-                  ),
-                ],
-              ),
+              // ملاحظة: «تجديد الاشتراكات» اتنقل للإعدادات، و«حفظ البيانات»
+              // و«طباعة المجموعات» اتنقلوا للقائمة الجانبية — لتنضيف الشاشة.
             ],
           ),
         ),
@@ -939,6 +1167,22 @@ class _HomeScreenState extends State<HomeScreen> {
                           fontSize: 11, fontWeight: FontWeight.w900,
                           color: positive ? AppColors.green : AppColors.red2)),
                 ),
+              // للعميل: زرار يفتح مجموعته مباشرة (من غير ما يفتح كارت العميل)
+              if (type == 'member' && (r['gid'] as String? ?? '').isNotEmpty) ...[
+                const SizedBox(width: 6),
+                GestureDetector(
+                  onTap: () => _goToGroup(r['gid'] as String),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: AppColors.blueLight,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.blueMid),
+                    ),
+                    child: const Text('📡', style: TextStyle(fontSize: 14)),
+                  ),
+                ),
+              ],
               const SizedBox(width: 4),
               const Icon(Icons.arrow_forward_ios, size: 12, color: AppColors.muted),
             ]),
@@ -979,15 +1223,43 @@ class _HomeScreenState extends State<HomeScreen> {
     // الموظف: قائمة عادية (مفيش إعادة ترتيب على مجموعات مش بتاعته)
     final canReorder = !SupabaseService.isEmployee;
     return ReorderableListView.builder(
+      scrollController: _groupsScrollCtrl,
       padding: const EdgeInsets.all(12),
       itemCount: groups.length,
       buildDefaultDragHandles: canReorder,
       onReorder: (oldIndex, newIndex) {
         if (canReorder) prov.reorderGroups(oldIndex, newIndex);
       },
-      itemBuilder: (_, i) =>
-          GroupCard(key: ValueKey(groups[i].id), group: groups[i]),
+      itemBuilder: (_, i) {
+        final key = _groupKeys[groups[i].id] ??= GlobalKey();
+        return GroupCard(
+          key: key,
+          group: groups[i],
+          initiallyExpanded: groups[i].id == _focusExpandGid,
+        );
+      },
     );
+  }
+
+  /// يروح لتاب المجموعات ويمرّر الشاشة لكارت مجموعة معيّنة (بعد البحث).
+  void _goToGroup(String gid) {
+    setState(() {
+      _tab = 0;
+      _searching = false;
+      _searchResults = [];
+      _searchCtrl.clear();
+      _focusExpandGid = gid; // تتفتح تلقائياً
+    });
+    // بعد ما القائمة تتبني، مرّر لكارت المجموعة
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _groupKeys[gid]?.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(ctx,
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeInOut,
+            alignment: 0.05);
+      }
+    });
   }
 
   // ─── GLOBAL SEARCH ───────────────────────────────────────────
@@ -1024,13 +1296,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
     switch (type) {
       case 'member':
-        setState(() => _tab = 0);
         final mid = result['id'] as String;
         final gid = result['gid'] as String? ?? '';
         final member = prov.db.members
             .firstWhere((m) => m.id == mid, orElse: () => prov.db.members.first);
         final group = prov.db.groups
             .firstWhere((g) => g.id == gid, orElse: () => prov.db.groups.first);
+        // يروح لمجموعة العميل ويمرّر لها — فلمّا يقفل كارت العميل يلاقي
+        // مجموعته قدامه (الرجوع بيوديه للمجموعة).
+        _goToGroup(gid);
         showModalBottomSheet(useRootNavigator: true,
           context: context,
           isScrollControlled: true,
@@ -1041,7 +1315,7 @@ class _HomeScreenState extends State<HomeScreen> {
         break;
 
       case 'group':
-        setState(() => _tab = 0);
+        _goToGroup(result['id'] as String? ?? result['gid'] as String? ?? '');
         break;
 
       case 'waitlist':
@@ -1073,16 +1347,21 @@ class _HomeScreenState extends State<HomeScreen> {
 
     showModalBottomSheet(useRootNavigator: true,
       context: context,
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
               barrierColor: Colors.black54,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheetState) => Container(
+          constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.85),
           decoration: const BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-          child: Column(
+          padding: EdgeInsets.fromLTRB(
+              20, 12, 20, 20 + MediaQuery.of(ctx).viewPadding.bottom),
+          child: SingleChildScrollView(
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Center(
@@ -1144,6 +1423,24 @@ class _HomeScreenState extends State<HomeScreen> {
                           ])
                         else
                           const Icon(Icons.chevron_left, color: AppColors.muted, size: 20),
+                        const SizedBox(width: 6),
+                        // زرار حذف اشتراك هذا الشهر للسايكل (لو اتضاف بالغلط)
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _confirmUndoCycle(prov, key, label);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFEBEE),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: const Color(0xFFEF9A9A)),
+                            ),
+                            child: const Icon(Icons.delete_outline,
+                                color: Color(0xFFD32F2F), size: 18),
+                          ),
+                        ),
                       ]),
                     ),
                   ),
@@ -1182,6 +1479,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ],
+          ),
           ),
         ),
       ),
@@ -1323,6 +1621,118 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// يطلب الرقم السري قبل تنفيذ عملية حساسة (تجديد/حذف اشتراكات).
+  /// بينفّذ onOk بس لو الرقم صح. ده بيمنع أي لخبطة في فلوس العملاء.
+  void _requirePin(AppProvider prov, String title, VoidCallback onOk) {
+    final ctrl = TextEditingController();
+    String? error;
+    showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setS) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(children: [
+              const Icon(Icons.lock_outline, color: AppColors.blue2, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(title,
+                    style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 15)),
+              ),
+            ]),
+            content: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text('اكتب الرقم السري للتأكيد — عملية حسّاسة تخص فلوس العملاء.',
+                  style: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                obscureText: true,
+                keyboardType: TextInputType.number,
+                textDirection: TextDirection.ltr,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: 'الرقم السري',
+                  labelStyle: GoogleFonts.cairo(fontSize: 13),
+                  errorText: error,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ]),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text('إلغاء', style: GoogleFonts.cairo()),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.blue2),
+                onPressed: () {
+                  if (ctrl.text.trim() == prov.pin) {
+                    Navigator.pop(ctx);
+                    onOk();
+                  } else {
+                    setS(() => error = 'الرقم السري غلط');
+                  }
+                },
+                child: Text('تأكيد',
+                    style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w800)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _confirmUndoCycle(AppProvider prov, String cycleKey, String label) {
+    showDialog(
+      context: context,
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(children: [
+            const Icon(Icons.delete_outline, color: Color(0xFFD32F2F)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('حذف اشتراك هذا الشهر',
+                  style: GoogleFonts.cairo(
+                      fontWeight: FontWeight.w900, fontSize: 15)),
+            ),
+          ]),
+          content: Text(
+              'هيتم حذف اشتراك الشهر الحالي لـ «$label» عن كل العملاء وإرجاع الرصيد. تستخدمه لو نزلت فاتورة بالغلط أو اتكررت. متأكد؟',
+              style: GoogleFonts.cairo(fontSize: 13, height: 1.6)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('إلغاء',
+                  style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFD32F2F),
+                  foregroundColor: Colors.white),
+              onPressed: () {
+                Navigator.pop(context);
+                _requirePin(prov, '🔒 تأكيد حذف الاشتراكات', () {
+                  final (count, total) =
+                      prov.undoCycleBillingThisMonth(cycleKey);
+                  AppSnackbar.show(context,
+                      count == 0
+                          ? 'مفيش اشتراكات لهذا الشهر تتحذف'
+                          : '🗑️ اتحذف $count اشتراك (${total.toStringAsFixed(0)} ج) ورجع الرصيد');
+                });
+              },
+              child: Text('احذف',
+                  style: GoogleFonts.cairo(fontWeight: FontWeight.w800)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _confirmCycleBilling(AppProvider prov, String cycleKey, String label) {
     showDialog(
       context: context,
@@ -1340,9 +1750,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           ElevatedButton(
             onPressed: () {
-              prov.addMonthBillingForCycle(cycleKey);
               Navigator.pop(context);
-              AppSnackbar.show(context, '✅ تمت إضافة الاشتراك');
+              _requirePin(prov, '🔒 تأكيد تجديد الاشتراك', () {
+                prov.addMonthBillingForCycle(cycleKey);
+                AppSnackbar.show(context, '✅ تمت إضافة الاشتراك');
+              });
             },
             child: Text('تأكيد', style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
           ),

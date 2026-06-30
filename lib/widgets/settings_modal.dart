@@ -11,7 +11,9 @@ import 'common.dart';
 import 'pin_dialog.dart';
 
 class SettingsModal extends StatefulWidget {
-  const SettingsModal({super.key});
+  /// callback لفتح قائمة «تجديد الاشتراكات» (اتنقلت هنا من الشاشة الرئيسية)
+  final VoidCallback? onRenew;
+  const SettingsModal({super.key, this.onRenew});
   @override
   State<SettingsModal> createState() => _SettingsModalState();
 }
@@ -26,6 +28,8 @@ class _SettingsModalState extends State<SettingsModal> {
   final _vodafoneCtrl     = TextEditingController();
   final _vodafone2Ctrl    = TextEditingController();
   final _bankCtrl         = TextEditingController();
+  final _cycle1DueCtrl    = TextEditingController();
+  final _cycle2DueCtrl    = TextEditingController();
   final _ownerNameCtrl    = TextEditingController();
   final _ownerPhoneCtrl   = TextEditingController();
   final _tgTokenCtrl      = TextEditingController();
@@ -45,6 +49,8 @@ class _SettingsModalState extends State<SettingsModal> {
     if (_vodafoneCtrl.text.isEmpty)    _vodafoneCtrl.text   = prov.vodafoneCash;
     if (_vodafone2Ctrl.text.isEmpty)   _vodafone2Ctrl.text  = prov.vodafoneCash2;
     if (_bankCtrl.text.isEmpty)        _bankCtrl.text       = prov.bankInfo;
+    if (_cycle1DueCtrl.text.isEmpty)   _cycle1DueCtrl.text  = prov.cycle1DueDay.toString();
+    if (_cycle2DueCtrl.text.isEmpty)   _cycle2DueCtrl.text  = prov.cycle2DueDay.toString();
     if (_ownerNameCtrl.text.isEmpty)   _ownerNameCtrl.text  = prov.ownerName;
     if (_ownerPhoneCtrl.text.isEmpty)  _ownerPhoneCtrl.text = prov.ownerPhone;
     if (_tgTokenCtrl.text.isEmpty)     _tgTokenCtrl.text    = prov.telegramToken;
@@ -57,7 +63,8 @@ class _SettingsModalState extends State<SettingsModal> {
     _oldPinCtrl.dispose(); _newPinCtrl.dispose(); _thresholdCtrl.dispose();
     _apiKeyCtrl.dispose(); _instapayCtrl.dispose(); _instapay2Ctrl.dispose();
     _vodafoneCtrl.dispose(); _vodafone2Ctrl.dispose();
-    _bankCtrl.dispose(); _ownerNameCtrl.dispose(); _ownerPhoneCtrl.dispose();
+    _bankCtrl.dispose(); _cycle1DueCtrl.dispose(); _cycle2DueCtrl.dispose();
+    _ownerNameCtrl.dispose(); _ownerPhoneCtrl.dispose();
     _tgTokenCtrl.dispose(); _tgChatIdCtrl.dispose(); _debtNoteCtrl.dispose();
     super.dispose();
   }
@@ -74,6 +81,40 @@ class _SettingsModalState extends State<SettingsModal> {
           children: [
             Text('⚙️ إعدادات البرنامج', style: GoogleFonts.cairo(fontSize: 17, fontWeight: FontWeight.w900, color: AppColors.blue2)),
             const SizedBox(height: 16),
+
+            // 🔄 تجديد الاشتراكات — اتنقل هنا من الشاشة الرئيسية، محمي برقم سري
+            if (widget.onRenew != null) ...[
+              GestureDetector(
+                onTap: () {
+                  Navigator.pop(context); // اقفل الإعدادات الأول
+                  widget.onRenew!.call();
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                        colors: [Color(0xFF0d47a1), Color(0xFF1565c0)]),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.event_repeat, color: Colors.white, size: 22),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('🔄 تجديد الاشتراكات',
+                            style: GoogleFonts.cairo(
+                                fontSize: 14, fontWeight: FontWeight.w900, color: Colors.white)),
+                        Text('إضافة اشتراك الشهر للسيكلات — مرة واحدة بس + محمي برقم سري',
+                            style: GoogleFonts.cairo(fontSize: 10, color: Colors.white70)),
+                      ]),
+                    ),
+                    const Icon(Icons.chevron_left, color: Colors.white70),
+                  ]),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // Neumorphism design preview (top — easy to find)
             GestureDetector(
@@ -513,6 +554,24 @@ class _SettingsModalState extends State<SettingsModal> {
                   decoration: InputDecoration(labelText: '🏦 بيانات التحويل البنكي', labelStyle: GoogleFonts.cairo(),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
                 ),
+                const SizedBox(height: 12),
+                // ── يوم سداد فاتورة الشركة (عدّاد) — مختلف لكل سيكل ──
+                Text('📅 يوم سداد فاتورة الشركة (لكل سيكل):',
+                    style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.blue2)),
+                const SizedBox(height: 6),
+                Row(children: [
+                  Expanded(child: TextField(controller: _cycle1DueCtrl, keyboardType: TextInputType.number,
+                    textDirection: TextDirection.ltr, style: GoogleFonts.cairo(fontSize: 13),
+                    decoration: InputDecoration(labelText: 'سيكل 1 (يوم)', labelStyle: GoogleFonts.cairo(),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                  )),
+                  const SizedBox(width: 10),
+                  Expanded(child: TextField(controller: _cycle2DueCtrl, keyboardType: TextInputType.number,
+                    textDirection: TextDirection.ltr, style: GoogleFonts.cairo(fontSize: 13),
+                    decoration: InputDecoration(labelText: 'سيكل 2 (يوم)', labelStyle: GoogleFonts.cairo(),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                  )),
+                ]),
                 const SizedBox(height: 10),
                 SizedBox(width: double.infinity, child: ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: AppColors.green2, foregroundColor: Colors.white,
@@ -523,10 +582,25 @@ class _SettingsModalState extends State<SettingsModal> {
                     prov.setVodafoneCash(_vodafoneCtrl.text.trim());
                     prov.setVodafoneCash2(_vodafone2Ctrl.text.trim());
                     prov.setBankInfo(_bankCtrl.text.trim());
+                    final d1 = int.tryParse(_cycle1DueCtrl.text.trim());
+                    final d2 = int.tryParse(_cycle2DueCtrl.text.trim());
+                    if (d1 != null) prov.setCycleDueDay(1, d1);
+                    if (d2 != null) prov.setCycleDueDay(2, d2);
                     AppSnackbar.show(context, '✅ تم حفظ بيانات الدفع');
                   },
                   child: Text('حفظ', style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
                 )),
+                const SizedBox(height: 14),
+                const Divider(),
+                const SizedBox(height: 6),
+                // ── فترة سماح الشركة (أيام من نزول الفاتورة) ──
+                Text('⏳ سماح الشركة (أيام من نزول الفاتورة):',
+                    style: GoogleFonts.cairo(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: const Color(0xFF2E7D32))),
+                const SizedBox(height: 6),
+                _GraceEditor(prov: prov),
               ]),
             ),
             const SizedBox(height: 16),
@@ -882,5 +956,140 @@ class _SettingsModalState extends State<SettingsModal> {
                 style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w700))),
       ),
     );
+  }
+}
+
+// محرّر فترة سماح الشركات (أيام من نزول الفاتورة) — قابل للتعديل لكل شركة
+class _GraceEditor extends StatefulWidget {
+  final AppProvider prov;
+  const _GraceEditor({required this.prov});
+  @override
+  State<_GraceEditor> createState() => _GraceEditorState();
+}
+
+class _GraceEditorState extends State<_GraceEditor> {
+  static const _companies = [
+    ('etisalat', '🟢 اتصالات'),
+    ('vodafone', '🔴 فودافون'),
+    ('orange', '🟠 أورنج'),
+    ('we', '🔵 WE'),
+  ];
+  late final Map<String, TextEditingController> _ctrls;   // سماح عام (سيكل 1 / افتراضي)
+  late final Map<String, TextEditingController> _ctrls2;  // سماح خاص بسيكل 2 (اختياري)
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrls = {
+      for (final c in _companies)
+        c.$1: TextEditingController(
+            text: '${widget.prov.graceForProvider(c.$1)}'),
+    };
+    final c2 = widget.prov.companyGraceCycle2;
+    _ctrls2 = {
+      for (final c in _companies)
+        c.$1: TextEditingController(
+            text: c2.containsKey(c.$1) ? '${c2[c.$1]}' : ''),
+    };
+  }
+
+  @override
+  void dispose() {
+    for (final c in _ctrls.values) {
+      c.dispose();
+    }
+    for (final c in _ctrls2.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(children: [
+      // سماح عام لكل شركة (سيكل 1 / الافتراضي)
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final c in _companies)
+            SizedBox(
+              width: 150,
+              child: TextField(
+                controller: _ctrls[c.$1],
+                keyboardType: TextInputType.number,
+                textDirection: TextDirection.ltr,
+                style: GoogleFonts.cairo(fontSize: 13),
+                decoration: InputDecoration(
+                  labelText: c.$2,
+                  labelStyle: GoogleFonts.cairo(fontSize: 12),
+                  suffixText: 'يوم',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 8),
+                ),
+              ),
+            ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      Align(
+        alignment: Alignment.centerRight,
+        child: Text('سماح سيكل 2 (اختياري — سيبه فاضي يستخدم العام):',
+            style: GoogleFonts.cairo(
+                fontSize: 12, fontWeight: FontWeight.w700, color: const Color(0xFFE65100))),
+      ),
+      const SizedBox(height: 6),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final c in _companies)
+            SizedBox(
+              width: 150,
+              child: TextField(
+                controller: _ctrls2[c.$1],
+                keyboardType: TextInputType.number,
+                textDirection: TextDirection.ltr,
+                style: GoogleFonts.cairo(fontSize: 13),
+                decoration: InputDecoration(
+                  labelText: '${c.$2} (سيكل 2)',
+                  labelStyle: GoogleFonts.cairo(fontSize: 11),
+                  hintText: 'عام',
+                  suffixText: 'يوم',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 8),
+                ),
+              ),
+            ),
+        ],
+      ),
+      const SizedBox(height: 8),
+      SizedBox(
+        width: double.infinity,
+        child: ElevatedButton(
+          style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2E7D32),
+              foregroundColor: Colors.white,
+              shape:
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+          onPressed: () {
+            for (final c in _companies) {
+              final v = int.tryParse(_ctrls[c.$1]!.text.trim());
+              if (v != null) widget.prov.setCompanyGrace(c.$1, v);
+              final t2 = _ctrls2[c.$1]!.text.trim();
+              widget.prov.setCompanyGraceCycle2(
+                  c.$1, t2.isEmpty ? null : int.tryParse(t2));
+            }
+            AppSnackbar.show(context, '✅ تم حفظ فترة سماح الشركات');
+          },
+          child: Text('حفظ السماح',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+        ),
+      ),
+    ]);
   }
 }

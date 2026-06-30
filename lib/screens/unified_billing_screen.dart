@@ -19,24 +19,55 @@ class UnifiedBillingScreen extends StatefulWidget {
 
 class _UnifiedBillingScreenState extends State<UnifiedBillingScreen> {
   int _mode = 1; // 0 = ليستة | 1 = مراجعة (الافتراضي الأذكى)
+  bool _switcherOpen = false; // مبدّل الوضع منطوي افتراضياً عشان مايعملش زحمة
+
+  static const _modeLabels = ['ليستة', 'مراجعة', 'جدول'];
+  static const _modeEmojis = ['📋', '🧾', '📊'];
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // ── مبدّل الوضع ──────────────────────────────────────────
+        // ── مبدّل الوضع (منطوي) ──────────────────────────────────
         Material(
           color: AppColors.blue2,
           child: SafeArea(
             bottom: false,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-              child: Row(children: [
-                _modeBtn(0, '📋', 'ليستة'),
-                const SizedBox(width: 8),
-                _modeBtn(1, '🧾', 'مراجعة'),
-                const SizedBox(width: 8),
-                _modeBtn(2, '📊', 'جدول'),
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+              child: Column(children: [
+                // شريط مضغوط: الوضع الحالي + سهم يفتح/يقفل
+                GestureDetector(
+                  onTap: () => setState(() => _switcherOpen = !_switcherOpen),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(children: [
+                      Text('${_modeEmojis[_mode]} ${_modeLabels[_mode]}',
+                          style: GoogleFonts.cairo(
+                              color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14)),
+                      const SizedBox(width: 8),
+                      Text('— اضغط لتغيير العرض',
+                          style: GoogleFonts.cairo(color: Colors.white60, fontSize: 11)),
+                      const Spacer(),
+                      Icon(_switcherOpen ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                          color: Colors.white, size: 22),
+                    ]),
+                  ),
+                ),
+                if (_switcherOpen) ...[
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    _modeBtn(0, '📋', 'ليستة'),
+                    const SizedBox(width: 8),
+                    _modeBtn(1, '🧾', 'مراجعة'),
+                    const SizedBox(width: 8),
+                    _modeBtn(2, '📊', 'جدول'),
+                  ]),
+                ],
               ]),
             ),
           ),
@@ -60,7 +91,7 @@ class _UnifiedBillingScreenState extends State<UnifiedBillingScreen> {
     final sel = _mode == idx;
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => _mode = idx),
+        onTap: () => setState(() { _mode = idx; _switcherOpen = false; }),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           padding: const EdgeInsets.symmetric(vertical: 10),

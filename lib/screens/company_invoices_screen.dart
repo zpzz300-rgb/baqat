@@ -7,11 +7,12 @@ import 'package:google_fonts/google_fonts.dart';
 import '../providers/app_provider.dart';
 import '../models/models.dart';
 import '../services/app_theme.dart';
+import '../services/export_service.dart';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 enum _Period { last, current, next }
 
-enum _Anomaly { none, doubled, repeated, unexpectedBimonthly }
+enum _Anomaly { none, doubled, repeated, unexpectedBimonthly, sameMonthDuplicate }
 
 String _monthKey(DateTime d) =>
     '${d.year}-${d.month.toString().padLeft(2, '0')}';
@@ -45,6 +46,19 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
   _Period _period = _Period.current;
   String _provFilter = 'all';
   String _typeFilter = 'all'; // all | estimated | actual | paid
+  String _search = '';
+  String _sort = 'default'; // default | remaining | deadline | recent
+  bool _onlyOverdue = false; // فات موعدها بس
+  bool _missingOpen = false; // عرض الفواتير الغايبة
+
+  static String _normSearch(String s) {
+    const indic = '٠١٢٣٤٥٦٧٨٩';
+    var r = s;
+    for (var i = 0; i < indic.length; i++) {
+      r = r.replaceAll(indic[i], '$i');
+    }
+    return r.toLowerCase().trim();
+  }
 
   // ── Period helpers ──────────────────────────────────────────────
   String get _targetMonth {
@@ -69,6 +83,13 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
   // ── Anomaly detection ────────────────────────────────────────────
   _Anomaly _anomalyOf(CompanyBill bill, List<CompanyBill> allBills) {
     if (bill.actualAmount <= 0) return _Anomaly.none;
+    // فاتورة مكررة نفس الشهر لنفس الخط (أولوية عليا — غلط شائع مع الشركات)
+    final sameMonth = allBills
+        .where((x) => x.groupId == bill.groupId &&
+            x.month == bill.month &&
+            x.actualAmount > 0)
+        .length;
+    if (sameMonth > 1) return _Anomaly.sameMonthDuplicate;
     final prevM = _prevMonthOf(bill.month);
     final CompanyBill? prev = allBills.cast<CompanyBill?>().firstWhere(
         (b) => b!.groupId == bill.groupId && b.month == prevM,
@@ -100,7 +121,9 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
 
   // ── Filtered bills ────────────────────────────────────────────────
   List<CompanyBill> _filteredBills(AppDB db) {
+    final prov = context.read<AppProvider>();
     final m = _targetMonth;
+    final q = _normSearch(_search);
     final result = db.companyBills.where((b) {
       if (b.month != m) return false;
       final g = db.groups.firstWhere((x) => x.id == b.groupId,
@@ -123,16 +146,62 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
           if (!b.isPaid) return false;
           break;
       }
+      // فلتر «فات موعدها بس»
+      if (_onlyOverdue) {
+        final d = prov.billGraceDaysLeft(b);
+        if (d == null || d >= 0) return false;
+      }
+      // بحث: رقم الخط / اسم المالك / المبلغ
+      if (q.isNotEmpty) {
+        final hay = _normSearch(
+            '${g.phone} ${g.ownerName ?? ''} ${b.actualAmount.toStringAsFixed(0)}');
+        if (!hay.contains(q)) return false;
+      }
       return true;
     }).toList();
-    result.sort((a, b) {
+
+    // الترتيب
+    int byProv(CompanyBill a, CompanyBill b) {
       final ga = db.groups.firstWhere((x) => x.id == a.groupId,
           orElse: () => Group(id: '', phone: ''));
       final gb = db.groups.firstWhere((x) => x.id == b.groupId,
           orElse: () => Group(id: '', phone: ''));
       return (ga.provider ?? '').compareTo(gb.provider ?? '');
-    });
+    }
+    switch (_sort) {
+      case 'remaining':
+        result.sort((a, b) => b.remaining.compareTo(a.remaining));
+        break;
+      case 'deadline':
+        result.sort((a, b) {
+          final da = prov.billGraceDaysLeft(a) ?? 99999;
+          final dbb = prov.billGraceDaysLeft(b) ?? 99999;
+          return da.compareTo(dbb);
+        });
+        break;
+      case 'recent':
+        result.sort((a, b) => b.id.compareTo(a.id));
+        break;
+      default:
+        result.sort(byProv);
+    }
     return result;
+  }
+
+  // عدّاد الفواتير المتأخرة (فات موعد سماحها) + إجماليها — للعرض في الهيدر
+  (int, double) _overdueStats(AppDB db) {
+    final prov = context.read<AppProvider>();
+    int count = 0;
+    double total = 0;
+    for (final b in db.companyBills) {
+      if (b.month != _targetMonth || b.isPaid) continue;
+      final d = prov.billGraceDaysLeft(b);
+      if (d != null && d < 0) {
+        count++;
+        total += b.remaining;
+      }
+    }
+    return (count, total);
   }
 
   // ── Expected groups for next month ────────────────────────────────
@@ -153,6 +222,32 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
       if (_provFilter != 'all' && g.provider != _provFilter) return false;
       // نظام شهر وشهر: لو الشهر اللي قبله نزلت فيه فاتورة، فالشهر ده
       // المفروض يكون فاضي (ببلاش) — فمنحطّوش في المتوقعة عشان ما نطلعش إنذار غلط.
+      if (g.billingSystem == 'bimonthly') {
+        final hadPrev = db.companyBills.any(
+            (b) => b.groupId == g.id && b.month == prevM && b.actualAmount > 0);
+        if (hadPrev) return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  // ── فواتير غايبة: خطوط المفروض عليها فاتورة الشهر ده وما نزلتش ──────
+  // (للشهر الحالي/الماضي فقط — الشهر القادم بيتعرض في «المتوقعة»)
+  List<Group> _missingGroups(AppDB db) {
+    if (_period == _Period.next) return [];
+    if (_typeFilter == 'actual' || _typeFilter == 'paid') return [];
+    final m = _targetMonth;
+    final addedGids = db.companyBills
+        .where((b) => b.month == m)
+        .map((b) => b.groupId)
+        .toSet();
+    final prevM = _prevMonthOf(m);
+    return db.groups.where((g) {
+      if (g.fixedBillAmount <= 0) return false;
+      if (addedGids.contains(g.id)) return false;
+      if (g.parentGroupId != null && g.parentGroupId!.isNotEmpty) return false;
+      if (_provFilter != 'all' && g.provider != _provFilter) return false;
+      // نظام شهر وشهر: لو نزلت فاتورة الشهر اللي فات، فالشهر ده المفروض فاضي
       if (g.billingSystem == 'bimonthly') {
         final hadPrev = db.companyBills.any(
             (b) => b.groupId == g.id && b.month == prevM && b.actualAmount > 0);
@@ -203,6 +298,7 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
         _buildHeader(context, prov, db, bills.length, expected.length,
             totalActual, totalUnpaid, anomalyCount),
         _buildPeriodSelector(),
+        _buildSearchSortRow(),
         _buildProviderChips(),
         _buildTypeChips(),
         Expanded(
@@ -211,6 +307,8 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
               : ListView(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
                   children: [
+                    _overdueBanner(db),
+                    _missingSection(db, prov),
                     _helpBanner(),
                     if (anomalyCount > 0) _anomalyBanner(anomalyCount),
                     // Expected section (next month only)
@@ -260,33 +358,48 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
       child: Column(children: [
         Row(children: [
-          const Text('🧾', style: TextStyle(fontSize: 22)),
-          const SizedBox(width: 8),
+          const Text('🧾', style: TextStyle(fontSize: 20)),
+          const SizedBox(width: 6),
           Expanded(
             child: Text(
               'مراجعة فواتير الشركات',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: GoogleFonts.cairo(
                   color: Colors.white,
-                  fontSize: 17,
+                  fontSize: 15,
                   fontWeight: FontWeight.w900),
             ),
           ),
-          GestureDetector(
-            onTap: () => _showRotationDialog(ctx, prov),
-            child: Container(
+          // الإضافة = الزرار الأساسي
+          _addBillBtn(ctx, prov, db),
+          const SizedBox(width: 6),
+          // باقي الأدوات في قائمة ⋮ عشان متزحمش الهيدر
+          PopupMenuButton<String>(
+            icon: Container(
               padding: const EdgeInsets.all(7),
-              margin: const EdgeInsets.only(left: 6),
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(color: Colors.white.withValues(alpha: 0.4)),
               ),
-              child: const Icon(Icons.sync, color: Colors.white, size: 16),
+              child: const Icon(Icons.more_horiz, color: Colors.white, size: 18),
             ),
+            onSelected: (v) {
+              switch (v) {
+                case 'generate': _showGenerateDialog(ctx, prov); break;
+                case 'rotation': _showRotationDialog(ctx, prov); break;
+                case 'export':   ExportService.exportInvoicesExcel(ctx, prov); break;
+                case 'compare':  _showMonthlyComparison(ctx, prov); break;
+              }
+            },
+            itemBuilder: (_) => [
+              _menuItem('generate', Icons.autorenew, 'جهّز فواتير الشهر'),
+              _menuItem('rotation', Icons.sync, 'تدوير شهر وشهر'),
+              _menuItem('export', Icons.table_view, 'تصدير Excel'),
+              _menuItem('compare', Icons.bar_chart, 'مقارنة شهرية'),
+            ],
           ),
-          _generateBtn(ctx, prov),
-          const SizedBox(width: 6),
-          _addBillBtn(ctx, prov, db),
         ]),
         const SizedBox(height: 8),
         Row(children: [
@@ -360,28 +473,15 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
     );
   }
 
-  Widget _generateBtn(BuildContext ctx, AppProvider prov) {
-    return GestureDetector(
-      onTap: () => _showGenerateDialog(ctx, prov),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.4)),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.autorenew, color: Colors.white, size: 16),
-          const SizedBox(width: 4),
-          Text('جهّز',
-              style: GoogleFonts.cairo(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700)),
+  PopupMenuItem<String> _menuItem(String value, IconData icon, String label) =>
+      PopupMenuItem<String>(
+        value: value,
+        child: Row(children: [
+          Icon(icon, size: 18, color: AppColors.blue2),
+          const SizedBox(width: 10),
+          Text(label, style: GoogleFonts.cairo(fontSize: 13, fontWeight: FontWeight.w700)),
         ]),
-      ),
-    );
-  }
+      );
 
   void _showRotationDialog(BuildContext ctx, AppProvider prov) {
     final month = _targetMonth;
@@ -489,6 +589,136 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
     );
   }
 
+  // مقارنة شهرية لإجمالي فواتير كل شركة (آخر 6 شهور) + فرق الشهر الأخير
+  void _showMonthlyComparison(BuildContext ctx, AppProvider prov) {
+    final data = prov.providerMonthlySpend(months: 6);
+    final now = DateTime.now();
+    final keys = <String>[];
+    for (int i = 5; i >= 0; i--) {
+      final d = DateTime(now.year, now.month - i);
+      keys.add('${d.year}-${d.month.toString().padLeft(2, '0')}');
+    }
+    showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Container(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.85),
+          decoration: const BoxDecoration(
+            color: Color(0xFFf5f7fa),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+          ),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const SizedBox(height: 10),
+            Container(width: 40, height: 4,
+                decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(children: [
+                const Icon(Icons.bar_chart, color: AppColors.blue2),
+                const SizedBox(width: 8),
+                Text('مقارنة المصروف الشهري لكل شركة',
+                    style: GoogleFonts.cairo(fontSize: 15, fontWeight: FontWeight.w900)),
+              ]),
+            ),
+            if (data.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(30),
+                child: Text('مفيش فواتير كفاية للمقارنة',
+                    style: GoogleFonts.cairo(color: AppColors.muted)),
+              )
+            else
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 20),
+                  children: [
+                    for (final entry in data.entries)
+                      _comparisonCard(entry.key, entry.value, keys),
+                  ],
+                ),
+              ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _comparisonCard(String provider, Map<String, double> byMonth, List<String> keys) {
+    final name = MainLine.providerNames[provider] ?? provider;
+    final emoji = MainLine.providerEmojis[provider] ?? '📡';
+    final color = MainLine.providerColors[provider] ?? AppColors.blue;
+    final maxV = byMonth.values.fold<double>(1, (a, b) => a > b ? a : b);
+    final lastK = keys.last;
+    final prevK = keys.length > 1 ? keys[keys.length - 2] : keys.last;
+    final last = byMonth[lastK] ?? 0;
+    final prev = byMonth[prevK] ?? 0;
+    final delta = last - prev;
+    final up = delta > 0;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Text('$emoji $name',
+              style: GoogleFonts.cairo(fontSize: 13, fontWeight: FontWeight.w900, color: color)),
+          const Spacer(),
+          if (prev > 0 || last > 0)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: (up ? AppColors.redLight : AppColors.greenLight),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                delta == 0
+                    ? 'ثابت'
+                    : '${up ? '🔺 زاد' : '🔻 قلّ'} ${delta.abs().toStringAsFixed(0)} ج عن الشهر اللي فات',
+                style: GoogleFonts.cairo(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: up ? AppColors.red2 : const Color(0xFF2E7D32)),
+              ),
+            ),
+        ]),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 90,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: keys.map((k) {
+              final v = byMonth[k] ?? 0;
+              final h = (v / maxV * 64).clamp(2, 64).toDouble();
+              final mm = k.split('-');
+              return Expanded(
+                child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [
+                  Text(v.toStringAsFixed(0),
+                      style: GoogleFonts.cairo(fontSize: 8, fontWeight: FontWeight.w700, color: color)),
+                  const SizedBox(height: 2),
+                  Container(
+                    height: h,
+                    margin: const EdgeInsets.symmetric(horizontal: 2),
+                    decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(mm.length > 1 ? 'ش${mm[1]}' : '',
+                      style: GoogleFonts.cairo(fontSize: 8, color: AppColors.muted)),
+                ]),
+              );
+            }).toList(),
+          ),
+        ),
+      ]),
+    );
+  }
+
   // ── Period selector ────────────────────────────────────────────────
   Widget _buildPeriodSelector() {
     const labels = {
@@ -531,6 +761,168 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
           ),
           if (p != _Period.next) const SizedBox(width: 6),
         ],
+      ]),
+    );
+  }
+
+  // ── Search + Sort + Overdue filter row ─────────────────────────────
+  Widget _buildSearchSortRow() {
+    const sortLabels = {
+      'default': 'الترتيب: الشركة',
+      'remaining': 'الأعلى متبقّي',
+      'deadline': 'الأقرب موعداً',
+      'recent': 'الأحدث',
+    };
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+      child: Column(children: [
+        Row(children: [
+          Expanded(
+            child: SizedBox(
+              height: 38,
+              child: TextField(
+                onChanged: (v) => setState(() => _search = v),
+                textDirection: TextDirection.rtl,
+                style: GoogleFonts.cairo(fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: '🔍 بحث برقم الخط / الاسم / المبلغ...',
+                  hintStyle: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
+                  filled: true,
+                  fillColor: const Color(0xFFf0f4f8),
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20), borderSide: BorderSide.none),
+                  suffixIcon: _search.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.close, size: 16),
+                          onPressed: () => setState(() => _search = ''))
+                      : null,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            height: 38,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFf0f4f8),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _sort,
+                isDense: true,
+                icon: const Icon(Icons.sort, size: 18),
+                style: GoogleFonts.cairo(fontSize: 11, color: AppColors.text, fontWeight: FontWeight.w700),
+                items: sortLabels.entries
+                    .map((e) => DropdownMenuItem(
+                        value: e.key,
+                        child: Text(e.value, style: GoogleFonts.cairo(fontSize: 11))))
+                    .toList(),
+                onChanged: (v) => setState(() => _sort = v ?? 'default'),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () => setState(() => _onlyOverdue = !_onlyOverdue),
+            child: Container(
+              height: 38,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: _onlyOverdue ? AppColors.red2 : const Color(0xFFf0f4f8),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(children: [
+                Icon(Icons.warning_amber_rounded,
+                    size: 15, color: _onlyOverdue ? Colors.white : AppColors.red2),
+                const SizedBox(width: 4),
+                Text('متأخرة',
+                    style: GoogleFonts.cairo(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: _onlyOverdue ? Colors.white : AppColors.red2)),
+              ]),
+            ),
+          ),
+        ]),
+      ]),
+    );
+  }
+
+  // عدّاد كلي للفواتير المتأخرة (فات موعد سماحها)
+  Widget _overdueBanner(AppDB db) {
+    final (count, total) = _overdueStats(db);
+    if (count == 0) return const SizedBox.shrink();
+    return GestureDetector(
+      onTap: () => setState(() {
+        _onlyOverdue = true;
+        _sort = 'deadline';
+      }),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFEBEE),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFEF9A9A)),
+        ),
+        child: Row(children: [
+          const Text('🔴', style: TextStyle(fontSize: 18)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '$count فاتورة فات موعد دفعها — إجمالي ${total.toStringAsFixed(0)} ج',
+              style: GoogleFonts.cairo(
+                  fontSize: 12, fontWeight: FontWeight.w800, color: const Color(0xFFC62828)),
+            ),
+          ),
+          const Icon(Icons.chevron_left, color: Color(0xFFC62828), size: 20),
+        ]),
+      ),
+    );
+  }
+
+  // ── قسم الفواتير الغايبة (منطوي) — خطوط المفروض عليها فاتورة وما نزلتش ──
+  Widget _missingSection(AppDB db, AppProvider prov) {
+    final missing = _missingGroups(db);
+    if (missing.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8E1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFFD54F)),
+      ),
+      child: Column(children: [
+        GestureDetector(
+          onTap: () => setState(() => _missingOpen = !_missingOpen),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(children: [
+              const Text('🕳️', style: TextStyle(fontSize: 16)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('${missing.length} خط لسه ما نزلتش فاتورته الشهر ده',
+                    style: GoogleFonts.cairo(
+                        fontSize: 12, fontWeight: FontWeight.w800, color: const Color(0xFFE65100))),
+              ),
+              Icon(_missingOpen ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                  size: 18, color: const Color(0xFFE65100)),
+            ]),
+          ),
+        ),
+        if (_missingOpen)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: Column(children: [
+              for (final g in missing)
+                _ExpectedCard(group: g, month: _targetMonth, prov: prov),
+            ]),
+          ),
       ]),
     );
   }
@@ -794,7 +1186,7 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
               color: color.withValues(alpha: 0.7)),
         ),
         const Spacer(),
-        if (unpaid > 0)
+        if (unpaid > 0) ...[
           Text(
             'متبقي: ${unpaid.toStringAsFixed(0)} ج',
             style: GoogleFonts.cairo(
@@ -802,7 +1194,68 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
                 fontWeight: FontWeight.w700,
                 color: color),
           ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () => _confirmPayProvider(provider, name),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF2E7D32),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.done_all, size: 12, color: Colors.white),
+                const SizedBox(width: 3),
+                Text('سدّد الكل',
+                    style: GoogleFonts.cairo(
+                        fontSize: 10, fontWeight: FontWeight.w800, color: Colors.white)),
+              ]),
+            ),
+          ),
+        ],
       ]),
+    );
+  }
+
+  // دفعة جماعية: سداد كل فواتير شركة في الشهر الحالي مرة واحدة
+  void _confirmPayProvider(String provider, String name) {
+    final prov = context.read<AppProvider>();
+    final (count, total) = prov.previewProviderUnpaid(provider, _targetMonth);
+    if (count == 0) return;
+    showDialog(
+      context: context,
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('💰 سداد جماعي — $name',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 15)),
+          content: Text(
+            'هتسدّد $count فاتورة غير مسددة بإجمالي ${total.toStringAsFixed(0)} ج '
+            'لشركة $name في ${_monthLabel(_targetMonth)}.\n\nمتأكد؟',
+            style: GoogleFonts.cairo(fontSize: 13, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('إلغاء', style: GoogleFonts.cairo())),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
+              onPressed: () {
+                final (n, t) = prov.payProviderBills(provider, _targetMonth);
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  backgroundColor: AppColors.green,
+                  content: Text('✅ تم سداد $n فاتورة (${t.toStringAsFixed(0)} ج)',
+                      style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+                ));
+              },
+              child: Text('سدّد الكل',
+                  style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w800)),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -827,11 +1280,19 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
     );
   }
 
+  // تحويل d/m/yyyy → yyyy-mm-dd لاستخدامه في DateTime.parse
+  String _isoFromDmy(String dmy) {
+    final p = dmy.split('/');
+    if (p.length != 3) return '';
+    return '${p[2]}-${p[1].padLeft(2, '0')}-${p[0].padLeft(2, '0')}';
+  }
+
   // ── Add bill dialog ────────────────────────────────────────────────
   void _showAddDialog(
       BuildContext ctx, AppProvider prov, AppDB db) {
     String? selectedGid;
     bool isEstimated = false;
+    String? issueDate; // تاريخ نزول الفاتورة من الشركة (للسماح والعدّاد)
     final amountCtrl = TextEditingController();
     final noteCtrl = TextEditingController();
     final selectedMonth = _targetMonth;
@@ -1067,6 +1528,48 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
                           );
                         }),
                       const SizedBox(height: 10),
+                      // 📅 تاريخ نزول الفاتورة (نتيجة) — للفاتورة الفعلية
+                      if (!isEstimated) ...[
+                        GestureDetector(
+                          onTap: () async {
+                            final now = DateTime.now();
+                            final picked = await showDatePicker(
+                              context: ctx2,
+                              initialDate: issueDate != null
+                                  ? (DateTime.tryParse(_isoFromDmy(issueDate!)) ??
+                                      now)
+                                  : now,
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2035),
+                              locale: const Locale('ar'),
+                            );
+                            if (picked != null) {
+                              setS(() => issueDate =
+                                  '${picked.day}/${picked.month}/${picked.year}');
+                            }
+                          },
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 13),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            child: Row(children: [
+                              const Icon(Icons.event,
+                                  size: 18, color: Color(0xFF6A1B9A)),
+                              const SizedBox(width: 8),
+                              Text(
+                                  issueDate != null
+                                      ? '📅 نزلت يوم: $issueDate'
+                                      : '📅 تاريخ نزول الفاتورة (اختياري)',
+                                  style: GoogleFonts.cairo(fontSize: 13)),
+                            ]),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
                       // Amount field (actual bills only)
                       if (!isEstimated)
                         TextField(
@@ -1137,7 +1640,7 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
                                   0;
                               if (amount <= 0) return;
                               prov.addGroupBill(selectedGid!,
-                                  amount, note: note);
+                                  amount, note: note, issueDate: issueDate);
                             }
                             Navigator.pop(ctx);
                           },
@@ -1206,6 +1709,18 @@ class _AuditCardState extends State<_AuditCard> {
     return '📊 تقديرية';
   }
 
+  // فاتورة «منتظمة» = آخر 3 شهور فعلية للخط بنفس المبلغ تقريباً (مايتغيّرش)
+  bool _isRegularLine() {
+    final actuals = db.companyBills
+        .where((x) => x.groupId == b.groupId && x.isActual && x.actualAmount > 0)
+        .toList()
+      ..sort((a, c) => c.month.compareTo(a.month));
+    if (actuals.length < 3) return false;
+    final recent = actuals.take(3).toList();
+    final first = recent.first.actualAmount;
+    return recent.every((x) => (x.actualAmount - first).abs() < 1);
+  }
+
   @override
   Widget build(BuildContext context) {
     final g = db.groups.firstWhere((x) => x.id == b.groupId,
@@ -1232,11 +1747,15 @@ class _AuditCardState extends State<_AuditCard> {
         : null;
 
     final hasAnomaly = widget.anomaly != _Anomaly.none;
+    // الفاتورة التقديرية = بلون باهت (مجرد متوقّع للشهر الجاي، مالهاش تأثير على الربح)
+    final isEstimated = !b.isActual && !b.isPaid;
 
-    return Container(
+    return Opacity(
+      opacity: isEstimated ? 0.62 : 1.0,
+      child: Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isEstimated ? const Color(0xFFFAF6FC) : Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
             color: hasAnomaly
@@ -1273,6 +1792,11 @@ class _AuditCardState extends State<_AuditCard> {
                         const SizedBox(width: 6),
                         _badge(
                             _typeLabel, _typeBg, _typeColor),
+                        if (_isRegularLine()) ...[
+                          const SizedBox(width: 6),
+                          _badge('🔁 منتظمة', const Color(0xFFE3F2FD),
+                              const Color(0xFF1565C0)),
+                        ],
                         const Spacer(),
                         if (hasAnomaly)
                           _anomalyBadge(widget.anomaly),
@@ -1435,6 +1959,17 @@ class _AuditCardState extends State<_AuditCard> {
                               color: AppColors.muted),
                         ),
                       ],
+                      if (b.isActual && b.fixedAmount > 0) ...[
+                        const SizedBox(height: 5),
+                        _diffChip(),
+                      ],
+                      if (b.isDeferred) ...[
+                        const SizedBox(height: 5),
+                        _deferCountdownChip(),
+                      ] else if (!b.isPaid) ...[
+                        const SizedBox(height: 5),
+                        _deadlineChip(),
+                      ],
                     ]),
               ),
             ),
@@ -1488,6 +2023,16 @@ class _AuditCardState extends State<_AuditCard> {
                   ),
                   const SizedBox(width: 6),
                 ],
+                if (db.groups.any((g) => g.parentGroupId == b.groupId)) ...[
+                  _splitBtn(context),
+                  const SizedBox(width: 6),
+                ],
+                if (!b.isPaid) ...[
+                  _deferBtn(context),
+                  const SizedBox(width: 6),
+                ],
+                _editBtn(context),
+                const SizedBox(width: 6),
                 _linkBtn(context),
                 const SizedBox(width: 6),
                 _deleteBtn(context),
@@ -1530,7 +2075,9 @@ class _AuditCardState extends State<_AuditCard> {
                                   ),
                                 ),
                               Text(
-                                p.date,
+                                p.time != null && p.time!.isNotEmpty
+                                    ? '${p.date} • ${p.time}'
+                                    : p.date,
                                 style: GoogleFonts.cairo(
                                     fontSize: 10,
                                     color: AppColors.muted),
@@ -1549,6 +2096,7 @@ class _AuditCardState extends State<_AuditCard> {
               ),
             ],
           ]),
+      ),
     );
   }
 
@@ -1664,7 +2212,9 @@ class _AuditCardState extends State<_AuditCard> {
         ? '⚠️ مضاعفة'
         : a == _Anomaly.unexpectedBimonthly
             ? '🚨 شهر مفروض فاضي'
-            : '⚠️ تكرار';
+            : a == _Anomaly.sameMonthDuplicate
+                ? '🚨 فاتورة مكررة'
+                : '⚠️ تكرار';
     return Container(
       margin: const EdgeInsets.only(right: 4),
       padding: const EdgeInsets.symmetric(
@@ -1694,6 +2244,10 @@ class _AuditCardState extends State<_AuditCard> {
       color = const Color(0xFFc62828);
       msg = '🚨 الخط ده نظامه «شهر وشهر» والمفروض الشهر ده يكون ببلاش، '
           'بس نزلت فاتورة (${b.actualAmount.toStringAsFixed(0)} ج)! راجع حسابك مع الشركة فوراً.';
+    } else if (a == _Anomaly.sameMonthDuplicate) {
+      color = const Color(0xFFc62828);
+      msg = '🚨 الخط ده عليه أكتر من فاتورة فعلية في نفس الشهر (${_monthLabel(b.month)})! '
+          'ده غالباً تسجيل مكرر بالغلط — امسح الفاتورة الزيادة عشان متحاسبش الشركة مرتين.';
     } else {
       color = const Color(0xFFe65100);
       msg = 'تنبيه: نفس المبلغ (${b.actualAmount.toStringAsFixed(0)} ج) تكرر شهرين متتاليين.'
@@ -1747,6 +2301,247 @@ class _AuditCardState extends State<_AuditCard> {
         ),
       );
 
+  // زرار تحكّم كامل: تعديل تاريخ النزول + تعديل المبلغ
+  Widget _editBtn(BuildContext context) => GestureDetector(
+        onTap: () => _showEditSheet(context),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+              color: const Color(0xFFE3F2FD),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFF90CAF9))),
+          child: const Icon(Icons.edit_calendar_outlined,
+              size: 14, color: Color(0xFF1565C0)),
+        ),
+      );
+
+  void _showEditSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(width: 40, height: 4,
+                decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 14),
+            Text('🛠️ تحكّم في الفاتورة',
+                style: GoogleFonts.cairo(fontSize: 15, fontWeight: FontWeight.w900, color: AppColors.blue2)),
+            const SizedBox(height: 14),
+            ListTile(
+              leading: const Icon(Icons.event, color: Color(0xFF6A1B9A)),
+              title: Text('تعديل تاريخ نزول الفاتورة',
+                  style: GoogleFonts.cairo(fontSize: 13, fontWeight: FontWeight.w700)),
+              subtitle: Text('بيحسب منه آخر موعد دفع (التاريخ + سماح الشركة)',
+                  style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),
+              onTap: () { Navigator.pop(context); _pickIssueDate(context); },
+            ),
+            if (b.isActual)
+              ListTile(
+                leading: const Icon(Icons.attach_money, color: Color(0xFF2E7D32)),
+                title: Text('تعديل مبلغ الفاتورة',
+                    style: GoogleFonts.cairo(fontSize: 13, fontWeight: FontWeight.w700)),
+                subtitle: Text('الحالي: ${b.actualAmount.toStringAsFixed(0)} ج',
+                    style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),
+                onTap: () { Navigator.pop(context); _editAmountDialog(context); },
+              ),
+            ListTile(
+              leading: const Icon(Icons.history, color: Color(0xFF1565C0)),
+              title: Text('سجل الخط الكامل (كل الفواتير)',
+                  style: GoogleFonts.cairo(fontSize: 13, fontWeight: FontWeight.w700)),
+              subtitle: Text('كل فواتير الخط بالشهور + الإجماليات',
+                  style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),
+              onTap: () { Navigator.pop(context); _showLineHistory(context); },
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickIssueDate(BuildContext context) async {
+    final now = DateTime.now();
+    DateTime? curParsed;
+    final p = b.date.split('/');
+    if (p.length == 3) {
+      final d = int.tryParse(p[0]), m = int.tryParse(p[1]), y = int.tryParse(p[2]);
+      if (d != null && m != null && y != null) curParsed = DateTime(y, m, d);
+    }
+    final cur = curParsed ?? now;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: cur,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+      locale: const Locale('ar'),
+    );
+    if (picked != null) {
+      widget.prov.setBillIssueDate(b.id, '${picked.day}/${picked.month}/${picked.year}');
+    }
+  }
+
+  void _editAmountDialog(BuildContext context) {
+    final ctrl = TextEditingController(text: b.actualAmount.toStringAsFixed(0));
+    showDialog(
+      context: context,
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('تعديل مبلغ الفاتورة',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 15)),
+          content: TextField(
+            controller: ctrl,
+            keyboardType: TextInputType.number,
+            textDirection: TextDirection.ltr,
+            decoration: InputDecoration(
+              labelText: 'المبلغ الفعلي (ج)',
+              labelStyle: GoogleFonts.cairo(fontSize: 13),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: Text('إلغاء', style: GoogleFonts.cairo())),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.green),
+              onPressed: () {
+                final v = double.tryParse(ctrl.text.trim());
+                if (v != null && v >= 0) widget.prov.editBillAmount(b.id, v);
+                Navigator.pop(context);
+              },
+              child: Text('حفظ', style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w800)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // السجل الكامل لكل فواتير الخط بالشهور + إجماليات (للمراجعة مع الشركة)
+  void _showLineHistory(BuildContext context) {
+    final g = db.groups.firstWhere((x) => x.id == b.groupId,
+        orElse: () => Group(id: '', phone: '—'));
+    final bills = db.companyBills.where((x) => x.groupId == b.groupId).toList()
+      ..sort((a, c) => c.month.compareTo(a.month));
+    final totalActual = bills.fold<double>(0, (s, x) => s + x.actualAmount);
+    final totalPaid = bills.fold<double>(0, (s, x) => s + x.paidAmount);
+    final totalRemaining = bills.fold<double>(0, (s, x) => s + x.remaining);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Container(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+          decoration: const BoxDecoration(
+            color: Color(0xFFf5f7fa),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+          ),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const SizedBox(height: 10),
+            Container(width: 40, height: 4,
+                decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(children: [
+                const Icon(Icons.history, color: Color(0xFF1565C0)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('سجل ${g.phone}',
+                        style: GoogleFonts.cairo(fontSize: 15, fontWeight: FontWeight.w900),
+                        textDirection: TextDirection.ltr),
+                    if (g.ownerName != null && g.ownerName!.isNotEmpty)
+                      Text(g.ownerName!,
+                          style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted)),
+                  ]),
+                ),
+                Text('${bills.length} فاتورة',
+                    style: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted)),
+              ]),
+            ),
+            // إجماليات
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white, borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+                _histPill('إجمالي', totalActual, AppColors.blue2),
+                _histPill('مدفوع', totalPaid, const Color(0xFF2E7D32)),
+                _histPill('متبقّي', totalRemaining, AppColors.red2),
+              ]),
+            ),
+            const SizedBox(height: 6),
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.fromLTRB(12, 6, 12, 20),
+                itemCount: bills.length,
+                itemBuilder: (_, i) {
+                  final x = bills[i];
+                  final status = x.isPaid
+                      ? ('مسددة', const Color(0xFF2E7D32), const Color(0xFFE8F5E9))
+                      : (x.paidAmount > 0
+                          ? ('جزئي', const Color(0xFFE65100), const Color(0xFFFFF3E0))
+                          : (x.isActual
+                              ? ('غير مسددة', AppColors.red2, AppColors.redLight)
+                              : ('تقديرية', const Color(0xFF6A1B9A), const Color(0xFFF3E5F5))));
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: Colors.white, borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Row(children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(color: AppColors.blueLight, borderRadius: BorderRadius.circular(8)),
+                        child: Text(_monthLabel(x.month),
+                            style: GoogleFonts.cairo(fontSize: 10, fontWeight: FontWeight.w800, color: AppColors.blue2)),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text('${x.actualAmount.toStringAsFixed(0)} ج'
+                            '${x.remaining > 0 ? '  •  متبقّي ${x.remaining.toStringAsFixed(0)}' : ''}',
+                            style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w700)),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(color: status.$3, borderRadius: BorderRadius.circular(8)),
+                        child: Text(status.$1,
+                            style: GoogleFonts.cairo(fontSize: 10, fontWeight: FontWeight.w800, color: status.$2)),
+                      ),
+                    ]),
+                  );
+                },
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _histPill(String label, double v, Color c) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('${v.toStringAsFixed(0)} ج',
+              style: GoogleFonts.cairo(fontSize: 14, fontWeight: FontWeight.w900, color: c)),
+          Text(label, style: GoogleFonts.cairo(fontSize: 9, color: AppColors.muted)),
+        ],
+      );
+
   Widget _linkBtn(BuildContext context) => GestureDetector(
         onTap: () => _showLinkDialog(context),
         child: Container(
@@ -1761,6 +2556,182 @@ class _AuditCardState extends State<_AuditCard> {
               size: 14, color: Color(0xFF6A1B9A)),
         ),
       );
+
+  // عدّاد واحد واضح لكل فاتورة:
+  // آخر موعد دفع = تاريخ نزول الفاتورة + سماح الشركة (مخزّن لكل شركة، قابل للتعديل).
+  // كل فاتورة ليها عدّادها المستقل — لو فيه فاتورتين غير مدفوعتين كل واحدة بتبان بموعدها.
+  Widget _deadlineChip() {
+    final days = widget.prov.billGraceDaysLeft(b);
+    final deadline = widget.prov.billDeadlineDate(b);
+    final g = db.groups.firstWhere((x) => x.id == b.groupId,
+        orElse: () => Group(id: '', phone: ''));
+    final grace = widget.prov.graceForGroup(g);
+
+    // مفيش تاريخ نزول → لمّح للمستخدم يحطّه (من زرار 🕐 تعديل التاريخ)
+    if (days == null || deadline == null) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+            color: const Color(0xFFF0F4F8),
+            borderRadius: BorderRadius.circular(8)),
+        child: Text('🗓️ حدّد تاريخ نزول الفاتورة (زرار 🕐) لعرض الموعد',
+            style: GoogleFonts.cairo(
+                fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.muted)),
+      );
+    }
+
+    final dd = '${deadline.day}/${deadline.month}';
+    final over = days < 0;
+    final urgent = !over && days <= 3;
+    final bg = over
+        ? AppColors.redLight
+        : (urgent ? const Color(0xFFFFF3E0) : const Color(0xFFE8F5E9));
+    final fg = over
+        ? AppColors.red2
+        : (urgent ? const Color(0xFFE65100) : const Color(0xFF2E7D32));
+    final label = over
+        ? '🔴 فات موعد الدفع بـ ${-days} يوم (كان $dd)'
+        : (days == 0
+            ? '🟠 النهارده آخر يوم دفع ($dd)'
+            : '🗓️ آخر موعد دفع $dd — باقي $days يوم (سماح $grace)');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
+      child: Text(label,
+          style: GoogleFonts.cairo(
+              fontSize: 10, fontWeight: FontWeight.w800, color: fg)),
+    );
+  }
+
+  // مقارنة الفاتورة الفعلية بالمبلغ الثابت المرجعي (لاكتشاف الغلط/الزيادة)
+  Widget _diffChip() {
+    final diff = b.actualAmount - b.fixedAmount;
+    final same = diff.abs() < 0.5;
+    final over = diff > 0;
+    final bg = same
+        ? const Color(0xFFE8F5E9)
+        : (over ? AppColors.redLight : const Color(0xFFFFF8E1));
+    final fg = same
+        ? const Color(0xFF2E7D32)
+        : (over ? AppColors.red2 : const Color(0xFFE65100));
+    final label = same
+        ? '⚖️ مطابق للمتوقّع (${b.fixedAmount.toStringAsFixed(0)})'
+        : over
+            ? '🔺 أعلى من المتوقّع بـ ${diff.toStringAsFixed(0)} ج (المتوقّع ${b.fixedAmount.toStringAsFixed(0)})'
+            : '🔻 أقل من المتوقّع بـ ${(-diff).toStringAsFixed(0)} ج';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
+      child: Text(label,
+          style: GoogleFonts.cairo(
+              fontSize: 10, fontWeight: FontWeight.w800, color: fg)),
+    );
+  }
+
+  // عدّاد تنازلي لميعاد سماح الفاتورة المؤجَّلة
+  Widget _deferCountdownChip() {
+    final d = DateTime.tryParse(b.deferDate ?? '');
+    if (d == null) return const SizedBox.shrink();
+    final now = DateTime.now();
+    final days = d.difference(DateTime(now.year, now.month, now.day)).inDays;
+    final late = days < 0;
+    final urgent = !late && days <= 3;
+    final bg = late ? AppColors.redLight : (urgent ? const Color(0xFFFFF3E0) : const Color(0xFFEDE7F6));
+    final fg = late ? AppColors.red2 : (urgent ? const Color(0xFFE65100) : const Color(0xFF5E35B1));
+    final label = late
+        ? '⏰ تأخّر سداد المؤجَّلة من ${-days} يوم'
+        : (days == 0 ? '⏰ آخر يوم للسداد المؤجَّل' : '⏰ مؤجَّلة — باقي $days يوم');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
+      child: Text(label, style: GoogleFonts.cairo(fontSize: 10, fontWeight: FontWeight.w800, color: fg)),
+    );
+  }
+
+  Widget _splitBtn(BuildContext context) => GestureDetector(
+        onTap: () => showModalBottomSheet(
+          useRootNavigator: true,
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (_) => _SplitBillSheet(parentId: b.groupId, prov: widget.prov),
+        ),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+              color: const Color(0xFFE8F5E9),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFA5D6A7))),
+          child: const Icon(Icons.call_split, size: 14, color: Color(0xFF2E7D32)),
+        ),
+      );
+
+  Widget _deferBtn(BuildContext context) => GestureDetector(
+        onTap: () => _showDeferDialog(context),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+              color: b.isDeferred ? const Color(0xFFEDE7F6) : const Color(0xFFF5F5F5),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: b.isDeferred ? const Color(0xFF7E57C2) : AppColors.border)),
+          child: Icon(Icons.schedule,
+              size: 14, color: b.isDeferred ? const Color(0xFF5E35B1) : AppColors.muted),
+        ),
+      );
+
+  // تأجيل سداد الفاتورة لميعاد سماح من خدمة العملاء + عدّاد تنازلي
+  void _showDeferDialog(BuildContext context) {
+    final noteCtrl = TextEditingController(text: b.deferNote ?? '');
+    DateTime picked = (b.deferDate != null && b.deferDate!.isNotEmpty)
+        ? (DateTime.tryParse(b.deferDate!) ?? DateTime.now().add(const Duration(days: 7)))
+        : DateTime.now().add(const Duration(days: 7));
+    showDialog(
+      context: context,
+      builder: (dCtx) => StatefulBuilder(builder: (dCtx, setLocal) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('⏰ تأجيل الفاتورة',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 15, color: const Color(0xFF5E35B1))),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('ميعاد السماح من خدمة العملاء — هيظهر عدّاد تنازلي على الفاتورة.',
+                style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted)),
+            const SizedBox(height: 8),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.calendar_today, color: Color(0xFF5E35B1)),
+              title: Text('مؤجَّلة حتى: ${picked.day}/${picked.month}/${picked.year}',
+                  style: GoogleFonts.cairo(fontSize: 13)),
+              onTap: () async {
+                final d = await showDatePicker(context: dCtx, initialDate: picked,
+                    firstDate: DateTime(2020), lastDate: DateTime(2100));
+                if (d != null) setLocal(() => picked = d);
+              },
+            ),
+            TextField(controller: noteCtrl, style: GoogleFonts.cairo(fontSize: 13),
+                decoration: InputDecoration(hintText: 'سبب التأجيل (اختياري)', hintStyle: GoogleFonts.cairo(fontSize: 12))),
+          ]),
+          actions: [
+            if (b.isDeferred)
+              TextButton(
+                onPressed: () { widget.prov.deferCompanyBill(b.id, null); Navigator.pop(dCtx); },
+                child: Text('إلغاء التأجيل', style: GoogleFonts.cairo(color: AppColors.red)),
+              ),
+            TextButton(onPressed: () => Navigator.pop(dCtx), child: Text('إغلاق', style: GoogleFonts.cairo())),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF5E35B1)),
+              onPressed: () {
+                final dateStr = '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+                widget.prov.deferCompanyBill(b.id, dateStr, note: noteCtrl.text.trim());
+                Navigator.pop(dCtx);
+              },
+              child: Text('تأجيل', style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+            ),
+          ],
+        );
+      }),
+    );
+  }
 
   // ضمّ خط فرعي لهذا الخط الرئيسي — الفاتورة تنزل عليه تلقائياً
   void _showLinkDialog(BuildContext context) {
@@ -2071,11 +3042,12 @@ class _AuditCardState extends State<_AuditCard> {
     final ctrl = TextEditingController(
         text: full ? b.remaining.toStringAsFixed(0) : '');
     final noteCtrl = TextEditingController();
+    DateTime payDate = DateTime.now();
     showDialog(
       context: context,
       builder: (_) => Directionality(
         textDirection: TextDirection.rtl,
-        child: AlertDialog(
+        child: StatefulBuilder(builder: (dCtx, setLocal) => AlertDialog(
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(18)),
           title: Text(full ? '✅ سداد كامل' : '💳 سداد جزئي',
@@ -2146,6 +3118,21 @@ class _AuditCardState extends State<_AuditCard> {
                             horizontal: 12, vertical: 10),
                   ),
                 ),
+                const SizedBox(height: 4),
+                // تاريخ الدفع (للدفع المنسي بتاريخ سابق)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  leading: const Icon(Icons.event, size: 18, color: AppColors.blue2),
+                  title: Text('تاريخ الدفع: ${payDate.day}/${payDate.month}/${payDate.year}',
+                      style: GoogleFonts.cairo(fontSize: 12)),
+                  trailing: Text('غيّر', style: GoogleFonts.cairo(fontSize: 11, color: AppColors.blue3)),
+                  onTap: () async {
+                    final d = await showDatePicker(context: dCtx, initialDate: payDate,
+                        firstDate: DateTime(2020), lastDate: DateTime.now());
+                    if (d != null) setLocal(() => payDate = d);
+                  },
+                ),
               ]),
           actions: [
             TextButton(
@@ -2164,12 +3151,14 @@ class _AuditCardState extends State<_AuditCard> {
                 final amount =
                     double.tryParse(ctrl.text.trim()) ?? 0;
                 if (amount <= 0) return;
+                final ds = '${payDate.day}/${payDate.month}/${payDate.year}';
                 prov.payCompanyBill(
                   b.id,
                   amount,
                   note: noteCtrl.text.trim().isEmpty
                       ? null
                       : noteCtrl.text.trim(),
+                  payDate: ds,
                 );
                 Navigator.pop(context);
               },
@@ -2179,7 +3168,7 @@ class _AuditCardState extends State<_AuditCard> {
                       fontWeight: FontWeight.w700)),
             ),
           ],
-        ),
+        )),
       ),
     );
   }
@@ -2433,6 +3422,169 @@ class _ExpectedCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// شاشة تقسيم فاتورة الحساب المدموج — كل خط: مبلغه + نظامه (ثابت/شهر وشهر) في مكان واحد
+// ══════════════════════════════════════════════════════════════════════════════
+class _SplitBillSheet extends StatefulWidget {
+  final String parentId;
+  final AppProvider prov;
+  const _SplitBillSheet({required this.parentId, required this.prov});
+  @override
+  State<_SplitBillSheet> createState() => _SplitBillSheetState();
+}
+
+class _SplitBillSheetState extends State<_SplitBillSheet> {
+  late final List<Group> _lines;          // الأب + التوابع
+  final Map<String, TextEditingController> _amtCtrls = {};
+  final Map<String, String> _systems = {}; // gid → 'fixed' | 'bimonthly'
+
+  @override
+  void initState() {
+    super.initState();
+    final db = widget.prov.db;
+    final parent = db.groups.firstWhere((g) => g.id == widget.parentId,
+        orElse: () => Group(id: '', phone: '—'));
+    final children = db.groups.where((g) => g.parentGroupId == widget.parentId).toList();
+    _lines = [parent, ...children];
+    for (final g in _lines) {
+      _amtCtrls[g.id] = TextEditingController(
+          text: g.fixedBillAmount > 0 ? g.fixedBillAmount.toStringAsFixed(0) : '');
+      _systems[g.id] = g.billingSystem == 'bimonthly' ? 'bimonthly' : 'fixed';
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in _amtCtrls.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  double get _total => _lines.fold(0.0, (s, g) => s + (double.tryParse(_amtCtrls[g.id]!.text.trim()) ?? 0));
+
+  void _save() {
+    for (final g in _lines) {
+      final amt = double.tryParse(_amtCtrls[g.id]!.text.trim()) ?? 0;
+      widget.prov.setGroupFixedBill(g.id, amt);
+      widget.prov.setGroupBillingSystem(g.id, _systems[g.id]!);
+    }
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('✅ تم حفظ تقسيمة ${_lines.length} خط',
+          style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(16, 14, 16, MediaQuery.of(context).viewInsets.bottom + 20),
+      decoration: const BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      child: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Center(child: Container(width: 40, height: 4,
+              decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)))),
+          const SizedBox(height: 12),
+          Text('✂️ تقسيم فاتورة الحساب',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 16, color: AppColors.blue2)),
+          Text('اكتب مبلغ كل خط واختار نظامه — «شهر وشهر» بيتعكس تلقائياً، و«ثابت» ينزل كل شهر.',
+              style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted)),
+          const SizedBox(height: 12),
+          ..._lines.asMap().entries.map((e) {
+            final g = e.value;
+            final isParent = e.key == 0;
+            return Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: isParent ? const Color(0xFFE8F4FD) : const Color(0xFFF7F9FC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: isParent ? AppColors.blueMid : AppColors.border),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Icon(isParent ? Icons.star : Icons.subdirectory_arrow_right,
+                      size: 14, color: isParent ? AppColors.blue2 : AppColors.muted),
+                  const SizedBox(width: 4),
+                  Text(g.phone, style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 14, color: AppColors.blue2),
+                      textDirection: TextDirection.ltr),
+                  if (isParent) ...[
+                    const SizedBox(width: 6),
+                    Text('(رئيسي)', style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),
+                  ],
+                ]),
+                const SizedBox(height: 8),
+                Row(children: [
+                  Expanded(child: TextField(
+                    controller: _amtCtrls[g.id],
+                    keyboardType: TextInputType.number,
+                    textDirection: TextDirection.ltr,
+                    onChanged: (_) => setState(() {}),
+                    style: GoogleFonts.cairo(fontSize: 14, fontWeight: FontWeight.w700),
+                    decoration: InputDecoration(
+                      labelText: 'المبلغ', labelStyle: GoogleFonts.cairo(fontSize: 12), suffixText: 'ج',
+                      isDense: true,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  )),
+                  const SizedBox(width: 8),
+                  _sysToggle(g.id),
+                ]),
+              ]),
+            );
+          }),
+          const SizedBox(height: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(color: const Color(0xFFE8F5E9), borderRadius: BorderRadius.circular(10)),
+            child: Row(children: [
+              Text('💰 إجمالي الفاتورة المدموجة',
+                  style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w700, color: const Color(0xFF1B5E20))),
+              const Spacer(),
+              Text('${_total.toStringAsFixed(0)} ج',
+                  style: GoogleFonts.cairo(fontSize: 16, fontWeight: FontWeight.w900, color: const Color(0xFF1B5E20))),
+            ]),
+          ),
+          const SizedBox(height: 14),
+          Row(children: [
+            Expanded(child: OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('إلغاء', style: GoogleFonts.cairo()))),
+            const SizedBox(width: 10),
+            Expanded(flex: 2, child: ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.blue2, foregroundColor: Colors.white),
+              onPressed: _save,
+              child: Text('💾 حفظ التقسيمة', style: GoogleFonts.cairo(fontWeight: FontWeight.w900)),
+            )),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  Widget _sysToggle(String gid) {
+    final isBi = _systems[gid] == 'bimonthly';
+    return GestureDetector(
+      onTap: () => setState(() => _systems[gid] = isBi ? 'fixed' : 'bimonthly'),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        decoration: BoxDecoration(
+          color: isBi ? const Color(0xFFEDE7F6) : const Color(0xFFE8F5E9),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: isBi ? const Color(0xFF7E57C2) : const Color(0xFF66BB6A)),
+        ),
+        child: Text(isBi ? '🔄 شهر وشهر' : '📌 ثابت',
+            style: GoogleFonts.cairo(fontSize: 11, fontWeight: FontWeight.w800,
+                color: isBi ? const Color(0xFF5E35B1) : const Color(0xFF2E7D32))),
       ),
     );
   }

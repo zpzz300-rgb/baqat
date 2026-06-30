@@ -8,16 +8,24 @@ import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
 import '../widgets/common.dart';
 
-class RentalsScreen extends StatelessWidget {
+class RentalsScreen extends StatefulWidget {
   const RentalsScreen({super.key});
+  @override
+  State<RentalsScreen> createState() => _RentalsScreenState();
+}
+
+class _RentalsScreenState extends State<RentalsScreen> {
+  String _search = '';
+  String _filter = 'all'; // all|active|paused|ended|debt|clear|partial|deferred
 
   @override
   Widget build(BuildContext context) {
     final prov = context.watch<AppProvider>();
-    final rentals = prov.db.rentals;
-    final active = rentals.where((r) => r.status == 'active').length;
-    final totalRent = rentals.where((r) => r.status == 'active').fold(0.0, (s, r) => s + r.rent);
-    final totalDebt = rentals.fold(0.0, (s, r) => s + (r.balance < 0 ? -r.balance : 0.0));
+    final all = prov.db.rentals;
+    final active = all.where((r) => r.status == 'active').length;
+    final totalRent = all.where((r) => r.status == 'active').fold(0.0, (s, r) => s + r.rent);
+    final totalDebt = all.fold(0.0, (s, r) => s + r.debt);
+    final rentals = _apply(all, prov);
 
     return Column(
       children: [
@@ -43,7 +51,7 @@ class RentalsScreen extends StatelessWidget {
           ),
         ),
         // Summary
-        if (rentals.isNotEmpty)
+        if (all.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
             child: Container(
@@ -65,6 +73,42 @@ class RentalsScreen extends StatelessWidget {
               ),
             ),
           ),
+        // Search
+        if (all.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+            child: TextField(
+              onChanged: (v) => setState(() => _search = v.trim()),
+              style: GoogleFonts.cairo(fontSize: 13),
+              decoration: InputDecoration(
+                hintText: '🔍 بحث باسم المستأجر أو الرقم...',
+                hintStyle: GoogleFonts.cairo(color: AppColors.muted, fontSize: 13),
+                prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.muted),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
+                filled: true, fillColor: Colors.white,
+              ),
+            ),
+          ),
+        // Filter chips
+        if (all.isNotEmpty)
+          SizedBox(
+            height: 44,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              children: [
+                _chip('الكل', 'all', '📋'),
+                _chip('نشط', 'active', '✅'),
+                _chip('متوقف', 'paused', '⏸'),
+                _chip('منتهي', 'ended', '❌'),
+                _chip('عليهم دين', 'debt', '🔴'),
+                _chip('سدّد جزئي', 'partial', '◑'),
+                _chip('مؤجَّل', 'deferred', '⏰'),
+                _chip('مسدّدين', 'clear', '🟢'),
+              ],
+            ),
+          ),
         // List
         Expanded(
           child: rentals.isEmpty
@@ -73,7 +117,8 @@ class RentalsScreen extends StatelessWidget {
                   children: [
                     const Text('🏠', style: TextStyle(fontSize: 48)),
                     const SizedBox(height: 12),
-                    Text('لا توجد خطوط مؤجرة', style: GoogleFonts.cairo(color: AppColors.muted, fontSize: 14)),
+                    Text(all.isEmpty ? 'لا توجد خطوط مؤجرة' : 'لا توجد نتائج',
+                        style: GoogleFonts.cairo(color: AppColors.muted, fontSize: 14)),
                   ],
                 ))
               : ListView.builder(
@@ -83,6 +128,47 @@ class RentalsScreen extends StatelessWidget {
                 ),
         ),
       ],
+    );
+  }
+
+  List<Rental> _apply(List<Rental> all, AppProvider prov) {
+    var list = all;
+    if (_search.isNotEmpty) {
+      final q = _search.toLowerCase();
+      list = list.where((r) {
+        final g = prov.db.groups.firstWhere((x) => x.id == r.gid, orElse: () => Group(id: '', phone: ''));
+        return r.name.toLowerCase().contains(q) ||
+            (r.wa ?? '').contains(q) || (r.wa2 ?? '').contains(q) || g.phone.contains(q);
+      }).toList();
+    }
+    switch (_filter) {
+      case 'active':   return list.where((r) => r.status == 'active').toList();
+      case 'paused':   return list.where((r) => r.status == 'paused').toList();
+      case 'ended':    return list.where((r) => r.status == 'ended').toList();
+      case 'debt':     return list.where((r) => r.hasDebt).toList();
+      case 'partial':  return list.where((r) => r.partlyPaid).toList();
+      case 'deferred': return list.where((r) => r.isDeferred).toList();
+      case 'clear':    return list.where((r) => !r.hasDebt).toList();
+      default:         return list;
+    }
+  }
+
+  Widget _chip(String label, String value, String emoji) {
+    final active = _filter == value;
+    return GestureDetector(
+      onTap: () => setState(() => _filter = value),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        margin: const EdgeInsets.only(right: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: BoxDecoration(
+          color: active ? AppColors.blue2 : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: active ? AppColors.blue2 : AppColors.border),
+        ),
+        child: Text('$emoji $label',
+            style: GoogleFonts.cairo(fontSize: 12, color: active ? Colors.white : AppColors.muted, fontWeight: active ? FontWeight.w700 : FontWeight.w500)),
+      ),
     );
   }
 
@@ -106,13 +192,20 @@ class RentalsScreen extends StatelessWidget {
   }
 }
 
-class _RentalCard extends StatelessWidget {
+class _RentalCard extends StatefulWidget {
   final Rental rental;
   const _RentalCard({required this.rental});
+  @override
+  State<_RentalCard> createState() => _RentalCardState();
+}
+
+class _RentalCardState extends State<_RentalCard> {
+  bool _showHistory = false;
 
   @override
   Widget build(BuildContext context) {
-    final prov = context.read<AppProvider>();
+    final rental = widget.rental;
+    final prov = context.watch<AppProvider>();
     final g = prov.db.groups.firstWhere((x) => x.id == rental.gid, orElse: () => Group(id: '', phone: '—'));
     final statusColor = rental.status == 'active' ? AppColors.green : rental.status == 'paused' ? AppColors.orange : AppColors.muted;
     final statusLabel = rental.status == 'active' ? '✅ نشط' : rental.status == 'paused' ? '⏸ متوقف' : '❌ منتهي';
@@ -143,15 +236,31 @@ class _RentalCard extends StatelessWidget {
                     children: [
                       Text(rental.name, style: GoogleFonts.cairo(fontWeight: FontWeight.w900, color: AppColors.blue2, fontSize: 16)),
                       Text('خط: ${g.phone}', style: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted)),
-                      Container(
-                        margin: const EdgeInsets.only(top: 4),
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: statusColor.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(10),
+                      Wrap(spacing: 6, runSpacing: 4, children: [
+                        Container(
+                          margin: const EdgeInsets.only(top: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: statusColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(statusLabel, style: GoogleFonts.cairo(fontSize: 10, fontWeight: FontWeight.w700, color: statusColor)),
                         ),
-                        child: Text(statusLabel, style: GoogleFonts.cairo(fontSize: 10, fontWeight: FontWeight.w700, color: statusColor)),
-                      ),
+                        if (rental.partlyPaid)
+                          Container(
+                            margin: const EdgeInsets.only(top: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(color: AppColors.orange.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
+                            child: Text('◑ سدّد جزئي', style: GoogleFonts.cairo(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.orange)),
+                          ),
+                        if (rental.isDeferred)
+                          Container(
+                            margin: const EdgeInsets.only(top: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(color: AppColors.purple.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
+                            child: Text('⏰ مؤجَّل حتى ${rental.deferralDate}', style: GoogleFonts.cairo(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.purple)),
+                          ),
+                      ]),
                     ],
                   ),
                 ),
@@ -170,24 +279,103 @@ class _RentalCard extends StatelessWidget {
           // Actions
           Padding(
             padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                if (rental.wa != null && rental.wa!.isNotEmpty)
-                  _btn('💬 واتساب', AppColors.waGreen, () => _openWA(rental)),
-                const SizedBox(width: 8),
-                _btn('💰 دفع', AppColors.blue2, () => _showPayment(context, rental)),
-                const SizedBox(width: 8),
-                _btn('✏️ تعديل', AppColors.blueLight, () => _edit(context, rental), textColor: AppColors.blue2),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, color: AppColors.red, size: 20),
-                  onPressed: () => _delete(context, rental),
-                ),
-              ],
-            ),
+            child: Wrap(spacing: 8, runSpacing: 8, children: [
+              if (rental.wa != null && rental.wa!.isNotEmpty)
+                _btn('💬 واتساب', AppColors.waGreen, () => _openWA(rental)),
+              _btn('💰 دفع', AppColors.blue2, () => _showPayment(context, rental)),
+              _btn('⏰ تأجيل', AppColors.purple, () => _showDeferral(context, rental)),
+              _btn('✏️ تعديل', AppColors.blueLight, () => _edit(context, rental), textColor: AppColors.blue2),
+              if (rental.log.isNotEmpty)
+                _btn(_showHistory ? '🔼 إخفاء السجل' : '📋 السجل (${rental.log.length})',
+                    AppColors.blueLight, () => setState(() => _showHistory = !_showHistory),
+                    textColor: AppColors.blue2),
+              _btn('🗑 حذف', AppColors.red, () => _delete(context, rental)),
+            ]),
           ),
+
+          // Payment history
+          if (_showHistory && rental.log.isNotEmpty)
+            Container(
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFf7f9fc),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                children: rental.log.asMap().entries.map((e) {
+                  final entry = e.value;
+                  final amount = (entry['amount'] ?? 0).toDouble();
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFf0f0f0)))),
+                    child: Row(children: [
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(entry['desc'] ?? '', style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w600)),
+                        Text(entry['date'] ?? '', style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),
+                      ])),
+                      if (amount != 0)
+                        Text('${amount > 0 ? "+" : ""}${amount.toStringAsFixed(0)} ج',
+                            style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w700,
+                                color: amount >= 0 ? AppColors.green : AppColors.red2)),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: () => context.read<AppProvider>().deleteRentalLogEntry(rental.id, e.key),
+                        child: const Icon(Icons.delete_outline, size: 15, color: AppColors.muted),
+                      ),
+                    ]),
+                  );
+                }).toList(),
+              ),
+            ),
         ],
       ),
+    );
+  }
+
+  void _showDeferral(BuildContext context, Rental r) {
+    final noteCtrl = TextEditingController(text: r.deferralNote ?? '');
+    DateTime picked = r.deferralDate != null
+        ? (DateTime.tryParse(r.deferralDate!) ?? DateTime.now().add(const Duration(days: 7)))
+        : DateTime.now().add(const Duration(days: 7));
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(builder: (dialogCtx, setLocal) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('⏰ تأجيل دفع - ${r.name}', style: GoogleFonts.cairo(fontWeight: FontWeight.w900, color: AppColors.blue2, fontSize: 15)),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.calendar_today, color: AppColors.purple),
+              title: Text('مؤجَّل حتى: ${picked.day}/${picked.month}/${picked.year}', style: GoogleFonts.cairo(fontSize: 13)),
+              onTap: () async {
+                final d = await showDatePicker(context: dialogCtx, initialDate: picked, firstDate: DateTime(2020), lastDate: DateTime(2100));
+                if (d != null) setLocal(() => picked = d);
+              },
+            ),
+            TextField(controller: noteCtrl, style: GoogleFonts.cairo(fontSize: 13),
+                decoration: InputDecoration(hintText: 'سبب التأجيل (اختياري)', hintStyle: GoogleFonts.cairo(fontSize: 12))),
+          ]),
+          actions: [
+            if (r.isDeferred)
+              TextButton(
+                onPressed: () { context.read<AppProvider>().setRentalDeferral(r.id, null, null); Navigator.pop(dialogCtx); },
+                child: Text('إلغاء التأجيل', style: GoogleFonts.cairo(color: AppColors.red)),
+              ),
+            TextButton(onPressed: () => Navigator.pop(dialogCtx), child: Text('إغلاق', style: GoogleFonts.cairo())),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.purple),
+              onPressed: () {
+                final dateStr = '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+                context.read<AppProvider>().setRentalDeferral(r.id, dateStr, noteCtrl.text.trim());
+                Navigator.pop(dialogCtx);
+              },
+              child: Text('تأجيل', style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+            ),
+          ],
+        );
+      }),
     );
   }
 

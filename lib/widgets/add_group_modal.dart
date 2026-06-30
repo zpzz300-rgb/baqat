@@ -30,6 +30,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
   final _pointPriceCtrl = TextEditingController();
   final _extraFeeCtrl = TextEditingController();
   final _actualBillCtrl = TextEditingController();
+  final _fixedBillCtrl = TextEditingController(); // المبلغ الثابت لحساب الربح
   final _lastBillAmountCtrl = TextEditingController();
   final _manualBillCtrl = TextEditingController();
   // Phase 2
@@ -85,8 +86,8 @@ class _AddGroupModalState extends State<AddGroupModal> {
   // المفاتيح: clients, minutes, gb, points, pointPrice, bill, extra
   static const _presets = <String, List<Map<String, String>>>{
     'etisalat': [
-      {'name': '4250', 'clients': '7', 'minutes': '12000', 'gb': '200', 'points': '2000', 'pointPrice': '0.04', 'bill': '4250', 'extra': '125'},
-      {'name': '2250', 'clients': '5', 'minutes': '10000', 'gb': '130', 'points': '1000', 'pointPrice': '0.04', 'bill': '2250', 'extra': '125'},
+      {'name': '4250', 'clients': '7', 'minutes': '12000', 'gb': '200', 'points': '4000', 'pointPrice': '0.04', 'bill': '4250', 'extra': '125'},
+      {'name': '2150', 'clients': '5', 'minutes': '10000', 'gb': '130', 'points': '1000', 'pointPrice': '0.04', 'bill': '2150', 'extra': '125'},
     ],
     'vodafone': [
       {'name': 'كبيرة', 'clients': '5', 'minutes': '10000', 'gb': '200', 'points': '0', 'pointPrice': '0', 'bill': '4000', 'extra': '100'},
@@ -100,10 +101,11 @@ class _AddGroupModalState extends State<AddGroupModal> {
       {'name': 'ADSL/فايبر', 'clients': '1', 'minutes': '0', 'gb': '0', 'points': '0', 'pointPrice': '0', 'bill': '400', 'extra': '0'},
     ],
   };
+  // 3 سيكلات بس (شلنا المكرر: أول الشهر = سيكل 1، منتصف الشهر = سيكل 2)
   static const _cycleLabels = {
-    'day4': 'اليوم 4',
     'cycle1': 'سيكل 1 — يتجدد يوم 1',
     'cycle2': 'سيكل 2 — يتجدد يوم 15',
+    'day4': 'سيكل 4 — يتجدد يوم 4',
   };
   // دورة الفوترة الافتراضية لكل شركة (قابلة للتعديل بعد الاختيار)
   static const _defaultCycle = {
@@ -163,6 +165,10 @@ class _AddGroupModalState extends State<AddGroupModal> {
       if (e.fixedBillAmount > 0 && e.type == 'manual') {
         _manualBillCtrl.text = e.fixedBillAmount.toStringAsFixed(0);
       }
+      // المبلغ الثابت للخطوط العادية (لحساب الربح)
+      if (e.fixedBillAmount > 0 && e.type != 'manual') {
+        _fixedBillCtrl.text = e.fixedBillAmount.toStringAsFixed(0);
+      }
       _manualDueDate = e.manualDueDate;
       _lineType = e.lineType;
       // Phase 2
@@ -198,6 +204,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
     _pointPriceCtrl.dispose();
     _extraFeeCtrl.dispose();
     _actualBillCtrl.dispose();
+    _fixedBillCtrl.dispose();
     _lastBillAmountCtrl.dispose();
     _manualBillCtrl.dispose();
     _totalMinutesCtrl.dispose();
@@ -231,6 +238,280 @@ class _AddGroupModalState extends State<AddGroupModal> {
     );
     if (picked == null) return null;
     return '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+  }
+
+  /// تغيير نوع الخط بيظبّط الـ Tier وعدد العملاء والدقائق والزيادة تلقائياً
+  /// (دمجنا «نوع الباقة Tier» مع «نوع الخط» عشان متختارش الحجم مرتين).
+  void _onTypeChanged(String v) {
+    setState(() {
+      _type = v;
+      if (v == '3800') {
+        _tier = 'tier1_4250';
+        _maxClientsCtrl.text = '7';
+        _totalMinutesCtrl.text = '12000';
+        _extraFeeCtrl.text = '125';
+      } else if (v == '1800') {
+        _tier = 'tier2_smaller';
+        _maxClientsCtrl.text = '5';
+        _totalMinutesCtrl.text = '10000';
+        _extraFeeCtrl.text = '125';
+      }
+    });
+  }
+
+  // ── قسم القسائم/المنح الدورية ──────────────────────────────────
+  Widget _buildCouponSection(AppProvider prov, Group group) {
+    final coupons = group.coupons;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3E5F5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFCE93D8), width: 1.5),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Text('🎫', style: TextStyle(fontSize: 16)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text('القسائم / المنح الدورية',
+                style: GoogleFonts.cairo(
+                    color: const Color(0xFF6A1B9A),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13)),
+          ),
+        ]),
+        const SizedBox(height: 4),
+        Text('قسيمة بتنزل كل فترة (٦ شهور/سنة) — بعداد تنازلي وسجل',
+            style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),
+        const SizedBox(height: 10),
+        if (coupons.isEmpty)
+          Text('مفيش قسائم — أضف واحدة 👇',
+              style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted))
+        else
+          ...coupons.map((c) => _couponTile(prov, group, c)),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: () => _showAddCoupon(prov, group),
+            icon: const Icon(Icons.add, size: 16),
+            label: Text('إضافة قسيمة دورية',
+                style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF8E24AA),
+              foregroundColor: Colors.white,
+              shape:
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _couponTile(
+      AppProvider prov, Group group, Map<String, dynamic> c) {
+    final name = (c['name'] ?? 'قسيمة').toString();
+    final value = (c['value'] as num?)?.toDouble() ?? 0;
+    final due = DateTime.tryParse((c['dueDate'] ?? '').toString());
+    final everyTxt = c['every'] == '1y'
+        ? 'كل سنة'
+        : c['every'] == '6m'
+            ? 'كل ٦ شهور'
+            : 'مرة واحدة';
+    final log = (c['log'] as List?) ?? [];
+    String countdown = '';
+    Color cdColor = AppColors.muted;
+    if (due != null) {
+      final days = due
+          .difference(DateTime(DateTime.now().year, DateTime.now().month,
+              DateTime.now().day))
+          .inDays;
+      if (days > 0) {
+        countdown = 'باقي $days يوم';
+        cdColor = days <= 14 ? AppColors.orange : AppColors.green2;
+      } else if (days == 0) {
+        countdown = 'النهاردة!';
+        cdColor = AppColors.red2;
+      } else {
+        countdown = 'فات بـ ${-days} يوم';
+        cdColor = AppColors.red2;
+      }
+    }
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE1BEE7)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+            child: Text('$name • ${value.toStringAsFixed(0)} ج',
+                style: GoogleFonts.cairo(
+                    fontWeight: FontWeight.w800, fontSize: 13)),
+          ),
+          GestureDetector(
+            onTap: () => prov.deleteCoupon(group.id, c['id'].toString()),
+            child: const Icon(Icons.delete_outline,
+                size: 18, color: Color(0xFFD32F2F)),
+          ),
+        ]),
+        const SizedBox(height: 2),
+        Row(children: [
+          Text('$everyTxt • ',
+              style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),
+          if (countdown.isNotEmpty)
+            Text(countdown,
+                style: GoogleFonts.cairo(
+                    fontSize: 11, fontWeight: FontWeight.w800, color: cdColor)),
+        ]),
+        if (log.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text('آخر استلام: ${log.first['date']} (${(log.first['amount'] as num?)?.toStringAsFixed(0) ?? 0} ج) • السجل: ${log.length}',
+              style: GoogleFonts.cairo(fontSize: 9.5, color: AppColors.muted)),
+        ],
+        const SizedBox(height: 6),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: () =>
+                prov.markCouponReceived(group.id, c['id'].toString()),
+            icon: const Icon(Icons.check_circle_outline, size: 15),
+            label: Text('تم استلام القسيمة',
+                style: GoogleFonts.cairo(
+                    fontWeight: FontWeight.w700, fontSize: 11.5)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF6A1B9A),
+              side: const BorderSide(color: Color(0xFF8E24AA)),
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              shape:
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  void _showAddCoupon(AppProvider prov, Group group) {
+    final nameCtrl = TextEditingController();
+    final valueCtrl = TextEditingController();
+    String? dueDate;
+    String every = '6m';
+    showDialog(
+      context: context,
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: StatefulBuilder(
+          builder: (ctx, setS) => AlertDialog(
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
+            title: Text('🎫 قسيمة دورية',
+                style: GoogleFonts.cairo(
+                    fontWeight: FontWeight.w900, fontSize: 15)),
+            content: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                AppFormField(
+                    label: 'اسم القسيمة',
+                    controller: nameCtrl,
+                    hint: 'مثال: قسيمة 5000'),
+                const SizedBox(height: 8),
+                AppFormField(
+                    label: 'قيمتها (ج)',
+                    controller: valueCtrl,
+                    keyboardType: TextInputType.number,
+                    textDirection: TextDirection.ltr),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: () async {
+                    final d = await _pickDate(dueDate);
+                    if (d != null) setS(() => dueDate = d);
+                  },
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 12),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.calendar_today,
+                          size: 16, color: AppColors.muted),
+                      const SizedBox(width: 8),
+                      Text(dueDate ?? '📅 ميعاد نزول القسيمة',
+                          style: GoogleFonts.cairo(fontSize: 13)),
+                    ]),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text('بتتكرر كل قد إيه؟',
+                    style: GoogleFonts.cairo(
+                        fontSize: 11, color: AppColors.muted)),
+                const SizedBox(height: 6),
+                Row(children: [
+                  for (final opt in const [
+                    ('6m', '٦ شهور'),
+                    ('1y', 'سنة'),
+                    ('once', 'مرة واحدة')
+                  ])
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setS(() => every = opt.$1),
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 2),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          decoration: BoxDecoration(
+                            color: every == opt.$1
+                                ? const Color(0xFF8E24AA)
+                                : const Color(0xFFF0F0F0),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(opt.$2,
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.cairo(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: every == opt.$1
+                                      ? Colors.white
+                                      : AppColors.muted)),
+                        ),
+                      ),
+                    ),
+                ]),
+              ]),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text('إلغاء', style: GoogleFonts.cairo()),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  if (dueDate == null) return;
+                  prov.addCoupon(
+                      group.id,
+                      nameCtrl.text,
+                      double.tryParse(valueCtrl.text.trim()) ?? 0,
+                      dueDate!,
+                      every);
+                  Navigator.pop(ctx);
+                },
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF8E24AA),
+                    foregroundColor: Colors.white),
+                child: Text('إضافة',
+                    style: GoogleFonts.cairo(fontWeight: FontWeight.w800)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -287,7 +568,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
         const SizedBox(height: 6),
         LineTypeSelector(
             value: _type,
-            onChanged: (v) => setState(() => _type = v),
+            onChanged: _onTypeChanged,
             prefix: 'ng'),
         const SizedBox(height: 12),
 
@@ -318,7 +599,8 @@ class _AddGroupModalState extends State<AddGroupModal> {
                   fontWeight: FontWeight.w700)),
           const SizedBox(height: 6),
           DropdownButtonFormField<String>(
-            initialValue: _billingCycle,
+            initialValue:
+                _cycleLabels.containsKey(_billingCycle) ? _billingCycle : null,
             decoration: InputDecoration(
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -438,6 +720,12 @@ class _AddGroupModalState extends State<AddGroupModal> {
         ],
         const SizedBox(height: 12),
 
+        // ── قسائم/منح دورية (للخطوط الموجودة فقط) ─────────────────
+        if (widget.existing != null) ...[
+          _buildCouponSection(prov, widget.existing!),
+          const SizedBox(height: 12),
+        ],
+
         // ── Notes ─────────────────────────────────────────────────
         AppFormField(label: 'ملاحظات', controller: _notesCtrl, hint: '...'),
       ],
@@ -500,7 +788,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
           // ── قوالب جاهزة حسب الشركة ──────────────────────────────
           if (_provider != null && _presets[_provider] != null) ...[
             const SizedBox(height: 10),
-            Text('⚡ قالب جاهز (اضغط واعدّل)',
+            Text('⚡ تعبئة سريعة (اضغط يملّي الأرقام واعدّل)',
                 style: GoogleFonts.cairo(
                     fontSize: 11,
                     color: AppColors.muted,
@@ -586,10 +874,30 @@ class _AddGroupModalState extends State<AddGroupModal> {
                     textDirection: TextDirection.ltr)),
           ]),
           const SizedBox(height: 10),
+          // ⭐ المبلغ الثابت — أساس حساب ربح المجموعة
+          Container(
+            padding: const EdgeInsets.all(2),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF66BB6A), width: 1.5),
+            ),
+            child: AppFormField(
+              label: '⭐ المبلغ الثابت للفاتورة (لحساب الربح)',
+              controller: _fixedBillCtrl,
+              hint: 'الفاتورة المتفق عليها — منها بيتحسب الربح',
+              keyboardType: TextInputType.number,
+              textDirection: TextDirection.ltr,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text('💡 من غير المبلغ ده الربح هيفضل صفر',
+              style: GoogleFonts.cairo(
+                  fontSize: 10, color: const Color(0xFF2E7D32))),
+          const SizedBox(height: 10),
           AppFormField(
-            label: '💵 المبلغ الفعلي للفاتورة (ج)',
+            label: '💵 المبلغ الفعلي للفاتورة (من الشركة)',
             controller: _actualBillCtrl,
-            hint: 'المبلغ الذي تدفعه للشركة شهرياً',
+            hint: 'اللي بينزل فعلاً من الشركة (للمراجعة فقط)',
             keyboardType: TextInputType.number,
             textDirection: TextDirection.ltr,
           ),
@@ -632,49 +940,37 @@ class _AddGroupModalState extends State<AddGroupModal> {
                           fontSize: 13)),
                 ]),
                 const SizedBox(height: 12),
-                // الاسم الرباعي
-                AppFormField(
-                  label: '👤 اسم صاحب الخط (رباعي)',
-                  controller: _ownerFullNameCtrl,
-                  hint: 'الاسم بالكامل (4 أسماء)',
+                // نوع الباقة بيتحدد تلقائياً من «نوع الخط» فوق (دمجنا الاتنين)
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFFFB74D)),
+                  ),
+                  child: Row(children: [
+                    const Text('🎯', style: TextStyle(fontSize: 14)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _type == '3800'
+                            ? 'الباقة: الكبير (4250) — 7 + 2 زيادة'
+                            : _type == '1800'
+                                ? 'الباقة: الصغير (2150) — 5 + 2 زيادة'
+                                : 'اختر نوع الخط فوق لتحديد الباقة',
+                        style: GoogleFonts.cairo(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: const Color(0xFFE65100)),
+                      ),
+                    ),
+                    Text('من «نوع الخط» فوق',
+                        style: GoogleFonts.cairo(
+                            fontSize: 9, color: AppColors.muted)),
+                  ]),
                 ),
-                const SizedBox(height: 10),
-                // Tier selector
-                Text('🎯 نوع الباقة (Tier)',
-                    style: GoogleFonts.cairo(
-                        fontSize: 12,
-                        color: AppColors.muted,
-                        fontWeight: FontWeight.w700)),
-                const SizedBox(height: 6),
-                Row(children: [
-                  Expanded(
-                    child: _GroupTierBtn(
-                      label: 'Tier 1 — 4250 ج\n7 + exception',
-                      value: 'tier1_4250',
-                      selected: _tier,
-                      onTap: (v) => setState(() {
-                        _tier = v;
-                        _totalMinutesCtrl.text = '12000';
-                        _maxClientsCtrl.text = '7';
-                        _extraFeeCtrl.text = '125';
-                      }),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _GroupTierBtn(
-                      label: 'Tier 2 — أصغر\n5 + exception',
-                      value: 'tier2_smaller',
-                      selected: _tier,
-                      onTap: (v) => setState(() {
-                        _tier = v;
-                        _totalMinutesCtrl.text = '10000';
-                        _maxClientsCtrl.text = '5';
-                        _extraFeeCtrl.text = '125';
-                      }),
-                    ),
-                  ),
-                ]),
                 const SizedBox(height: 10),
                 Row(children: [
                   Expanded(
@@ -930,6 +1226,8 @@ class _AddGroupModalState extends State<AddGroupModal> {
       _pointPriceCtrl.text = p['pointPrice'] ?? _pointPriceCtrl.text;
       _actualBillCtrl.text = p['bill'] ?? _actualBillCtrl.text;
       _manualBillCtrl.text = p['bill'] ?? _manualBillCtrl.text;
+      // ملاحظة: مش بنملّي «المبلغ الثابت للربح» تلقائياً — انت بتكتب اللي بينزل
+      // فعلاً للربح بإيدك (ممكن يكون نص الفاتورة لو شهر وشهر).
       _extraFeeCtrl.text = p['extra'] ?? _extraFeeCtrl.text;
     });
   }
@@ -1221,7 +1519,12 @@ class _AddGroupModalState extends State<AddGroupModal> {
           : (double.tryParse(_lastBillAmountCtrl.text.trim()) ??
               widget.existing?.lastBillAmount ??
               0),
-      fixedBillAmount: manualBill,
+      // المبلغ الثابت = اليدوي للخط اليدوي، وإلا الحقل الجديد للخطوط العادية
+      fixedBillAmount: isManual
+          ? manualBill
+          : (double.tryParse(_fixedBillCtrl.text.trim()) ??
+              widget.existing?.fixedBillAmount ??
+              0),
       billDebt: billDebt,
       groupNotes: widget.existing?.groupNotes ?? [],
       lastNotesMonth: widget.existing?.lastNotesMonth,
@@ -1230,9 +1533,9 @@ class _AddGroupModalState extends State<AddGroupModal> {
       stickyNote: widget.existing?.stickyNote,
       manualDueDate: isManual ? _manualDueDate : null,
       parentGroupId: widget.existing?.parentGroupId,
-      // Phase 2: Master Line fields
-      ownerFullName: _ownerFullNameCtrl.text.trim().isNotEmpty
-          ? _ownerFullNameCtrl.text.trim()
+      // Phase 2: Master Line fields — اسم صاحب الخط بقى حقل واحد فوق (شلنا التكرار)
+      ownerFullName: _ownerNameCtrl.text.trim().isNotEmpty
+          ? _ownerNameCtrl.text.trim()
           : null,
       contractPhotoPath: _contractPhotoPath,
       mainLineAllocationGb: int.tryParse(_mainLineGbCtrl.text.trim()) ??
@@ -1251,6 +1554,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
       weCouponDate: _weCouponDate,
       vodafoneRateType: _vodafoneRateType,
       extraBundles: widget.existing?.extraBundles ?? [],
+      coupons: widget.existing?.coupons ?? [],
     );
     if (widget.existing == null) {
       prov.addGroup(g);

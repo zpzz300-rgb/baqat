@@ -23,7 +23,7 @@ class EditMemberModal extends StatefulWidget {
 }
 
 class _EditMemberModalState extends State<EditMemberModal> {
-  late TextEditingController _nameCtrl, _phoneCtrl, _phone2Ctrl;
+  late TextEditingController _nameCtrl, _nicknameCtrl, _phoneCtrl, _phone2Ctrl;
   late TextEditingController _priceCtrl, _notesCtrl, _natIdCtrl, _addressCtrl;
   late TextEditingController _guarantorNameCtrl, _guarantorPhoneCtrl;
   late TextEditingController _minutesCtrl, _intlCtrl;
@@ -42,6 +42,7 @@ class _EditMemberModalState extends State<EditMemberModal> {
     super.initState();
     final m = widget.member;
     _nameCtrl = TextEditingController(text: m.name);
+    _nicknameCtrl = TextEditingController(text: m.nickname ?? '');
     _phoneCtrl = TextEditingController(text: m.phone);
     _phone2Ctrl = TextEditingController(text: m.phone2 ?? '');
     _priceCtrl = TextEditingController(text: m.price.toStringAsFixed(0));
@@ -205,6 +206,12 @@ class _EditMemberModalState extends State<EditMemberModal> {
       children: [
         // ── Name ──
         AppFormField(label: 'الاسم', controller: _nameCtrl),
+        const SizedBox(height: 12),
+        // ── Nickname (used in messages) ──
+        AppFormField(
+            label: '💬 كنية المراسلة (اختياري)',
+            controller: _nicknameCtrl,
+            hint: 'النداء اللي يظهر في الرسالة بدل الاسم — مثال: أ. محمد / حضرتك'),
         const SizedBox(height: 12),
 
         // ── Phone ──
@@ -786,6 +793,7 @@ class _EditMemberModalState extends State<EditMemberModal> {
       id: m.id,
       gid: _selectedGroup!,
       name: _nameCtrl.text.trim(),
+      nickname: _nicknameCtrl.text.trim().isNotEmpty ? _nicknameCtrl.text.trim() : null,
       phone: _phoneCtrl.text.trim(),
       phone2:
           _phone2Ctrl.text.trim().isNotEmpty ? _phone2Ctrl.text.trim() : null,

@@ -183,6 +183,9 @@ class Group {
 
   // باقات إضافية مؤقتة (Phase 3)
   List<Map<String, dynamic>> extraBundles; // [{month, gb, cost, date}]
+  // قسائم/منح دورية على الخط الرئيسي (كل قسيمة: {id, name, value, dueDate, every, log})
+  // every: '6m' | '1y' | 'once' ؛ log: [{date, amount, note}]
+  List<Map<String, dynamic>> coupons;
 
   Group({
     required this.id,
@@ -249,11 +252,13 @@ class Group {
     this.weCouponDate,
     this.vodafoneRateType,
     List<Map<String, dynamic>>? extraBundles,
+    List<Map<String, dynamic>>? coupons,
   })  : complaints = complaints ?? [],
         gifts = gifts ?? [],
         pointsRedemptions = pointsRedemptions ?? [],
         groupNotes = groupNotes ?? [],
-        extraBundles = extraBundles ?? [];
+        extraBundles = extraBundles ?? [],
+        coupons = coupons ?? [];
 
   factory Group.fromJson(Map<String, dynamic> j) => Group(
         id: j['id'].toString(),
@@ -322,6 +327,7 @@ class Group {
         vodafoneRateType: j['vodafoneRateType'],
         extraBundles:
             List<Map<String, dynamic>>.from(j['extraBundles'] ?? []),
+        coupons: List<Map<String, dynamic>>.from(j['coupons'] ?? []),
       );
 
   Map<String, dynamic> toJson() => {
@@ -389,6 +395,7 @@ class Group {
         'weCouponDate': weCouponDate,
         'vodafoneRateType': vodafoneRateType,
         'extraBundles': extraBundles,
+        'coupons': coupons,
       };
 
   int get defaultPrice => type == '3800' ? 260 : 190;
@@ -409,6 +416,11 @@ class Group {
 
   /// سعر العميل الإضافي (الـ 8 أو 9 أو 10)
   double get extraCustomerFee => extraClientFee ?? 125;
+
+  /// قيمة النقاط الشهرية الثابتة (عدد النقاط الشهري × سعر النقطة) — تُستخدم في
+  /// حساب ربح المجموعة بدل المتراكم. صفر لو مش متحدد.
+  double get monthlyPointsValue =>
+      (pointsMonthly ?? 0) * (pointPrice ?? 0);
 
   /// عدد الأيام المتبقية لانتهاء العرض (null لو مفيش تاريخ)
   int? get daysUntilOfferEnd {
@@ -480,6 +492,7 @@ class Member {
   String id;
   String gid;
   String name;
+  String? nickname; // كنية/نداء العميل في الرسائل (لو فاضي نستخدم name)
   String phone;
   String? phone2; // secondary number
   bool waPhone2; // true = use phone2 for WhatsApp
@@ -520,6 +533,7 @@ class Member {
     required this.id,
     required this.gid,
     required this.name,
+    this.nickname,
     required this.phone,
     this.phone2,
     this.waPhone2 = false,
@@ -558,6 +572,7 @@ class Member {
         id: j['id'].toString(),
         gid: j['gid'].toString(),
         name: j['name'] ?? '',
+        nickname: j['nickname'],
         phone: j['phone'] ?? '',
         phone2: j['phone2'],
         waPhone2: j['waPhone2'] ?? false,
@@ -593,6 +608,7 @@ class Member {
         'id': id,
         'gid': gid,
         'name': name,
+        'nickname': nickname,
         'phone': phone,
         'phone2': phone2,
         'waPhone2': waPhone2,
@@ -639,6 +655,17 @@ class Member {
   bool get isClear => balance >= 0 && price > 0;
   bool get isZero => price == 0;
 
+  /// دقائق العميل الفعّالة: لو محددة يدوياً نستخدمها، وإلا الافتراضي 1500 دقيقة.
+  /// (الأرضي/الهوم 4G ملهمش دقائق من الباقة)
+  int get effectiveMinutes {
+    if (type == 'landline' || type == 'homeforgee') return 0;
+    return minutesAllocation > 0 ? minutesAllocation : 1500;
+  }
+
+  /// نداء العميل في الرسائل: الكنية لو موجودة، وإلا الاسم.
+  String get salutation =>
+      (nickname != null && nickname!.trim().isNotEmpty) ? nickname!.trim() : name;
+
   /// رقم الواتساب المحدد (الافتراضي أو الثانوي)
   String get waPhone =>
       (waPhone2 && phone2 != null && phone2!.isNotEmpty) ? phone2! : phone;
@@ -663,6 +690,8 @@ class Guarantor {
   String type; // 'personal', 'company', 'relative'
   String? natId;
   String? notes;
+  double? maxDebt;        // حد الكفالة الأقصى (لو null = بدون حد)
+  String? lastRemindedAt; // آخر تذكير (ISO 8601)
 
   Guarantor({
     required this.id,
@@ -672,6 +701,8 @@ class Guarantor {
     this.type = 'personal',
     this.natId,
     this.notes,
+    this.maxDebt,
+    this.lastRemindedAt,
   });
 
   factory Guarantor.fromJson(Map<String, dynamic> j) => Guarantor(
@@ -682,6 +713,8 @@ class Guarantor {
         type: j['type'] ?? 'personal',
         natId: j['natId'],
         notes: j['notes'],
+        maxDebt: (j['maxDebt'] as num?)?.toDouble(),
+        lastRemindedAt: j['lastRemindedAt'],
       );
 
   Map<String, dynamic> toJson() => {
@@ -692,6 +725,8 @@ class Guarantor {
         'type': type,
         'natId': natId,
         'notes': notes,
+        'maxDebt': maxDebt,
+        'lastRemindedAt': lastRemindedAt,
       };
 
   String get typeLabel {
@@ -723,6 +758,8 @@ class Rental {
   String? packageSize; // "20 جيجا"
   double packagePrice; // السعر الشهري للباقة
   String? lastBilledMonth; // YYYY-MM — لمنع تكرار الفوترة
+  String? deferralDate; // تأجيل الدفع حتى (YYYY-MM-DD)
+  String? deferralNote; // سبب التأجيل
 
   Rental({
     required this.id,
@@ -740,6 +777,8 @@ class Rental {
     this.packageSize,
     this.packagePrice = 0,
     this.lastBilledMonth,
+    this.deferralDate,
+    this.deferralNote,
   }) : log = log ?? [];
 
   factory Rental.fromJson(Map<String, dynamic> j) => Rental(
@@ -758,6 +797,8 @@ class Rental {
         packageSize: j['packageSize'],
         packagePrice: (j['packagePrice'] ?? 0).toDouble(),
         lastBilledMonth: j['lastBilledMonth'],
+        deferralDate: j['deferralDate'],
+        deferralNote: j['deferralNote'],
       );
 
   Map<String, dynamic> toJson() => {
@@ -776,10 +817,19 @@ class Rental {
         'packageSize': packageSize,
         'packagePrice': packagePrice,
         'lastBilledMonth': lastBilledMonth,
+        'deferralDate': deferralDate,
+        'deferralNote': deferralNote,
       };
 
   /// السعر الفعلي للباقة (يستخدم packagePrice إن وُجد، وإلا rent)
   double get effectivePrice => packagePrice > 0 ? packagePrice : rent;
+
+  double get debt => balance < 0 ? -balance : 0;
+  bool get hasDebt => balance < 0;
+  bool get isDeferred => deferralDate != null;
+  /// سدّد جزئي: عليه دين + عمل دفعة واحدة على الأقل في السجل
+  bool get partlyPaid =>
+      hasDebt && log.any((e) => (e['amount'] ?? 0).toDouble() > 0);
 }
 
 class WorkNum {
@@ -968,18 +1018,26 @@ class BillPayment {
   String id;
   double amount;
   String date;
+  String? time; // الساعة (HH:mm) — لتسجيل الدفعة الجزئية بالتاريخ والساعة
   String? note;
 
-  BillPayment({required this.id, required this.amount, required this.date, this.note});
+  BillPayment(
+      {required this.id,
+      required this.amount,
+      required this.date,
+      this.time,
+      this.note});
 
   factory BillPayment.fromJson(Map<String, dynamic> j) => BillPayment(
         id: j['id'].toString(),
         amount: (j['amount'] as num?)?.toDouble() ?? 0,
         date: j['date'] ?? '',
+        time: j['time'],
         note: j['note'],
       );
 
-  Map<String, dynamic> toJson() => {'id': id, 'amount': amount, 'date': date, 'note': note};
+  Map<String, dynamic> toJson() =>
+      {'id': id, 'amount': amount, 'date': date, 'time': time, 'note': note};
 }
 
 // ── Company Bill (فاتورة شركة الاتصالات) ─────────────────────────────────────
@@ -1290,9 +1348,9 @@ class AppDB {
     final rentalIncome = rentals
         .where((r) => r.status == 'active')
         .fold<double>(0, (s, r) => s + r.rent);
-    // أرباح الهدايا + النقاط المعلقة (لا علاقة لها بفواتير الشركة)
+    // أرباح الهدايا + النقاط الشهرية الثابتة (نفس منطق ربح المجموعة عشان يطابق البادجات)
     final giftProfits   = groups.fold<double>(0, (s, g) => s + g.giftProfit);
-    final pointsProfits = groups.fold<double>(0, (s, g) => s + g.pendingPointsProfit);
+    final pointsProfits = groups.fold<double>(0, (s, g) => s + g.monthlyPointsValue);
     // صافي الربح = (دخل العملاء - fixedBillAmount - رسوم زيادة) + إيجارات + هدايا + نقاط
     // الفواتير الفعلية (actualBillAmount / companyBills) لا تدخل في هذه المعادلة
     final netProfit = totalBillingProfit + rentalIncome + giftProfits + pointsProfits;
@@ -1312,15 +1370,16 @@ class AppDB {
   double groupBalance(String gid) =>
       membersOf(gid).fold(0, (s, m) => s + m.balance);
 
+  /// السعر الافتراضي للعميل الزيادة لو مش متحدد على الخط (125 ج لكل عميل)
+  static const double defaultExtraClientFee = 125;
+
   /// عدد خطوط الزيادة القابلة للخصم حسب الحد الأقصى للأفراد ونوع الخط
   int groupExtraLines(String gid) {
     final g = groups.firstWhere((x) => x.id == gid,
         orElse: () => Group(id: '', phone: ''));
-    if (g.maxClients == null ||
-        g.extraClientFee == null ||
-        g.extraClientFee! <= 0) {
-      return 0;
-    }
+    // لازم يكون فيه حد أقصى للأفراد عشان نعرف مين «زيادة».
+    // السعر مش شرط يكون متحدد — لو مش متحدد بنستخدم الافتراضي (125 ج).
+    if (g.maxClients == null) return 0;
     if (g.lineType == LineType.home4g || g.lineType == LineType.adsl) {
       return 0;
     }
@@ -1329,11 +1388,14 @@ class AppDB {
     return count > g.maxClients! ? count - g.maxClients! : 0;
   }
 
-  /// إجمالي رسوم الخطوط الإضافية القابلة للخصم
+  /// إجمالي رسوم الخطوط الإضافية القابلة للخصم (السعر المحدد أو 125 ج افتراضياً)
   double groupExtraLineFee(String gid) {
     final g = groups.firstWhere((x) => x.id == gid,
         orElse: () => Group(id: '', phone: ''));
-    return groupExtraLines(gid) * (g.extraClientFee ?? 0);
+    final fee = (g.extraClientFee != null && g.extraClientFee! > 0)
+        ? g.extraClientFee!
+        : defaultExtraClientFee;
+    return groupExtraLines(gid) * fee;
   }
 
   /// ربح مجموعة — يعتمد حصراً على fixedBillAmount (المبلغ الثابت المتفق عليه).
@@ -1379,7 +1441,38 @@ class AppDB {
     final rentalProfit = rentals
         .where((r) => r.gid == gid && r.status == 'active')
         .fold<double>(0, (s, r) => s + r.rent);
-    return billProfit + g.giftProfit + rentalProfit + g.pendingPointsProfit;
+    // النقاط = القيمة الشهرية الثابتة (مش المتراكم) حسب اختيار المستخدم.
+    return billProfit + g.giftProfit + rentalProfit + g.monthlyPointsValue;
+  }
+
+  /// تفصيل بنود ربح المجموعة (للعرض في نافذة «تفصيل الربح»).
+  /// كل القيم بنفس منطق groupNetProfit عشان المجموع يطابق البادج بالظبط.
+  Map<String, double> groupProfitBreakdown(String gid, List<Rental> rentals) {
+    final g = groups.firstWhere((x) => x.id == gid,
+        orElse: () => Group(id: '', phone: ''));
+    final income = membersOf(gid).fold<double>(0, (s, m) => s + m.price);
+    final fixedBill = g.fixedBillAmount;
+    final extraFee = groupExtraLineFee(gid);
+    final now = DateTime.now();
+    final month = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    final extraBundle = g.extraCostThisMonth(month);
+    final rentalProfit = rentals
+        .where((r) => r.gid == gid && r.status == 'active')
+        .fold<double>(0, (s, r) => s + r.rent);
+    // ربح الفاتورة = صفر لو الفاتورة الثابتة مش متكتوبة (نفس groupProfit)
+    final hasFixed = fixedBill > 0 || g.type == 'manual';
+    final billProfit = hasFixed ? (income - fixedBill - extraFee - extraBundle) : 0.0;
+    return {
+      'income': income,
+      'fixedBill': fixedBill,
+      'extraFee': extraFee,
+      'extraBundle': extraBundle,
+      'points': g.monthlyPointsValue,
+      'gift': g.giftProfit,
+      'rental': rentalProfit,
+      'hasFixed': hasFixed ? 1 : 0,
+      'net': billProfit + g.giftProfit + rentalProfit + g.monthlyPointsValue,
+    };
   }
 
   /// Total GB pool for a group based on type + extra bundles لهذا الشهر
@@ -1393,17 +1486,17 @@ class AppDB {
     return base + g.extraGbThisMonth(month);
   }
 
-  /// GB used by members + main line allocation
+  /// GB used by members (استهلاك العملاء فقط — مش بنضيف حصة الخط الرئيسي)
   int groupUsedGb(String gid) {
-    final g = groups.firstWhere((x) => x.id == gid,
-        orElse: () => Group(id: '', phone: ''));
     final byMembers = membersOf(gid).fold<int>(0, (s, m) {
       // الخط الأرضي بياخد 10 جيجا ثابتة، Home 4G مايخصمش (شبكة منفصلة)
       if (m.type == 'landline') return s + 10;
       if (m.type == 'homeforgee') return s; // 0 GB
       return s + m.gb;
     });
-    return byMembers + g.mainLineAllocationGb;
+    // ملاحظة: حصة الخط الرئيسي (mainLineAllocationGb) مش بتتضاف للمستخدَم عشان
+    // كانت بتسبب مضاعفة الرقم (70→140 / 200→400). المستخدَم = استهلاك العملاء فقط.
+    return byMembers;
   }
 
   /// Remaining GB (لا يقل عن 0)
@@ -1419,9 +1512,9 @@ class AppDB {
     return (groupRemainingGb(gid) / total).clamp(0.0, 1.0);
   }
 
-  /// إجمالي الدقائق المستخدمة من قبل العملاء
+  /// إجمالي الدقائق المستخدمة من قبل العملاء (افتراضي 1500 لكل عميل غير محدد)
   int groupUsedMinutes(String gid) =>
-      membersOf(gid).fold<int>(0, (s, m) => s + m.minutesAllocation);
+      membersOf(gid).fold<int>(0, (s, m) => s + m.effectiveMinutes);
 
   /// إجمالي الدقائق الدولية المستخدمة من قبل العملاء
   int groupUsedInternational(String gid) =>

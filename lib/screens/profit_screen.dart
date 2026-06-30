@@ -16,6 +16,7 @@ class ProfitScreen extends StatefulWidget {
 class _ProfitScreenState extends State<ProfitScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabs;
+  bool _summaryExpanded = true; // طي/فرد شريط الملخص العلوي لتوفير مساحة
 
   @override
   void initState() {
@@ -54,28 +55,46 @@ class _ProfitScreenState extends State<ProfitScreen>
         // ── Summary strip ─────────────────────────────────────────
         Container(
           color: AppColors.blue2,
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
           child: Column(children: [
-            Row(children: [
-              _topCard('📥 دخل شهري', monthlyIncome),
-              const SizedBox(width: 8),
-              _topCard('💰 ربح فواتير', billingProfit, positive: billingProfit >= 0),
-              const SizedBox(width: 8),
-              _topCard('🎁 ربح هدايا', giftProfit),
-            ]),
+            // زرار طي/فرد الملخص العلوي
+            GestureDetector(
+              onTap: () => setState(() => _summaryExpanded = !_summaryExpanded),
+              child: Row(children: [
+                Text('📊 الملخص المالي',
+                    style: GoogleFonts.cairo(
+                        fontSize: 13, fontWeight: FontWeight.w900, color: Colors.white)),
+                const SizedBox(width: 6),
+                Icon(_summaryExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                    color: Colors.white70, size: 20),
+                const Spacer(),
+                Text(_summaryExpanded ? 'اضغط للطي' : 'اضغط للعرض',
+                    style: GoogleFonts.cairo(fontSize: 10, color: Colors.white54)),
+              ]),
+            ),
             const SizedBox(height: 8),
-            Row(children: [
-              _topCard('🏠 إيجارات', rentalIncome),
-              const SizedBox(width: 8),
-              _topCard('🧳 ربح ضيوف', guestProfit),
-              const SizedBox(width: 8),
-              _topCard('🔴 مديونيات', -totalDebt, positive: false, forceNeg: true),
-            ]),
-            const SizedBox(height: 8),
-            Row(children: [
-              _topCard('🪙 نقاط تراكمية', pointsProfit),
-            ]),
-            const SizedBox(height: 8),
+            if (_summaryExpanded) ...[
+              Row(children: [
+                _topCard('📥 دخل شهري', monthlyIncome),
+                const SizedBox(width: 8),
+                _topCard('💰 ربح فواتير', billingProfit, positive: billingProfit >= 0),
+                const SizedBox(width: 8),
+                _topCard('🎁 ربح هدايا', giftProfit),
+              ]),
+              const SizedBox(height: 8),
+              Row(children: [
+                _topCard('🏠 إيجارات', rentalIncome),
+                const SizedBox(width: 8),
+                _topCard('🧳 ربح ضيوف', guestProfit),
+                const SizedBox(width: 8),
+                _topCard('🔴 مديونيات', -totalDebt, positive: false, forceNeg: true),
+              ]),
+              const SizedBox(height: 8),
+              Row(children: [
+                _topCard('🪙 نقاط تراكمية', pointsProfit),
+              ]),
+              const SizedBox(height: 8),
+            ],
             // صافي الرصيد المطلوب للعمل (من العملاء فقط — بدون إيجارات)
             Container(
               width: double.infinity,
@@ -213,24 +232,376 @@ class _ProfitScreenState extends State<ProfitScreen>
   }
 }
 
-// ── Tab 1: Per-group breakdown ────────────────────────────────────────────────
-class _GroupsTab extends StatelessWidget {
+// ── Tab 1: Per-group breakdown + بحث وفلاتر وترتيب ────────────────────────────
+class _GroupsTab extends StatefulWidget {
   final AppDB db;
   const _GroupsTab({required this.db});
 
   @override
+  State<_GroupsTab> createState() => _GroupsTabState();
+}
+
+class _GroupsTabState extends State<_GroupsTab> {
+  final _searchCtrl = TextEditingController();
+  String _q = '';
+  String _sort = 'profit_desc';
+  String _status = 'all'; // all/winning/losing/debt/nobill
+  String _prov = 'all';
+  bool _statsOpen = false; // لوحة إحصائيات الباقات منطوية افتراضياً
+
+  static String _norm(String s) {
+    const indic = '٠١٢٣٤٥٦٧٨٩';
+    var r = s;
+    for (var i = 0; i < indic.length; i++) {
+      r = r.replaceAll(indic[i], '$i');
+    }
+    return r.toLowerCase().trim();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  bool _matchSearch(Group g) {
+    if (_q.isEmpty) return true;
+    final q = _norm(_q);
+    if (_norm(g.phone).contains(q)) return true;
+    if (g.ownerName != null && _norm(g.ownerName!).contains(q)) return true;
+    // ابحث جوّه العملاء كمان (اسم/رقم/باقة)
+    for (final m in widget.db.membersOf(g.id)) {
+      if (_norm(m.name).contains(q) ||
+          _norm(m.phone).contains(q) ||
+          _norm(m.package).contains(q)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _matchStatus(Group g) {
+    final db = widget.db;
+    final bill = g.fixedBillAmount > 0 ? g.fixedBillAmount : (g.actualBillAmount ?? 0);
+    final profit = db.groupProfit(g.id);
+    switch (_status) {
+      case 'winning': return bill > 0 && profit > 0;
+      case 'losing':  return bill > 0 && profit < 0;
+      case 'debt':    return db.groupDebt(g.id) > 0;
+      case 'nobill':  return bill <= 0;
+      default:        return true;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final db = widget.db;
     if (db.groups.isEmpty) {
       return Center(
           child: Text('لا توجد مجموعات',
               style: GoogleFonts.cairo(color: AppColors.muted)));
     }
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: db.groups.length,
-      itemBuilder: (_, i) => _GroupProfitCard(group: db.groups[i], db: db),
+
+    var groups = db.groups
+        .where((g) => _matchSearch(g) && _matchStatus(g))
+        .where((g) => _prov == 'all' || (g.provider ?? 'غير محدد') == _prov)
+        .toList();
+
+    // الترتيب
+    int byMembers(Group a, Group b) =>
+        db.membersOf(b.id).length.compareTo(db.membersOf(a.id).length);
+    switch (_sort) {
+      case 'profit_desc':
+        groups.sort((a, b) => db.groupProfit(b.id).compareTo(db.groupProfit(a.id)));
+        break;
+      case 'profit_asc':
+        groups.sort((a, b) => db.groupProfit(a.id).compareTo(db.groupProfit(b.id)));
+        break;
+      case 'income_desc':
+        double inc(Group g) => db.membersOf(g.id).fold(0.0, (s, m) => s + m.price);
+        groups.sort((a, b) => inc(b).compareTo(inc(a)));
+        break;
+      case 'debt_desc':
+        groups.sort((a, b) => db.groupDebt(b.id).compareTo(db.groupDebt(a.id)));
+        break;
+      case 'members_desc':
+        groups.sort(byMembers);
+        break;
+    }
+
+    // إجماليات النتيجة المفلترة
+    final fProfit = groups.fold<double>(0, (s, g) => s + db.groupProfit(g.id));
+    final fIncome = groups.fold<double>(
+        0, (s, g) => s + db.membersOf(g.id).fold(0.0, (t, m) => t + m.price));
+    final fDebt = groups.fold<double>(0, (s, g) => s + db.groupDebt(g.id));
+
+    return Column(
+      children: [
+        // ── شريط البحث ──
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+          child: TextField(
+            controller: _searchCtrl,
+            onChanged: (v) => setState(() => _q = v),
+            textDirection: TextDirection.rtl,
+            decoration: InputDecoration(
+              hintText: '🔍 ابحث باسم العميل/الخط/الرقم/الباقة...',
+              hintStyle: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
+              filled: true,
+              fillColor: Colors.white,
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(22),
+                  borderSide: const BorderSide(color: AppColors.border)),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(22),
+                  borderSide: const BorderSide(color: AppColors.border)),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(22),
+                  borderSide: const BorderSide(color: AppColors.blue)),
+              suffixIcon: _q.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: () => setState(() {
+                            _q = '';
+                            _searchCtrl.clear();
+                          }))
+                  : null,
+            ),
+          ),
+        ),
+        // ── شرائح الحالة + المزود + الترتيب ──
+        SizedBox(
+          height: 36,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              _chip('الكل', _status == 'all', () => setState(() => _status = 'all')),
+              _chip('🟢 رابحة', _status == 'winning', () => setState(() => _status = 'winning')),
+              _chip('🔴 خاسرة', _status == 'losing', () => setState(() => _status = 'losing')),
+              _chip('📋 عليها ديون', _status == 'debt', () => setState(() => _status = 'debt')),
+              _chip('⚪ بدون فاتورة', _status == 'nobill', () => setState(() => _status = 'nobill')),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 36,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              _chip('كل المزودين', _prov == 'all', () => setState(() => _prov = 'all')),
+              _chip('🔴 فودافون', _prov == 'vodafone', () => setState(() => _prov = 'vodafone')),
+              _chip('🟢 اتصالات', _prov == 'etisalat', () => setState(() => _prov = 'etisalat')),
+              _chip('🟠 أورانج', _prov == 'orange', () => setState(() => _prov = 'orange')),
+              _chip('🟣 WE', _prov == 'we', () => setState(() => _prov = 'we')),
+            ],
+          ),
+        ),
+        // ── الترتيب + زرار إحصائيات الباقات ──
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+          child: Row(children: [
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _sort,
+                    isExpanded: true,
+                    isDense: true,
+                    icon: const Icon(Icons.sort, size: 18),
+                    style: GoogleFonts.cairo(fontSize: 12, color: AppColors.text, fontWeight: FontWeight.w700),
+                    items: [
+                      DropdownMenuItem(value: 'profit_desc', child: Text('💰 الأعلى ربحاً', style: GoogleFonts.cairo(fontSize: 12))),
+                      DropdownMenuItem(value: 'profit_asc', child: Text('🔻 الأقل ربحاً', style: GoogleFonts.cairo(fontSize: 12))),
+                      DropdownMenuItem(value: 'income_desc', child: Text('📥 الأعلى دخلاً', style: GoogleFonts.cairo(fontSize: 12))),
+                      DropdownMenuItem(value: 'debt_desc', child: Text('📋 الأعلى ديوناً', style: GoogleFonts.cairo(fontSize: 12))),
+                      DropdownMenuItem(value: 'members_desc', child: Text('👥 الأكثر عملاء', style: GoogleFonts.cairo(fontSize: 12))),
+                    ],
+                    onChanged: (v) => setState(() => _sort = v ?? 'profit_desc'),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => setState(() => _statsOpen = !_statsOpen),
+              child: Container(
+                height: 40,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: _statsOpen ? AppColors.blue2 : AppColors.blueLight,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.blueMid),
+                ),
+                child: Row(children: [
+                  Icon(Icons.inventory_2_outlined,
+                      size: 18, color: _statsOpen ? Colors.white : AppColors.blue2),
+                  const SizedBox(width: 5),
+                  Text('📦 الباقات',
+                      style: GoogleFonts.cairo(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: _statsOpen ? Colors.white : AppColors.blue2)),
+                ]),
+              ),
+            ),
+          ]),
+        ),
+        // ── لوحة إحصائيات الباقات (منطوية) ──
+        if (_statsOpen) _PackageStatsPanel(db: db),
+        // ── شريط إجماليات النتيجة المفلترة ──
+        Container(
+          margin: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEFF3FF),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+            _sumPill('${groups.length}', 'خط', AppColors.blue2),
+            _sumPill(fIncome.toStringAsFixed(0), 'دخل', AppColors.blue2),
+            _sumPill(fProfit.toStringAsFixed(0), 'ربح', fProfit >= 0 ? AppColors.green : AppColors.red2),
+            _sumPill(fDebt.toStringAsFixed(0), 'ديون', AppColors.red2),
+          ]),
+        ),
+        // ── القائمة ──
+        Expanded(
+          child: groups.isEmpty
+              ? Center(
+                  child: Text('مفيش نتائج مطابقة',
+                      style: GoogleFonts.cairo(color: AppColors.muted)))
+              : ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: groups.length,
+                  itemBuilder: (_, i) => _GroupProfitCard(group: groups[i], db: db),
+                ),
+        ),
+      ],
     );
   }
+
+  Widget _chip(String label, bool sel, VoidCallback onTap) => Padding(
+        padding: const EdgeInsets.only(left: 6),
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: sel ? AppColors.blue2 : Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: sel ? AppColors.blue2 : AppColors.border),
+            ),
+            child: Text(label,
+                style: GoogleFonts.cairo(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: sel ? Colors.white : AppColors.muted)),
+          ),
+        ),
+      );
+
+  Widget _sumPill(String value, String label, Color c) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(value, style: GoogleFonts.cairo(fontSize: 14, fontWeight: FontWeight.w900, color: c)),
+          Text(label, style: GoogleFonts.cairo(fontSize: 9, color: AppColors.muted)),
+        ],
+      );
+}
+
+// لوحة إحصائيات: توزيع العملاء حسب حجم الباقة (جيجا) + الانتظام في الدفع
+class _PackageStatsPanel extends StatelessWidget {
+  final AppDB db;
+  const _PackageStatsPanel({required this.db});
+
+  @override
+  Widget build(BuildContext context) {
+    // عدّ العملاء حسب حجم الباقة (gb)
+    final byGb = <int, int>{};
+    for (final m in db.members) {
+      if (m.type != 'regular') continue;
+      byGb[m.gb] = (byGb[m.gb] ?? 0) + 1;
+    }
+    final gbKeys = byGb.keys.toList()..sort();
+
+    // الانتظام في الدفع حسب علامة الدفع
+    int green = 0, yellow = 0, red = 0, none = 0;
+    for (final m in db.members) {
+      switch (m.paymentFlag) {
+        case 'green': green++; break;
+        case 'yellow': yellow++; break;
+        case 'red': red++; break;
+        default: none++;
+      }
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('📦 عدد العملاء حسب حجم الباقة',
+            style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w900, color: AppColors.blue2)),
+        const SizedBox(height: 8),
+        if (gbKeys.isEmpty)
+          Text('لا يوجد عملاء', style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted))
+        else
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final gb in gbKeys)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.blueLight,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.blueMid),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text('$gb جيجا',
+                      style: GoogleFonts.cairo(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.blue2)),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                    decoration: BoxDecoration(color: AppColors.blue2, borderRadius: BorderRadius.circular(8)),
+                    child: Text('${byGb[gb]}',
+                        style: GoogleFonts.cairo(fontSize: 11, fontWeight: FontWeight.w900, color: Colors.white)),
+                  ),
+                ]),
+              ),
+          ]),
+        const Divider(height: 18),
+        Text('💳 انتظام الدفع',
+            style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w900, color: AppColors.blue2)),
+        const SizedBox(height: 8),
+        Row(children: [
+          _payStat('🟢 منتظم', green, AppColors.green),
+          _payStat('🟡 متذبذب', yellow, const Color(0xFFF9A825)),
+          _payStat('🔴 متعثّر', red, AppColors.red2),
+          _payStat('⚪ غير مصنّف', none, AppColors.muted),
+        ]),
+      ]),
+    );
+  }
+
+  Widget _payStat(String label, int count, Color c) => Expanded(
+        child: Column(children: [
+          Text('$count', style: GoogleFonts.cairo(fontSize: 18, fontWeight: FontWeight.w900, color: c)),
+          Text(label, style: GoogleFonts.cairo(fontSize: 9, color: AppColors.muted), textAlign: TextAlign.center),
+        ]),
+      );
 }
 
 class _GroupProfitCard extends StatefulWidget {
@@ -704,6 +1075,62 @@ class _MembersTabState extends State<_MembersTab> {
   }
 }
 
+// قسم قابل للطي — ادوس على العنوان يتفرد/يتقفل عشان تشوف باقي الصفحة
+class _CollapsibleSection extends StatefulWidget {
+  final String title;
+  final Widget child;
+  final bool initiallyExpanded;
+  const _CollapsibleSection({
+    required this.title,
+    required this.child,
+    this.initiallyExpanded = false,
+  });
+
+  @override
+  State<_CollapsibleSection> createState() => _CollapsibleSectionState();
+}
+
+class _CollapsibleSectionState extends State<_CollapsibleSection> {
+  late bool _open = widget.initiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(children: [
+        InkWell(
+          onTap: () => setState(() => _open = !_open),
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Row(children: [
+              Expanded(
+                child: Text(widget.title,
+                    style: GoogleFonts.cairo(
+                        fontSize: 13, fontWeight: FontWeight.w900, color: AppColors.blue2)),
+              ),
+              Icon(_open ? Icons.expand_less : Icons.expand_more,
+                  color: AppColors.muted, size: 22),
+            ]),
+          ),
+        ),
+        if (_open) ...[
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+            child: widget.child,
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
 // ── Tab 4: تحليل وجرد ─────────────────────────────────────────────────────────
 class _AnalysisTab extends StatelessWidget {
   final AppProvider prov;
@@ -806,21 +1233,28 @@ class _AnalysisTab extends StatelessWidget {
             onPressed: () => ExportService.exportProfitReport(context, prov),
           ),
         ),
-        const SizedBox(height: 16),
-        _sectionTitle('💵 جرد الكاش والموقف المالي'),
-        _cashReconciliation(db),
-        const SizedBox(height: 16),
-        _sectionTitle('🥧 توزيع مصادر الدخل'),
-        _distribution(),
-        const SizedBox(height: 16),
-        _sectionTitle('📈 هامش الربح حسب المزود'),
-        ..._marginByProvider(db),
-        const SizedBox(height: 16),
-        _sectionTitle('🔴 خطوط خاسرة (دخلها أقل من فاتورتها)'),
-        ..._lossLines(db),
-        const SizedBox(height: 16),
-        _sectionTitle('🧾 أعلى ١٠ عملاء مديونية'),
-        ..._topDebtors(db),
+        const SizedBox(height: 8),
+        _CollapsibleSection(
+          title: '💵 جرد الكاش والموقف المالي',
+          initiallyExpanded: true,
+          child: _cashReconciliation(db),
+        ),
+        _CollapsibleSection(
+          title: '🥧 توزيع مصادر الدخل',
+          child: _distribution(),
+        ),
+        _CollapsibleSection(
+          title: '📈 هامش الربح حسب المزود',
+          child: Column(children: _marginByProvider(db)),
+        ),
+        _CollapsibleSection(
+          title: '🔴 خطوط خاسرة (دخلها أقل من فاتورتها)',
+          child: Column(children: _lossLines(db)),
+        ),
+        _CollapsibleSection(
+          title: '🧾 أعلى ١٠ عملاء مديونية',
+          child: Column(children: _topDebtors(db)),
+        ),
       ],
     );
   }

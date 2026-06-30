@@ -380,9 +380,9 @@ class _LineTypeSelectorState extends State<LineTypeSelector> {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Expanded(child: _btn('3800', '📡', '3800 ج', '260 ج')),
+        Expanded(child: _btn('3800', '🛰️', '4250 ج', 'الكبير • 7+2')),
         const SizedBox(width: 8),
-        Expanded(child: _btn('1800', '📶', '1800 ج', '190 ج')),
+        Expanded(child: _btn('1800', '📶', '2150 ج', 'الصغير • 5+2')),
         const SizedBox(width: 8),
         Expanded(child: _btn('manual', '✏️', 'يدوي', 'فاتورة يدوية')),
       ],
