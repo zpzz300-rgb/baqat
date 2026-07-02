@@ -280,6 +280,60 @@ class ExportService {
     await Share.shareXFiles([XFile(file.path)], text: '💰 تقرير الأرباح');
   }
 
+  // ── Guarantors Excel export ─────────────────────────────────────
+  static Future<void> exportGuarantorsExcel(
+      BuildContext context, AppProvider prov) async {
+    final excel = Excel.createExcel();
+    excel.delete('Sheet1');
+    final sheet = excel['الكفلاء'];
+    const headers = [
+      'اسم الكفيل', 'رقم الكفيل', 'رقم 2', 'النوع', 'حد الكفالة',
+      'عدد العملاء', 'عدد المدينين', 'إجمالي المديونية', 'نسبة السداد %', 'العملاء',
+    ];
+    sheet.appendRow(headers.map((h) => TextCellValue(h)).toList());
+
+    // تجميع العملاء تحت كل كفيل (بالرقم) — نفس منطق شاشة الكفلاء
+    final byPhone = <String, List<Member>>{};
+    for (final m in prov.db.members) {
+      final p = (m.guarantorPhone ?? '').trim();
+      if (p.isEmpty) continue;
+      byPhone.putIfAbsent(p, () => []).add(m);
+    }
+    final phones = <String>{
+      ...prov.db.guarantors.map((g) => g.phone),
+      ...byPhone.keys,
+    };
+    for (final phone in phones) {
+      final g = prov.db.guarantors.cast<Guarantor?>()
+          .firstWhere((x) => x!.phone == phone, orElse: () => null);
+      final mems = byPhone[phone] ?? [];
+      final name = g?.name ?? (mems.isNotEmpty ? (mems.first.guarantorName ?? 'كفيل') : 'كفيل');
+      final debtors = mems.where((m) => m.balance < 0).length;
+      final totalDebt = mems.fold<double>(0, (s, m) => s + (m.balance < 0 ? -m.balance : 0));
+      final rate = mems.isEmpty ? 100 : ((mems.length - debtors) / mems.length * 100).round();
+      sheet.appendRow(<CellValue>[
+        TextCellValue(name),
+        TextCellValue(phone),
+        TextCellValue(g?.phone2 ?? '-'),
+        TextCellValue(g?.typeLabel ?? '👤 شخصي'),
+        TextCellValue(g?.maxDebt != null ? g!.maxDebt!.toStringAsFixed(0) : '-'),
+        IntCellValue(mems.length),
+        IntCellValue(debtors),
+        DoubleCellValue(totalDebt),
+        IntCellValue(rate),
+        TextCellValue(mems.map((m) => '${m.name} (${m.balance.toStringAsFixed(0)})').join(' • ')),
+      ]);
+    }
+
+    final bytes = excel.save();
+    if (bytes == null) { _snack(context, 'فشل إنشاء الملف'); return; }
+    final dir = await getApplicationDocumentsDirectory();
+    final ts = intl.DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
+    final file = File('${dir.path}/telecom_guarantors_$ts.xlsx');
+    await file.writeAsBytes(bytes);
+    await Share.shareXFiles([XFile(file.path)], text: '🤝 كشف الكفلاء');
+  }
+
   // ── Invoices-only Excel export ──────────────────────────────────
   static Future<void> exportInvoicesExcel(
       BuildContext context, AppProvider prov) async {
@@ -616,6 +670,150 @@ class ExportService {
     final file = File('${dir.path}/telecom_report_$ts.pdf');
     await file.writeAsBytes(bytes);
     await OpenFile.open(file.path);
+  }
+
+  // ── Guarantor statement PDF (كشف حساب كفيل) ─────────────────────
+  static Future<void> exportGuarantorStatement(
+    BuildContext context,
+    AppProvider prov, {
+    required String name,
+    required String phone,
+    String? phone2,
+    required List<Member> members,
+    List<Map<String, dynamic>> log = const [],
+    double? maxDebt,
+  }) async {
+    final font = await PdfGoogleFonts.cairoRegular();
+    final fontBold = await PdfGoogleFonts.cairoBold();
+    final pdf = pw.Document();
+    final now = intl.DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now());
+
+    final totalDebt =
+        members.fold<double>(0, (s, m) => s + (m.balance < 0 ? -m.balance : 0));
+    final debtors = members.where((m) => m.balance < 0).length;
+    final totalPaid = log
+        .where((e) => e['type'] == 'payment')
+        .fold<double>(0, (s, e) => s + ((e['amount'] as num?)?.toDouble() ?? 0));
+
+    pw.Widget infoRow(String k, String v) => pw.Padding(
+          padding: const pw.EdgeInsets.symmetric(vertical: 2),
+          child: pw.Row(children: [
+            pw.Text('$k: ',
+                style: pw.TextStyle(font: fontBold, fontSize: 11),
+                textDirection: pw.TextDirection.rtl),
+            pw.Text(v,
+                style: pw.TextStyle(font: font, fontSize: 11),
+                textDirection: pw.TextDirection.rtl),
+          ]),
+        );
+
+    pdf.addPage(pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      textDirection: pw.TextDirection.rtl,
+      build: (ctx) => [
+        _pdfTitle('كشف حساب الكفيل', now, fontBold),
+        pw.SizedBox(height: 10),
+        pw.Container(
+          padding: const pw.EdgeInsets.all(10),
+          decoration: pw.BoxDecoration(
+            color: const PdfColor(0.93, 0.96, 1),
+            borderRadius: pw.BorderRadius.circular(6),
+          ),
+          child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+            infoRow('الاسم', name),
+            infoRow('الرقم', phone),
+            if (phone2?.isNotEmpty == true) infoRow('رقم آخر', phone2!),
+            if (maxDebt != null && maxDebt > 0)
+              infoRow('حد الكفالة', '${_fNum(maxDebt)} ج'),
+            infoRow('عدد العملاء', '${members.length}'),
+            infoRow('عدد المدينين', '$debtors'),
+            infoRow('إجمالي المديونية', '${_fNum(totalDebt)} ج'),
+            infoRow('إجمالي المدفوعات المسجّلة', '${_fNum(totalPaid)} ج'),
+          ]),
+        ),
+        pw.SizedBox(height: 14),
+        pw.Text('العملاء المكفولون',
+            style: pw.TextStyle(font: fontBold, fontSize: 13),
+            textDirection: pw.TextDirection.rtl),
+        pw.SizedBox(height: 6),
+        _guarantorMembersTable(members, prov, font, fontBold),
+        if (log.isNotEmpty) ...[
+          pw.SizedBox(height: 14),
+          pw.Text('سجل المدفوعات والأحداث',
+              style: pw.TextStyle(font: fontBold, fontSize: 13),
+              textDirection: pw.TextDirection.rtl),
+          pw.SizedBox(height: 6),
+          _guarantorLogTable(log, font, fontBold),
+        ],
+      ],
+    ));
+
+    final bytes = await pdf.save();
+    final ts = intl.DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
+    final safe = name.replaceAll(RegExp(r'[^\w؀-ۿ]+'), '_');
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/كشف_كفيل_${safe}_$ts.pdf');
+    await file.writeAsBytes(bytes);
+    await Share.shareXFiles([XFile(file.path)],
+        text: 'كشف حساب الكفيل $name');
+  }
+
+  static pw.Widget _guarantorMembersTable(List<Member> members,
+      AppProvider prov, pw.Font font, pw.Font fontBold) {
+    final cols = ['الاسم', 'رقم الموبايل', 'الباقة', 'الرصيد', 'مديونية', 'المجموعة'];
+    final rows = [
+      pw.TableRow(
+        decoration: const pw.BoxDecoration(color: PdfColors.blueGrey700),
+        children: cols.map((c) => _pdfCell(c, fontBold, isHeader: true)).toList(),
+      ),
+      ...members.asMap().entries.map((e) {
+        final m = e.value;
+        final group = prov.db.groups.cast<Group?>()
+            .firstWhere((g) => g?.id == m.gid, orElse: () => null);
+        final groupLabel = group != null
+            ? (group.ownerName?.isNotEmpty == true ? group.ownerName! : group.phone)
+            : '-';
+        final debt = m.balance < 0 ? _fNum(-m.balance) : '-';
+        final bg = e.key.isEven ? PdfColors.white : const PdfColor(0.96, 0.96, 0.97);
+        return pw.TableRow(
+          decoration: pw.BoxDecoration(color: bg),
+          children: [m.name, m.phone, m.package, _fNum(m.balance), debt, groupLabel]
+              .map((c) => _pdfCell(c, font)).toList(),
+        );
+      }),
+    ];
+    return pw.Table(
+      border: pw.TableBorder.all(color: PdfColors.blueGrey100, width: 0.5),
+      children: rows,
+    );
+  }
+
+  static pw.Widget _guarantorLogTable(
+      List<Map<String, dynamic>> log, pw.Font font, pw.Font fontBold) {
+    final cols = ['التاريخ', 'الحركة', 'المبلغ'];
+    final rows = [
+      pw.TableRow(
+        decoration: const pw.BoxDecoration(color: PdfColors.blueGrey700),
+        children: cols.map((c) => _pdfCell(c, fontBold, isHeader: true)).toList(),
+      ),
+      ...log.asMap().entries.map((e) {
+        final it = e.value;
+        final amt = (it['amount'] as num?)?.toDouble() ?? 0;
+        final bg = e.key.isEven ? PdfColors.white : const PdfColor(0.96, 0.96, 0.97);
+        return pw.TableRow(
+          decoration: pw.BoxDecoration(color: bg),
+          children: [
+            (it['date'] ?? '-').toString(),
+            (it['desc'] ?? '-').toString(),
+            amt != 0 ? _fNum(amt) : '-',
+          ].map((c) => _pdfCell(c, font)).toList(),
+        );
+      }),
+    ];
+    return pw.Table(
+      border: pw.TableBorder.all(color: PdfColors.blueGrey100, width: 0.5),
+      children: rows,
+    );
   }
 
   static pw.Widget _pdfTitle(String title, String date, pw.Font fontBold) =>

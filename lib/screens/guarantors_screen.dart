@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/export_service.dart';
 import '../utils/phone_utils.dart';
 import '../widgets/common.dart';
 import '../widgets/member_card.dart';
@@ -42,30 +43,61 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
 
     return Column(
       children: [
-        // ── Search bar ──────────────────────────────────────────
+        // ── Search bar + Export ─────────────────────────────────
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-          child: TextField(
-            onChanged: (v) => setState(() => _search = v.trim()),
-            style: GoogleFonts.cairo(fontSize: 13),
-            decoration: InputDecoration(
-              hintText: '🔍 بحث باسم أو رقم الكفيل...',
-              hintStyle: GoogleFonts.cairo(color: AppColors.muted, fontSize: 13),
-              prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.muted),
-              suffixIcon: _search.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear, size: 16, color: AppColors.muted),
-                      onPressed: () => setState(() => _search = ''),
-                    )
-                  : null,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppColors.border)),
-              filled: true,
-              fillColor: Colors.white,
+          child: Row(children: [
+            Expanded(
+              child: TextField(
+                onChanged: (v) => setState(() => _search = v.trim()),
+                style: GoogleFonts.cairo(fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: '🔍 بحث باسم أو رقم الكفيل...',
+                  hintStyle: GoogleFonts.cairo(color: AppColors.muted, fontSize: 13),
+                  prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.muted),
+                  suffixIcon: _search.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 16, color: AppColors.muted),
+                          onPressed: () => setState(() => _search = ''),
+                        )
+                      : null,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppColors.border)),
+                  filled: true,
+                  fillColor: Colors.white,
+                ),
+              ),
             ),
-          ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => ExportService.exportGuarantorsExcel(context, prov),
+              child: Container(
+                height: 42, width: 42,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F5E9),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF80CBC4)),
+                ),
+                child: const Icon(Icons.table_view, size: 20, color: Color(0xFF00695C)),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // 📣 رسالة جماعية لكل الكفلاء
+            GestureDetector(
+              onTap: () => _showBroadcast(context, prov, entries),
+              child: Container(
+                height: 42, width: 42,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF3E0),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFFFB74D)),
+                ),
+                child: const Icon(Icons.campaign, size: 22, color: Color(0xFFE65100)),
+              ),
+            ),
+          ]),
         ),
 
         // ── Filter chips ────────────────────────────────────────
@@ -99,19 +131,32 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: AppColors.blueMid)),
               child: Row(children: [
-                Text('${entries.length} كفيل', style: GoogleFonts.cairo(fontSize: 12, color: AppColors.blue2, fontWeight: FontWeight.w700)),
-                const SizedBox(width: 10),
-                if (debtCount > 0) ...[
-                  Container(width: 1, height: 14, color: AppColors.blueMid),
-                  const SizedBox(width: 10),
-                  Text('$debtCount عليهم ديون', style: GoogleFonts.cairo(fontSize: 12, color: AppColors.red2, fontWeight: FontWeight.w700)),
+                Flexible(
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Flexible(
+                      child: Text('${entries.length} كفيل',
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.cairo(fontSize: 12, color: AppColors.blue2, fontWeight: FontWeight.w700)),
+                    ),
+                    if (debtCount > 0) ...[
+                      const SizedBox(width: 8),
+                      Container(width: 1, height: 14, color: AppColors.blueMid),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text('$debtCount عليهم ديون',
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.cairo(fontSize: 12, color: AppColors.red2, fontWeight: FontWeight.w700)),
+                      ),
+                    ],
+                  ]),
+                ),
+                if (totalDebt > 0) ...[
+                  const SizedBox(width: 6),
+                  Text('${totalDebt.toStringAsFixed(0)} ج', style: GoogleFonts.cairo(fontSize: 12, color: AppColors.red2, fontWeight: FontWeight.w900)),
                 ],
-                const Spacer(),
-                if (totalDebt > 0)
-                  Text('إجمالي: ${totalDebt.toStringAsFixed(0)} ج', style: GoogleFonts.cairo(fontSize: 12, color: AppColors.red2, fontWeight: FontWeight.w900)),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 _sortButton(),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 GestureDetector(
                   onTap: () => _showForm(context, null, prov),
                   child: Container(
@@ -127,10 +172,10 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
         // ── KPI strip ───────────────────────────────────────────
         if (entries.isNotEmpty && totalDebt > 0)
           SizedBox(
-            height: 62,
+            height: 76,
             child: ListView(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
               children: [
                 if (topDebtor != null && topDebtor.totalDebt > 0)
                   _kpiCard('🔝 أعلى مديونية', topDebtor.name,
@@ -172,8 +217,16 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
                     entry: filtered[i],
                     prov: prov,
                     onEdit: () {
-                      final formal = prov.db.guarantors.cast<Guarantor?>()
-                          .firstWhere((g) => g!.phone == filtered[i].phone, orElse: () => null);
+                      final e = filtered[i];
+                      // نجيب الكيان الرسمي، ولو مش موجود (كفيل قديم مكتوب من عند عميل)
+                      // نبنيه من بيانات العميل عشان التعديل يوحّده ويربط العملاء.
+                      var formal = prov.db.guarantors.cast<Guarantor?>()
+                          .firstWhere((g) => g!.phone == e.phone, orElse: () => null);
+                      formal ??= Guarantor(
+                        id: DateTime.now().millisecondsSinceEpoch.toString(),
+                        name: e.name, phone: e.phone, phone2: e.phone2,
+                        type: e.typeKey, maxDebt: e.maxDebt,
+                      );
                       _showForm(context, formal, prov);
                     },
                   ),
@@ -315,6 +368,14 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
     }
   }
 
+  /// 📣 رسالة جماعية — شيت بكل الكفلاء، إرسال واحد ورا التاني مع علامة ✅
+  void _showBroadcast(BuildContext context, AppProvider prov, List<_GuarantorEntry> entries) {
+    showModalBottomSheet(
+      context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
+      builder: (_) => _BroadcastSheet(entries: entries, prov: prov),
+    );
+  }
+
   void _showForm(BuildContext context, Guarantor? existing, AppProvider prov) {
     showModalBottomSheet(
       context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
@@ -339,6 +400,17 @@ class _GuarantorEntry {
 
   double get totalDebt => members.fold(0.0, (s, m) => s + (m.balance < 0 ? -m.balance : 0.0));
   int get debtorCount  => members.where((m) => m.balance < 0).length;
+
+  /// نسبة سداد عملاء الكفيل (المسددون ÷ الإجمالي) — مؤشر موثوقية الكفيل.
+  double get payRate => members.isEmpty ? 1.0 : (members.length - debtorCount) / members.length;
+  /// تصنيف الموثوقية: (نص، لون)
+  (String, Color) get reliability {
+    if (members.isEmpty) return ('—', AppColors.muted);
+    final r = payRate;
+    if (r >= 0.7) return ('🟢 موثوق ${(r * 100).toStringAsFixed(0)}%', AppColors.green);
+    if (r >= 0.4) return ('🟡 متوسط ${(r * 100).toStringAsFixed(0)}%', const Color(0xFFE65100));
+    return ('🔴 ضعيف ${(r * 100).toStringAsFixed(0)}%', AppColors.red2);
+  }
 
   /// تجاوز حد الكفالة؟ (لازم يكون فيه حد محدّد أكبر من صفر)
   bool get overLimit => (maxDebt ?? 0) > 0 && totalDebt > maxDebt!;
@@ -434,6 +506,15 @@ class _GuarantorCard extends StatelessWidget {
                       const SizedBox(width: 6),
                       Text('• ${entry.debtorCount} مدين', style: GoogleFonts.cairo(fontSize: 11, color: AppColors.red)),
                     ],
+                    // 🎯 مؤشر موثوقية الكفيل (نسبة سداد عملائه)
+                    if (entry.members.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      Text('• ${entry.reliability.$1}',
+                          style: GoogleFonts.cairo(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w800,
+                              color: entry.reliability.$2)),
+                    ],
                   ]),
                   // ⚠️ تجاوز حد الكفالة
                   if (entry.overLimit)
@@ -476,6 +557,8 @@ class _GuarantorCard extends StatelessWidget {
                 _btnLabeled('📋 تفصيلي', AppColors.waGreen, () => _showMsgSheet(context)),
                 _btnLabeled('📊 ملخص', const Color(0xFF1976D2), _sendSummaryReport),
               ],
+              _btnLabeled('📒 السجل', const Color(0xFF6A1B9A), () => _showLogSheet(context)),
+              _btn('🧾', const Color(0xFF00695C), () => _exportStatement(context)),
               if (entry.formalId != null && entry.totalDebt > 0)
                 _btn('🔔', AppColors.orange, () {
                   prov.markGuarantorReminded(entry.formalId!);
@@ -519,7 +602,7 @@ class _GuarantorCard extends StatelessWidget {
   );
 
   void _openWA(String phone, String name) async {
-    final p = phone.replaceFirst(RegExp(r'^0'), '20');
+    final p = waDigits(phone);
     final url = 'https://wa.me/$p?text=${Uri.encodeComponent("السلام عليكم $name 👋")}';
     if (await canLaunchUrl(Uri.parse(url))) launchUrl(Uri.parse(url));
   }
@@ -554,7 +637,7 @@ class _GuarantorCard extends StatelessWidget {
   }
 
   void _sendSummaryReport() async {
-    final phone = entry.phone.replaceFirst(RegExp(r'^0'), '20');
+    final phone = waDigits(entry.phone);
     final msg = '💳 ملخص مديونية — ${entry.name}\n'
         '═══════════════════════\n'
         '🔴 إجمالي المديونية: ${entry.totalDebt.toStringAsFixed(0)} ج\n'
@@ -569,6 +652,50 @@ class _GuarantorCard extends StatelessWidget {
     context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
     builder: (_) => _BulkPaySheet(phone: entry.phone, name: entry.name, members: entry.members),
   );
+
+  /// يتأكد إن فيه كيان كفيل رسمي (يبنيه من بيانات العميل لو مش موجود) ويرجّع الـ id.
+  String _ensureFormalId() {
+    var formal = prov.db.guarantors.cast<Guarantor?>()
+        .firstWhere((g) => g!.phone == entry.phone, orElse: () => null);
+    if (formal == null) {
+      formal = Guarantor(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        name: entry.name, phone: entry.phone, phone2: entry.phone2,
+        type: entry.typeKey, maxDebt: entry.maxDebt,
+      );
+      prov.addGuarantor(formal);
+    }
+    return formal.id;
+  }
+
+  void _showLogSheet(BuildContext context) {
+    final id = _ensureFormalId();
+    showModalBottomSheet(
+      context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
+      builder: (_) => _GuarantorLogSheet(
+        guarantorId: id, name: entry.name, members: entry.members, prov: prov),
+    );
+  }
+
+  void _exportStatement(BuildContext context) async {
+    final id = _ensureFormalId();
+    final g = prov.guarantorById(id);
+    try {
+      await ExportService.exportGuarantorStatement(
+        context, prov,
+        name: entry.name, phone: entry.phone, phone2: entry.phone2,
+        members: entry.members,
+        log: g?.log ?? const [],
+        maxDebt: entry.maxDebt,
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('تعذّر إنشاء الكشف: $e', style: GoogleFonts.cairo()),
+        ));
+      }
+    }
+  }
 
   void _delete(BuildContext context, String id, String name, AppProvider prov) {
     showDialog(
@@ -1159,7 +1286,8 @@ class _GuarantorFormState extends State<_GuarantorForm> {
     if (widget.existing == null) {
       widget.prov.addGuarantor(g);
     } else {
-      widget.prov.editGuarantor(g);
+      // نمرّر الرقم القديم عشان العملاء المرتبطين يتحدّثوا بالاسم/الرقم الجديد
+      widget.prov.editGuarantor(g, oldPhone: widget.existing!.phone);
     }
     Navigator.pop(context);
   }
@@ -1402,6 +1530,338 @@ class _GuarantorMsgSheetState extends State<_GuarantorMsgSheet> {
             fontSize: 11.5, color: value ? Colors.white : AppColors.muted,
             fontWeight: value ? FontWeight.w700 : FontWeight.w500)),
       ]),
+    ),
+  );
+}
+
+// ── Guarantor payment log sheet (سجل مدفوعات الكفيل بالتاريخ) ─────────
+class _GuarantorLogSheet extends StatefulWidget {
+  final String guarantorId, name;
+  final List<Member> members;
+  final AppProvider prov;
+  const _GuarantorLogSheet({
+    required this.guarantorId, required this.name,
+    required this.members, required this.prov,
+  });
+  @override
+  State<_GuarantorLogSheet> createState() => _GuarantorLogSheetState();
+}
+
+class _GuarantorLogSheetState extends State<_GuarantorLogSheet> {
+  @override
+  Widget build(BuildContext context) {
+    // نراقب المزوّد عشان السجل يتحدّث فوراً بعد أي دفعة
+    context.watch<AppProvider>();
+    final g = widget.prov.guarantorById(widget.guarantorId);
+    final log = g?.log ?? const <Map<String, dynamic>>[];
+    final totalPaid = g?.totalPaid ?? 0;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.82),
+      decoration: const BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Center(child: Container(width: 40, height: 4,
+            decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)))),
+        const SizedBox(height: 14),
+        Row(children: [
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('📒 سجل الكفيل', style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 16, color: const Color(0xFF6A1B9A))),
+            Text(widget.name, style: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted)),
+          ])),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(color: AppColors.green.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
+            child: Text('💰 دفع: ${totalPaid.toStringAsFixed(0)} ج',
+                style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 12.5, color: AppColors.green)),
+          ),
+        ]),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF6A1B9A),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+            onPressed: _addPayment,
+            icon: const Icon(Icons.add, color: Colors.white, size: 20),
+            label: Text('تسجيل دفعة جديدة', style: GoogleFonts.cairo(fontWeight: FontWeight.w800, color: Colors.white, fontSize: 14)),
+          ),
+        ),
+        const SizedBox(height: 14),
+        Text('الحركات (${log.length})', style: GoogleFonts.cairo(fontWeight: FontWeight.w800, fontSize: 13)),
+        const SizedBox(height: 6),
+        Flexible(
+          child: log.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 30),
+                  child: Center(child: Text('لا توجد حركات بعد', style: GoogleFonts.cairo(color: AppColors.muted))),
+                )
+              : ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: log.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 6),
+                  itemBuilder: (_, i) {
+                    final it = log[i];
+                    final amt = (it['amount'] as num?)?.toDouble() ?? 0;
+                    final isPay = it['type'] == 'payment';
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: isPay ? AppColors.green.withValues(alpha: 0.06) : const Color(0xFFF7F7FA),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: Row(children: [
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text('${it['desc'] ?? ''}', style: GoogleFonts.cairo(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                          const SizedBox(height: 2),
+                          Text('🗓 ${it['date'] ?? ''}', style: GoogleFonts.cairo(fontSize: 10.5, color: AppColors.muted)),
+                        ])),
+                        if (amt != 0)
+                          Text('${amt > 0 ? '+' : ''}${amt.toStringAsFixed(0)} ج',
+                              style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 13,
+                                  color: amt > 0 ? AppColors.green : AppColors.red)),
+                        GestureDetector(
+                          onTap: () => _confirmDelete(i),
+                          child: const Padding(padding: EdgeInsets.only(right: 6),
+                              child: Icon(Icons.close, size: 16, color: AppColors.muted)),
+                        ),
+                      ]),
+                    );
+                  },
+                ),
+        ),
+      ]),
+    );
+  }
+
+  void _confirmDelete(int i) {
+    showDialog(context: context, builder: (_) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Text('حذف القيد', style: GoogleFonts.cairo(fontWeight: FontWeight.w900)),
+      content: Text('حذف هذه الحركة من سجل الكفيل؟ (مش بيرجّع رصيد العميل)', style: GoogleFonts.cairo()),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: Text('إلغاء', style: GoogleFonts.cairo())),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.red),
+          onPressed: () { Navigator.pop(context); widget.prov.deleteGuarantorLog(widget.guarantorId, i); },
+          child: Text('حذف', style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+        ),
+      ],
+    ));
+  }
+
+  void _addPayment() {
+    final amtCtrl = TextEditingController();
+    final noteCtrl = TextEditingController();
+    String? memberId; // null = دفعة عامة بدون ربط بعميل
+    final debtors = widget.members.where((m) => m.balance < 0).toList()
+      ..sort((a, b) => a.balance.compareTo(b.balance));
+
+    showDialog(context: context, builder: (dctx) => StatefulBuilder(
+      builder: (dctx, setD) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('💰 دفعة جديدة', style: GoogleFonts.cairo(fontWeight: FontWeight.w900, color: const Color(0xFF6A1B9A))),
+        content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+            controller: amtCtrl, keyboardType: TextInputType.number, textDirection: TextDirection.ltr,
+            style: GoogleFonts.cairo(fontWeight: FontWeight.w700),
+            decoration: InputDecoration(labelText: 'المبلغ (ج)', labelStyle: GoogleFonts.cairo(), suffixText: 'ج',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
+          ),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<String?>(
+            initialValue: memberId,
+            isExpanded: true,
+            decoration: InputDecoration(labelText: 'عن عميل (اختياري)', labelStyle: GoogleFonts.cairo(),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
+            items: [
+              DropdownMenuItem(value: null, child: Text('— دفعة عامة —', style: GoogleFonts.cairo(fontSize: 13))),
+              ...widget.members.map((m) {
+                final d = m.balance < 0 ? ' (${(-m.balance).toStringAsFixed(0)} ج)' : '';
+                return DropdownMenuItem(value: m.id,
+                    child: Text('${m.name}$d', style: GoogleFonts.cairo(fontSize: 13), overflow: TextOverflow.ellipsis));
+              }),
+            ],
+            onChanged: (v) => setD(() => memberId = v),
+          ),
+          if (debtors.isNotEmpty && memberId == null)
+            Padding(padding: const EdgeInsets.only(top: 4),
+                child: Text('💡 لو حددت عميل، السداد هيقلّل مديونيته', style: GoogleFonts.cairo(fontSize: 10.5, color: AppColors.muted))),
+          const SizedBox(height: 10),
+          TextField(
+            controller: noteCtrl,
+            style: GoogleFonts.cairo(fontSize: 13),
+            decoration: InputDecoration(labelText: 'ملاحظة (اختياري)', labelStyle: GoogleFonts.cairo(),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
+          ),
+        ])),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dctx), child: Text('إلغاء', style: GoogleFonts.cairo())),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF6A1B9A)),
+            onPressed: () {
+              final amt = double.tryParse(amtCtrl.text.trim()) ?? 0;
+              if (amt <= 0) return;
+              widget.prov.recordGuarantorPayment(widget.guarantorId, amt,
+                  note: noteCtrl.text.trim(), memberId: memberId);
+              Navigator.pop(dctx);
+            },
+            child: Text('تسجيل', style: GoogleFonts.cairo(fontWeight: FontWeight.w800, color: Colors.white)),
+          ),
+        ],
+      ),
+    ));
+  }
+}
+
+// ── Broadcast sheet: رسالة جماعية لكل الكفلاء ─────────────────────────
+class _BroadcastSheet extends StatefulWidget {
+  final List<_GuarantorEntry> entries;
+  final AppProvider prov;
+  const _BroadcastSheet({required this.entries, required this.prov});
+  @override
+  State<_BroadcastSheet> createState() => _BroadcastSheetState();
+}
+
+class _BroadcastSheetState extends State<_BroadcastSheet> {
+  bool _debtOnly = true;          // افتراضي: الكفلاء اللي عليهم ديون بس
+  final Set<String> _sent = {};   // مين اتبعت له في الجلسة دي (بالرقم)
+
+  List<_GuarantorEntry> get _targets => _debtOnly
+      ? widget.entries.where((e) => e.totalDebt > 0).toList()
+      : widget.entries.toList();
+
+  String _msgFor(_GuarantorEntry e) {
+    if (e.totalDebt > 0) {
+      return '🤝 تنبيه للكفيل ${e.name}\n'
+          '═══════════════════════\n'
+          '🔴 إجمالي مديونية عملائك: ${e.totalDebt.toStringAsFixed(0)} ج\n'
+          '👥 عدد العملاء: ${e.members.length}\n'
+          '🔴 عدد المدينين: ${e.debtorCount}\n'
+          'برجاء المتابعة معهم للسداد. شكراً 🙏';
+    }
+    return '🤝 تحية للكفيل ${e.name}\n'
+        '👥 عدد عملائك: ${e.members.length}\n'
+        '✅ كل عملائك مسددين — شكراً لتعاونك 🙏';
+  }
+
+  Future<void> _send(_GuarantorEntry e) async {
+    final url = 'https://wa.me/${waDigits(e.phone)}?text=${Uri.encodeComponent(_msgFor(e))}';
+    if (await canLaunchUrl(Uri.parse(url))) {
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      setState(() => _sent.add(e.phone));
+      if (e.formalId != null && e.totalDebt > 0) {
+        widget.prov.markGuarantorReminded(e.formalId!);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final targets = _targets;
+    final remaining = targets.where((e) => !_sent.contains(e.phone)).length;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+      decoration: const BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Center(child: Container(width: 40, height: 4,
+            decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)))),
+        const SizedBox(height: 14),
+        Row(children: [
+          Expanded(child: Text('📣 رسالة جماعية للكفلاء',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 16, color: const Color(0xFFE65100)))),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(color: const Color(0xFFFFF3E0), borderRadius: BorderRadius.circular(10)),
+            child: Text('باقي $remaining من ${targets.length}',
+                style: GoogleFonts.cairo(fontSize: 11.5, fontWeight: FontWeight.w800, color: const Color(0xFFE65100))),
+          ),
+        ]),
+        const SizedBox(height: 4),
+        Text('ابعت واحد ورا التاني — اللي اتبعت له بيتعلّم ✅ (وبيتسجّل تذكير عنده)',
+            style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted)),
+        const SizedBox(height: 10),
+        // فلتر: مدينين بس / الكل
+        Row(children: [
+          _toggle('🔴 عليهم ديون بس', _debtOnly, () => setState(() => _debtOnly = true)),
+          const SizedBox(width: 8),
+          _toggle('📋 كل الكفلاء', !_debtOnly, () => setState(() => _debtOnly = false)),
+        ]),
+        const SizedBox(height: 12),
+        Flexible(
+          child: targets.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 30),
+                  child: Center(child: Text('لا يوجد كفلاء مطابقين', style: GoogleFonts.cairo(color: AppColors.muted))),
+                )
+              : ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: targets.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 6),
+                  itemBuilder: (_, i) {
+                    final e = targets[i];
+                    final done = _sent.contains(e.phone);
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: done ? AppColors.green.withValues(alpha: 0.07) : Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: done ? AppColors.green : AppColors.border),
+                      ),
+                      child: Row(children: [
+                        Text(done ? '✅' : '🤝', style: const TextStyle(fontSize: 16)),
+                        const SizedBox(width: 8),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(e.name, overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.cairo(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.blue2)),
+                          Text(
+                            e.totalDebt > 0
+                                ? '🔴 ${e.totalDebt.toStringAsFixed(0)} ج · ${e.debtorCount} مدين'
+                                : '✅ مسددين · ${e.members.length} عميل',
+                            style: GoogleFonts.cairo(fontSize: 10.5,
+                                color: e.totalDebt > 0 ? AppColors.red2 : AppColors.green),
+                          ),
+                        ])),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: done ? Colors.grey[300] : AppColors.waGreen,
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            elevation: 0,
+                          ),
+                          onPressed: () => _send(e),
+                          child: Text(done ? 'تاني' : '💬 إرسال',
+                              style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w800,
+                                  color: done ? AppColors.muted : Colors.white)),
+                        ),
+                      ]),
+                    );
+                  },
+                ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _toggle(String label, bool on, VoidCallback onTap) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: on ? const Color(0xFFE65100) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: on ? const Color(0xFFE65100) : AppColors.border),
+      ),
+      child: Text(label, style: GoogleFonts.cairo(fontSize: 11.5,
+          fontWeight: FontWeight.w700, color: on ? Colors.white : AppColors.muted)),
     ),
   );
 }

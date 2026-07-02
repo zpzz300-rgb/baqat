@@ -692,6 +692,7 @@ class Guarantor {
   String? notes;
   double? maxDebt;        // حد الكفالة الأقصى (لو null = بدون حد)
   String? lastRemindedAt; // آخر تذكير (ISO 8601)
+  List<Map<String, dynamic>> log; // سجل الكفيل: مدفوعات/أحداث بالتاريخ
 
   Guarantor({
     required this.id,
@@ -703,7 +704,8 @@ class Guarantor {
     this.notes,
     this.maxDebt,
     this.lastRemindedAt,
-  });
+    List<Map<String, dynamic>>? log,
+  }) : log = log ?? [];
 
   factory Guarantor.fromJson(Map<String, dynamic> j) => Guarantor(
         id: j['id'].toString(),
@@ -715,6 +717,10 @@ class Guarantor {
         notes: j['notes'],
         maxDebt: (j['maxDebt'] as num?)?.toDouble(),
         lastRemindedAt: j['lastRemindedAt'],
+        log: (j['log'] as List?)
+                ?.map((e) => Map<String, dynamic>.from(e as Map))
+                .toList() ??
+            [],
       );
 
   Map<String, dynamic> toJson() => {
@@ -727,7 +733,13 @@ class Guarantor {
         'notes': notes,
         'maxDebt': maxDebt,
         'lastRemindedAt': lastRemindedAt,
+        'log': log,
       };
+
+  /// إجمالي المدفوعات المسجّلة على الكفيل
+  double get totalPaid => log
+      .where((e) => e['type'] == 'payment')
+      .fold(0.0, (s, e) => s + ((e['amount'] as num?)?.toDouble() ?? 0));
 
   String get typeLabel {
     switch (type) {

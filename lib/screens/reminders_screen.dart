@@ -9,6 +9,7 @@ import '../services/app_theme.dart';
 import '../services/notification_service.dart';
 import '../models/models.dart';
 import '../widgets/member_card.dart';
+import '../utils/phone_utils.dart';
 
 class RemindersScreen extends StatefulWidget {
   const RemindersScreen({super.key});
@@ -957,7 +958,7 @@ class _DebtorsTab extends StatelessWidget {
 
   Future<void> _sendWA(
       String phone, String name, double debt, double price) async {
-    final p = phone.replaceFirst(RegExp(r'^0'), '20');
+    final p = waDigits(phone);
     final msg = Uri.encodeComponent(
         'السلام عليكم $name 👋\nإجمالي مديونيتك: ${debt.toStringAsFixed(0)} ج\nالاشتراك الشهري: ${price.toStringAsFixed(0)} ج\nيرجى السداد 🙏');
     final url = 'https://wa.me/$p?text=$msg';
@@ -997,7 +998,7 @@ class _DebtorsTab extends StatelessWidget {
                 icon: const Icon(Icons.chat, color: AppColors.waGreen, size: 18),
                 label: Text('واتساب الكفيل', style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
                 onPressed: () {
-                  final p = phone.replaceFirst(RegExp(r'^0'), '20');
+                  final p = waDigits(phone);
                   launchUrl(Uri.parse('https://wa.me/$p'),
                       mode: LaunchMode.externalApplication);
                 },

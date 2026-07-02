@@ -28,19 +28,63 @@ class PhoneInputFormatter extends TextInputFormatter {
   }
 }
 
+// أكواد دول (بدون +) بنحافظ عليها كأرقام دولية — الخليج وبعض الدول العربية
+const _intlCountryCodes = [
+  '971','966','965','973','974','968', // الإمارات/السعودية/الكويت/البحرين/قطر/عمان
+  '962','963','964','961','970','249','218','212','216','213','90','44','49',
+];
+
 String normalizeEgyptPhone(String raw) {
-  var digits = arabicToEnglish(raw).replaceAll(RegExp(r'\D'), '');
+  final t = arabicToEnglish(raw).trim();
+  final hadPlus = t.startsWith('+');
+  var digits = t.replaceAll(RegExp(r'\D'), '');
   if (digits.isEmpty) return '';
+  var intl = hadPlus;
   while (digits.startsWith('00')) {
     digits = digits.substring(2);
+    intl = true;
   }
-  if (digits.startsWith('20')) {
-    digits = digits.substring(2);
+  // كود مصر (20) + 10 أرقام → رقم محلي بصفر
+  if (digits.startsWith('20') && digits.length == 12) {
+    return '0${digits.substring(2)}';
   }
+  // أكواد دول تانية (خليج/عربي/عالمي) → نحافظ عليه دولي بـ +
+  for (final c in _intlCountryCodes) {
+    if (c.length >= 2 && digits.startsWith(c) && digits.length > 8) {
+      return '+$digits';
+    }
+  }
+  if (intl) return '+$digits'; // دولي صريح
+  // رقم مصري محلي
   if (!digits.startsWith('0')) {
     digits = '0$digits';
   }
   return digits;
+}
+
+/// يحوّل أي رقم (محلي مصري أو دولي) لصيغة wa.me (أرقام فقط بكود الدولة، من غير +).
+/// - لو الرقم دولي (يبدأ بـ + أو 00 أو كود دولة) بيستخدمه زي ما هو.
+/// - لو رقم مصري محلي 01… بيحطّ كود مصر 20.
+String waDigits(String raw) {
+  final t = arabicToEnglish(raw).trim();
+  final hadPlus = t.startsWith('+');
+  var d = t.replaceAll(RegExp(r'\D'), '');
+  if (d.isEmpty) return '';
+  while (d.startsWith('00')) {
+    d = d.substring(2);
+  }
+  if (hadPlus) return d; // دولي كامل زي ما اتكتب
+  // موبايل مصري محلي: 01x + 8 أرقام
+  if (d.length == 11 && RegExp(r'^01[0125]').hasMatch(d)) {
+    return '20${d.substring(1)}';
+  }
+  // كود دولة موجود بالفعل (مصر أو دولي)
+  for (final c in ['20', ..._intlCountryCodes]) {
+    if (c.length >= 2 && d.startsWith(c) && d.length > 8) return d;
+  }
+  // رقم محلي بصفر من غير كود دولة معروف → شيل الصفر
+  if (d.startsWith('0')) return d.substring(1);
+  return d;
 }
 
 /// Input formatter for national ID — digits only, max 14

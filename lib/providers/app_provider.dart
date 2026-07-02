@@ -1204,6 +1204,7 @@ class AppProvider extends ChangeNotifier {
   void addMember(Member m) {
     db.members.add(m);
     db.mid++;
+    _ensureGuarantorEntity(m.guarantorName, m.guarantorPhone);
     _addLog(m, 'add', 'تمت إضافة العميل ${m.name}');
     save();
   }
@@ -1225,8 +1226,31 @@ class AppProvider extends ChangeNotifier {
   void editMember(Member m) {
     final i = db.members.indexWhere((x) => x.id == m.id);
     if (i >= 0) db.members[i] = m;
+    _ensureGuarantorEntity(m.guarantorName, m.guarantorPhone);
     _addLog(m, 'edit', 'تم تعديل بيانات ${m.name}');
     save();
+  }
+
+  /// يضمن وجود كيان كفيل رسمي في db.guarantors لأي كفيل اتكتب من جوه عميل —
+  /// عشان الكفيل يبقى واحد في كل مكان (قائمة الكفلاء + العميل + البحث + التعديل).
+  void _ensureGuarantorEntity(String? name, String? phone) {
+    final p = (phone ?? '').trim();
+    if (p.isEmpty) return;
+    final idx = db.guarantors.indexWhere((g) => g.phone == p);
+    if (idx >= 0) {
+      // موجود بالفعل — لو الاسم فاضي عنده وجه اسم جديد، حدّثه
+      if ((db.guarantors[idx].name.trim().isEmpty) &&
+          (name ?? '').trim().isNotEmpty) {
+        db.guarantors[idx].name = name!.trim();
+      }
+    } else {
+      db.guarantors.add(Guarantor(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        name: (name ?? '').trim().isEmpty ? 'كفيل' : name!.trim(),
+        phone: p,
+      ));
+    }
+    // مفيش save() هنا — بيتنادى من addMember/editMember اللي بيحفظوا بعده.
   }
 
   void deleteMember(String mid) {
@@ -1338,7 +1362,8 @@ class AppProvider extends ChangeNotifier {
     db.members[i].balance += (amount - oldAmount); // فرق التعديل
     entry['desc'] = desc.trim().isNotEmpty ? desc.trim() : (entry['desc'] ?? 'حركة');
     entry['amount'] = amount;
-    if (date != null && date.trim().isNotEmpty) entry['date'] = date.trim();
+    final dateChanged = date != null && date.trim().isNotEmpty;
+    if (dateChanged) entry['date'] = date.trim();
     if (time != null) {
       if (time.trim().isEmpty) {
         entry.remove('time');
@@ -1346,10 +1371,37 @@ class AppProvider extends ChangeNotifier {
         entry['time'] = time.trim();
       }
     }
+    // لو التاريخ اتغيّر → رتّب السجل زمنياً (الأحدث فوق) فينزل في مكانه الصح
+    if (dateChanged) sortMemberLogByDate(mid);
     _addLog(db.members[i], 'edit',
         'تعديل حركة في كشف ${db.members[i].name} (${oldAmount.toStringAsFixed(0)} ← ${amount.toStringAsFixed(0)} ج)');
     save();
     notifyListeners();
+  }
+
+  /// ترتيب سجل العميل زمنياً (الأحدث فوق) بثبات — بيستخدم بعد تعديل تاريخ حركة.
+  void sortMemberLogByDate(String mid) {
+    final i = db.members.indexWhere((x) => x.id == mid);
+    if (i < 0) return;
+    int key(Map e) {
+      final d = (e['date'] ?? '').toString().split('/');
+      if (d.length != 3) return 0;
+      final day = int.tryParse(d[0]) ?? 1;
+      final mon = int.tryParse(d[1]) ?? 1;
+      final yr = int.tryParse(d[2]) ?? 2000;
+      var ms = DateTime(yr, mon, day).millisecondsSinceEpoch;
+      final t = (e['time'] ?? '').toString().split(':');
+      if (t.length == 2) {
+        ms += ((int.tryParse(t[0]) ?? 0) * 3600 + (int.tryParse(t[1]) ?? 0) * 60) * 1000;
+      }
+      return ms;
+    }
+    final indexed = db.members[i].log.asMap().entries.toList();
+    indexed.sort((a, b) {
+      final c = key(b.value).compareTo(key(a.value)); // تنازلي
+      return c != 0 ? c : a.key.compareTo(b.key);      // ثبات
+    });
+    db.members[i].log = indexed.map((e) => e.value).toList();
   }
 
   void addService(String mid, String desc, double amount, bool isPaid) {
@@ -2172,10 +2224,52 @@ class AppProvider extends ChangeNotifier {
 
   // ─── GIFTS ───────────────────────────────────────────────────
   // ─── GUARANTORS ──────────────────────────────────────────────
-  void addGuarantor(Guarantor g) { db.guarantors.add(g); save(); notifyListeners(); }
-  void editGuarantor(Guarantor g) {
-    final i = db.guarantors.indexWhere((x) => x.id == g.id);
-    if (i >= 0) { db.guarantors[i] = g; save(); notifyListeners(); }
+  void addGuarantor(Guarantor g) {
+    // منع التكرار: لو فيه كفيل بنفس الرقم، حدّثه بدل ما نضيف واحد جديد
+    final existing = db.guarantors.indexWhere((x) => x.phone == g.phone);
+    if (existing >= 0) {
+      saveGuarantor(g, oldPhone: db.guarantors[existing].phone,
+          keepId: db.guarantors[existing].id);
+      return;
+    }
+    db.guarantors.add(g);
+    _syncMembersToGuarantor(g.phone, g);
+    save(); notifyListeners();
+  }
+
+  void editGuarantor(Guarantor g, {String? oldPhone}) {
+    saveGuarantor(g, oldPhone: oldPhone);
+  }
+
+  /// الحفظ الموحّد للكفيل: upsert + مزامنة العملاء المرتبطين (الاسم/الرقم).
+  void saveGuarantor(Guarantor g, {String? oldPhone, String? keepId}) {
+    final searchPhone = oldPhone ?? g.phone;
+    int idx = db.guarantors.indexWhere((x) => x.id == (keepId ?? g.id));
+    idx = idx >= 0 ? idx : db.guarantors.indexWhere((x) => x.phone == searchPhone);
+    if (idx >= 0) {
+      final ex = db.guarantors[idx];
+      ex.name = g.name;
+      ex.phone = g.phone;
+      ex.phone2 = g.phone2;
+      ex.type = g.type;
+      ex.natId = g.natId;
+      ex.notes = g.notes;
+      ex.maxDebt = g.maxDebt;
+    } else {
+      db.guarantors.add(g);
+    }
+    _syncMembersToGuarantor(searchPhone, g);
+    save(); notifyListeners();
+  }
+
+  /// يحدّث اسم/رقم الكفيل عند كل العملاء المرتبطين بيه (بالرقم القديم أو الجديد).
+  void _syncMembersToGuarantor(String oldPhone, Guarantor g) {
+    for (final m in db.members) {
+      if (m.guarantorPhone == oldPhone || m.guarantorPhone == g.phone) {
+        m.guarantorName = g.name;
+        m.guarantorPhone = g.phone;
+      }
+    }
   }
   void deleteGuarantor(String id) {
     db.guarantors.removeWhere((g) => g.id == id);
@@ -2187,6 +2281,74 @@ class AppProvider extends ChangeNotifier {
     final i = db.guarantors.indexWhere((g) => g.id == id);
     if (i < 0) return;
     db.guarantors[i].lastRemindedAt = DateTime.now().toIso8601String();
+    _logGuarantor(id, desc: '📤 تم إرسال تذكير للكفيل', type: 'reminder');
+    save(); notifyListeners();
+  }
+
+  /// يرجّع الكفيل الرسمي بالرقم (لو موجود) — للربط بين العميل والكفيل.
+  Guarantor? guarantorByPhone(String phone) {
+    final i = db.guarantors.indexWhere((g) => g.phone == phone);
+    return i >= 0 ? db.guarantors[i] : null;
+  }
+
+  Guarantor? guarantorById(String id) {
+    final i = db.guarantors.indexWhere((g) => g.id == id);
+    return i >= 0 ? db.guarantors[i] : null;
+  }
+
+  /// يضيف قيد لسجل الكفيل (بيبني كيان رسمي لو مش موجود بالرقم).
+  void _logGuarantor(String id,
+      {required String desc, double amount = 0, String type = 'note', String? phone}) {
+    int i = db.guarantors.indexWhere((g) => g.id == id);
+    if (i < 0 && phone != null) i = db.guarantors.indexWhere((g) => g.phone == phone);
+    if (i < 0) return;
+    db.guarantors[i].log.insert(0, {
+      'date': _today(),
+      'ts': DateTime.now().toIso8601String(),
+      'desc': desc,
+      'amount': amount,
+      'type': type,
+    });
+  }
+
+  /// تسجيل دفعة على الكفيل (سداد نيابة عن عميل أو سداد مباشر).
+  /// [memberId] اختياري — لو اترصد يتخصم من رصيد العميل كمان.
+  void recordGuarantorPayment(String guarantorId, double amount,
+      {String note = '', String? memberId}) {
+    final gi = db.guarantors.indexWhere((g) => g.id == guarantorId);
+    if (gi < 0 || amount <= 0) return;
+    String memberName = '';
+    if (memberId != null) {
+      final mi = db.members.indexWhere((m) => m.id == memberId);
+      if (mi >= 0) {
+        memberName = db.members[mi].name;
+        db.members[mi].balance += amount; // سداد يقلّل المديونية
+        db.members[mi].log.insert(0, {
+          'date': _today(),
+          'desc': '🤝 سداد عن طريق الكفيل ${db.guarantors[gi].name}'
+              '${note.isNotEmpty ? ' · $note' : ''}',
+          'amount': amount,
+          'type': 'guarantor_pay',
+        });
+      }
+    }
+    final forWho = memberName.isNotEmpty ? ' عن $memberName' : '';
+    db.guarantors[gi].log.insert(0, {
+      'date': _today(),
+      'ts': DateTime.now().toIso8601String(),
+      'desc': '💰 دفعة$forWho${note.isNotEmpty ? ' · $note' : ''}',
+      'amount': amount,
+      'type': 'payment',
+      if (memberId != null) 'memberId': memberId,
+    });
+    save(); notifyListeners();
+  }
+
+  /// حذف قيد من سجل الكفيل (بالـ ts أو الفهرس).
+  void deleteGuarantorLog(String guarantorId, int index) {
+    final gi = db.guarantors.indexWhere((g) => g.id == guarantorId);
+    if (gi < 0 || index < 0 || index >= db.guarantors[gi].log.length) return;
+    db.guarantors[gi].log.removeAt(index);
     save(); notifyListeners();
   }
 

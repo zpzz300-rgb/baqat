@@ -8,6 +8,7 @@ import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
 import '../services/notification_service.dart';
+import '../utils/phone_utils.dart';
 import 'common.dart';
 import 'edit_member_modal.dart';
 import 'pin_dialog.dart';
@@ -269,7 +270,7 @@ class MemberCard extends StatelessWidget {
   }
 
   void _openWA(Member m) async {
-    final phone = m.waPhone.replaceFirst(RegExp(r'^0'), '20');
+    final phone = waDigits(m.waPhone);
     final url = 'https://wa.me/$phone';
     if (await canLaunchUrl(Uri.parse(url))) launchUrl(Uri.parse(url));
   }
@@ -1303,7 +1304,7 @@ class _MemberDrawerState extends State<MemberDrawer> {
       v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
 
   Future<void> _sendWA(Member member, String msg) async {
-    final phone = member.waPhone.replaceFirst(RegExp(r'^0'), '20');
+    final phone = waDigits(member.waPhone);
     final url =
         Uri.parse('https://wa.me/$phone?text=${Uri.encodeComponent(msg)}');
     if (await canLaunchUrl(url)) {
@@ -2017,7 +2018,7 @@ class _MemberDrawerState extends State<MemberDrawer> {
   }
 
   void _openWA(Member m) async {
-    final phone = m.waPhone.replaceFirst(RegExp(r'^0'), '20');
+    final phone = waDigits(m.waPhone);
     final url = 'https://wa.me/$phone';
     if (await canLaunchUrl(Uri.parse(url))) launchUrl(Uri.parse(url));
   }
@@ -2237,7 +2238,7 @@ class _MemberDrawerState extends State<MemberDrawer> {
     } else {
       msg = 'السلام عليكم ${m.salutation} 👋\n\n✅ حسابك مسدّد بالكامل، شكراً لك 🙏';
     }
-    final phone = m.waPhone.replaceFirst(RegExp(r'^0'), '20');
+    final phone = waDigits(m.waPhone);
     _showWAPreview(msg, phone, memberId: m.id, channel: 'wa_debt');
   }
 
@@ -2284,7 +2285,7 @@ class _MemberDrawerState extends State<MemberDrawer> {
     lines.writeln('');
     lines.writeln('شكراً لتعاونك معنا 🙏');
 
-    final phone = m.waPhone.replaceFirst(RegExp(r'^0'), '20');
+    final phone = waDigits(m.waPhone);
     _showWAPreview(lines.toString(), phone,
         memberId: countReminder ? m.id : null,
         channel: countReminder ? 'wa_statement' : null);
