@@ -27,6 +27,7 @@ import 'main_lines_screen.dart';
 import 'admin_panel_screen.dart';
 import 'consolidated_screen.dart';
 import 'bulk_message_screen.dart';
+import 'member_filter_screen.dart';
 import 'flagged_members_screen.dart';
 import 'bills_screen.dart';
 import 'notes_screen.dart';
@@ -1010,44 +1011,65 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
           child: Column(
             children: [
-              // Search
-              TextField(
-                controller: _searchCtrl,
-                onChanged: (v) => _onSearch(v, prov),
-                textDirection: TextDirection.rtl,
-                decoration: InputDecoration(
-                  hintText: '🔍 بحث بالاسم أو الرقم أو الباقة أو المبلغ...',
-                  hintStyle:
-                      GoogleFonts.cairo(fontSize: 13, color: AppColors.muted),
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide:
-                        const BorderSide(color: AppColors.border, width: 1.5),
+              // Search + زرار تصنيف العملاء
+              Row(children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchCtrl,
+                    onChanged: (v) => _onSearch(v, prov),
+                    textDirection: TextDirection.rtl,
+                    decoration: InputDecoration(
+                      hintText: '🔍 بحث بالاسم أو الرقم أو الباقة أو المبلغ...',
+                      hintStyle:
+                          GoogleFonts.cairo(fontSize: 13, color: AppColors.muted),
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide:
+                            const BorderSide(color: AppColors.border, width: 1.5),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide:
+                            const BorderSide(color: AppColors.border, width: 1.5),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide:
+                            const BorderSide(color: AppColors.blue, width: 1.5),
+                      ),
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      suffixIcon: _searchCtrl.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.close, size: 18),
+                              onPressed: () {
+                                _searchCtrl.clear();
+                                _onSearch('', prov);
+                              })
+                          : null,
+                    ),
                   ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide:
-                        const BorderSide(color: AppColors.border, width: 1.5),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide:
-                        const BorderSide(color: AppColors.blue, width: 1.5),
-                  ),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  suffixIcon: _searchCtrl.text.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.close, size: 18),
-                          onPressed: () {
-                            _searchCtrl.clear();
-                            _onSearch('', prov);
-                          })
-                      : null,
                 ),
-              ),
+                const SizedBox(width: 8),
+                // 🎛️ تصنيف العملاء: باقات / دفع / شهر اشتراك / نوع
+                GestureDetector(
+                  onTap: () => Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => const MemberFilterScreen())),
+                  child: Container(
+                    height: 44, width: 44,
+                    decoration: BoxDecoration(
+                      color: AppColors.blue2,
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [BoxShadow(
+                          color: AppColors.blue2.withValues(alpha: 0.3),
+                          blurRadius: 8, offset: const Offset(0, 3))],
+                    ),
+                    child: const Icon(Icons.tune, size: 22, color: Colors.white),
+                  ),
+                ),
+              ]),
               // ملاحظة: «تجديد الاشتراكات» اتنقل للإعدادات، و«حفظ البيانات»
               // و«طباعة المجموعات» اتنقلوا للقائمة الجانبية — لتنضيف الشاشة.
             ],
