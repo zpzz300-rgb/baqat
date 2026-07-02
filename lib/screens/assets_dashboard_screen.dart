@@ -11,6 +11,7 @@ import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/member_card.dart';
 
 class AssetsDashboardScreen extends StatefulWidget {
   const AssetsDashboardScreen({super.key});
@@ -232,7 +233,12 @@ class _AssetsDashboardScreenState extends State<AssetsDashboardScreen> {
     final bg = isLandline ? AppColors.greenLight : AppColors.blueLight;
 
     return InkWell(
-      onTap: () => _openEditDialog(prov, g, m, type),
+      // موجود → يفتح ملف العميل (التاب بتاعه)، فاضي → إضافة جديدة
+      onTap: () => exists
+          ? _openMemberDrawer(m, g)
+          : _openEditDialog(prov, g, m, type),
+      // ضغطة مطوّلة → تعديل الإكسيبشن (النوع/الرقم/الاسم/الحذف)
+      onLongPress: exists ? () => _openEditDialog(prov, g, m, type) : null,
       borderRadius: BorderRadius.circular(10),
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 2),
@@ -272,6 +278,17 @@ class _AssetsDashboardScreenState extends State<AssetsDashboardScreen> {
                 ],
               ),
       ),
+    );
+  }
+
+  // ── فتح ملف العميل (درج العميل الكامل) ────────────────────────
+  void _openMemberDrawer(Member m, Group g) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (_) => MemberDrawer(member: m, group: g),
     );
   }
 
