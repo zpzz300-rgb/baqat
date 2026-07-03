@@ -57,3 +57,4 @@ build_windows_log.txt
 .tools/
 key.properties
 *.jks
+docs/

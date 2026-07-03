@@ -340,20 +340,42 @@ class NotificationService {
   static int _generalNoteIdOf(String noteId) =>
       _generalNoteBase + (noteId.hashCode.abs() % 1000);
 
+  /// [repeat]: 'none' مرة واحدة | 'daily' يومياً | 'weekly' أسبوعياً | 'monthly' شهرياً
   static Future<void> scheduleGeneralNoteReminder({
     required String noteId,
     required String content,
     required DateTime when,
+    String repeat = 'none',
   }) async {
     await init();
-    final t = tz.TZDateTime.from(when, tz.local);
+    var t = tz.TZDateTime.from(when, tz.local);
+    final now = tz.TZDateTime.now(tz.local);
+    DateTimeComponents? comp;
+    switch (repeat) {
+      case 'daily':
+        comp = DateTimeComponents.time;
+        while (t.isBefore(now)) { t = t.add(const Duration(days: 1)); }
+        break;
+      case 'weekly':
+        comp = DateTimeComponents.dayOfWeekAndTime;
+        while (t.isBefore(now)) { t = t.add(const Duration(days: 7)); }
+        break;
+      case 'monthly':
+        comp = DateTimeComponents.dayOfMonthAndTime;
+        while (t.isBefore(now)) {
+          t = tz.TZDateTime(tz.local, t.month == 12 ? t.year + 1 : t.year,
+              t.month == 12 ? 1 : t.month + 1, t.day, t.hour, t.minute);
+        }
+        break;
+    }
     await _scheduleOnce(
       id: _generalNoteIdOf(noteId),
       channelId: _chGeneralNote,
       channelName: 'تذكيرات الملاحظات العامة',
-      title: '📝 ملاحظة شغل',
+      title: repeat == 'none' ? '📝 ملاحظة شغل' : '🔁 تذكير متكرر',
       body: content.length > 100 ? '${content.substring(0, 100)}…' : content,
       when: t,
+      repeat: comp,
     );
   }
 

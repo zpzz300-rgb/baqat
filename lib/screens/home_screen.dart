@@ -28,6 +28,7 @@ import 'admin_panel_screen.dart';
 import 'consolidated_screen.dart';
 import 'bulk_message_screen.dart';
 import 'member_filter_screen.dart';
+import '../widgets/notes_bubble.dart';
 import 'flagged_members_screen.dart';
 import 'bills_screen.dart';
 import 'notes_screen.dart';
@@ -130,18 +131,24 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: const Color(0xFFf5f7fa),
       drawer: _buildDrawer(prov),
       body: LayoutBuilder(
-        builder: (context, constraints) => Column(
+        builder: (context, constraints) => Stack(
           children: [
-            if (!keyboardOpen)
-              ConstrainedBox(
-                constraints:
-                    BoxConstraints(maxHeight: constraints.maxHeight * 0.55),
-                child: SingleChildScrollView(child: _buildHeader(prov)),
-              )
-            else
-              SizedBox(height: MediaQuery.of(context).padding.top),
-            if (!prov.isOnline) _readOnlyBanner(),
-            Expanded(child: _buildBody(prov)),
+            Column(
+              children: [
+                if (!keyboardOpen)
+                  ConstrainedBox(
+                    constraints:
+                        BoxConstraints(maxHeight: constraints.maxHeight * 0.55),
+                    child: SingleChildScrollView(child: _buildHeader(prov)),
+                  )
+                else
+                  SizedBox(height: MediaQuery.of(context).padding.top),
+                if (!prov.isOnline) _readOnlyBanner(),
+                Expanded(child: _buildBody(prov)),
+              ],
+            ),
+            // 📝 فقاعة الملاحظات العائمة (تختفي مع الكيبورد عشان ماتغطيش الكتابة)
+            if (!keyboardOpen) const NotesBubble(),
           ],
         ),
       ),

@@ -11,8 +11,13 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
+import '../services/demo_data.dart';
 
 class AppProvider extends ChangeNotifier {
+  /// 🎭 وضع الديمو: بيانات وهمية للعرض/التصوير — لا قراءة ولا كتابة لبيانات حقيقية.
+  /// يتفعّل وقت البناء فقط: flutter build apk --dart-define=DEMO=true
+  static const bool kDemo = bool.fromEnvironment('DEMO');
+
   AppDB db = AppDB();
   bool _loading = true;
 
@@ -350,6 +355,18 @@ class AppProvider extends ChangeNotifier {
 
   // ─── INIT ────────────────────────────────────────────────────
   Future<void> init() async {
+    // 🎭 وضع الديمو: بيانات وهمية في الذاكرة فقط — من غير قراءة محلية
+    // ولا مزامنة سحابية ولا إشعارات، عشان بيانات المستخدم الحقيقية ما تتلمسش.
+    if (kDemo) {
+      db = buildDemoDb();
+      _ownerName = 'أبو أحمد';
+      _ownerPhone = '01000000000';
+      _isOnline = true;
+      _lastGoodJson = jsonEncode(db.toJson());
+      _loading = false;
+      notifyListeners();
+      return;
+    }
     final prefs = await SharedPreferences.getInstance();
     // وضع الموظف: ممنوع قراءة نسخة محلية من بيانات المحل — يبدأ فاضي
     // ويحمّل من السيرفر لايف فقط (منع تسريب البيانات).
@@ -442,6 +459,7 @@ class AppProvider extends ChangeNotifier {
     _addMonthlyPoints();
     _autoGroupNotes();
     _autoGiftReset();
+    autoArchiveOldNotes(); // 🧹 أرشفة الملاحظات المكتملة من أكتر من أسبوع
     if (_autoBackup) _checkAutoBackup();
     applyAllNotifications();
     notifyListeners();
@@ -464,6 +482,11 @@ class AppProvider extends ChangeNotifier {
 
   // ─── SAVE ────────────────────────────────────────────────────
   Future<void> save() async {
+    // 🎭 الديمو: التعديلات في الذاكرة فقط — ممنوع الكتابة على القرص أو السحابة.
+    if (kDemo) {
+      notifyListeners();
+      return;
+    }
     // حاجز الأوفلاين: ممنوع أي كتابة وانت مش متصل. نرجّع آخر نسخة سليمة
     // عشان أي تعديل اتسرّب لا يُحفظ ولا يُرفع (منع تضارب نهائياً).
     if (!_isOnline) {
@@ -488,6 +511,8 @@ class AppProvider extends ChangeNotifier {
   }
 
   void _saveToCloud(Map<String, dynamic> json) {
+    // 🎭 الديمو: ممنوع رفع أي حاجة للسحابة نهائياً.
+    if (kDemo) return;
     // Attach telegram config so the Edge Function can match this user
     final withConfig = Map<String, dynamic>.from(json);
     withConfig['_telegramConfig'] = {
@@ -604,6 +629,8 @@ class AppProvider extends ChangeNotifier {
   // ─── LOAD FROM CLOUD (بعد Login / عند رجوع التطبيق) ───────────
   /// بيرجّع: pulled = نزّل من السيرفر | pushed = رفع المحلي | noop = مفيش تغيير
   Future<String> loadFromCloud() async {
+    // 🎭 الديمو: ممنوع أي مزامنة سحابية — البيانات الوهمية تفضل زي ما هي.
+    if (kDemo) return 'noop';
     final r = await _loadFromCloudInner();
     // حدّث لقطة الحالة السليمة (للرجوع وقت محاولة كتابة أوفلاين)
     _lastGoodJson = jsonEncode(db.toJson());
@@ -693,6 +720,8 @@ class AppProvider extends ChangeNotifier {
   // ─── REALTIME (live sync بين الأجهزة) ────────────────────────
   /// اشتراك لحظي على صف بيانات المالك — أي تعديل من جهاز تاني ينزل فوراً.
   void startRealtime() {
+    // 🎭 الديمو: مفيش مزامنة لحظية — البيانات وهمية ومحلية.
+    if (kDemo) return;
     stopRealtime();
     final uid = SupabaseService.dataUserId;
     if (uid == null) return;
@@ -3716,6 +3745,10 @@ class AppProvider extends ChangeNotifier {
   Future<void> addGeneralNote({
     required String content,
     DateTime? reminderTime,
+    String color = 'yellow',
+    String? memberId,
+    String? memberName,
+    String repeat = 'none',
   }) async {
     final note = GeneralNote(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -3723,16 +3756,22 @@ class AppProvider extends ChangeNotifier {
       createdAt: DateTime.now(),
       reminderTime: reminderTime,
       isCompleted: false,
+      color: color,
+      memberId: memberId,
+      memberName: memberName,
+      repeat: repeat,
     );
     db.generalNotes.insert(0, note);
     save();
     notifyListeners();
-    // جدولة التنبيه لو محدد وقت
-    if (reminderTime != null && reminderTime.isAfter(DateTime.now())) {
+    // جدولة التنبيه لو محدد وقت (المتكرر بيتجدول حتى لو الوقت الأساسي فات)
+    if (reminderTime != null &&
+        (repeat != 'none' || reminderTime.isAfter(DateTime.now()))) {
       await NotificationService.scheduleGeneralNoteReminder(
         noteId: note.id,
         content: note.content,
         when: reminderTime,
+        repeat: repeat,
       );
     }
   }
@@ -3743,20 +3782,145 @@ class AppProvider extends ChangeNotifier {
     if (i < 0) return;
     db.generalNotes[i].isCompleted = !db.generalNotes[i].isCompleted;
     if (db.generalNotes[i].isCompleted) {
+      db.generalNotes[i].completedAt = DateTime.now();
       // الغي التنبيه لو الملاحظة اتعملت
       NotificationService.cancelGeneralNoteReminder(noteId);
+    } else {
+      db.generalNotes[i].completedAt = null;
+      // رجّع التنبيه لو لسه ليه معاد
+      final n = db.generalNotes[i];
+      if (n.reminderTime != null &&
+          (n.repeat != 'none' || n.reminderTime!.isAfter(DateTime.now()))) {
+        NotificationService.scheduleGeneralNoteReminder(
+            noteId: n.id, content: n.content, when: n.reminderTime!, repeat: n.repeat);
+      }
     }
     save();
     notifyListeners();
   }
 
-  /// حذف ملاحظة عامة
+  /// 📌 تثبيت/فك تثبيت ملاحظة — المثبتة بتظهر أول القائمة
+  void togglePinGeneralNote(String noteId) {
+    final i = db.generalNotes.indexWhere((n) => n.id == noteId);
+    if (i < 0) return;
+    db.generalNotes[i].pinned = !db.generalNotes[i].pinned;
+    save();
+    notifyListeners();
+  }
+
+  /// 🎨 تغيير لون الملاحظة
+  void setGeneralNoteColor(String noteId, String color) {
+    final i = db.generalNotes.indexWhere((n) => n.id == noteId);
+    if (i < 0) return;
+    db.generalNotes[i].color = color;
+    save();
+    notifyListeners();
+  }
+
+  /// 🧹 أرشفة تلقائية للمكتملة من أكتر من أسبوع — بتتنادى عند فتح البرنامج
+  void autoArchiveOldNotes() {
+    final cutoff = DateTime.now().subtract(const Duration(days: 7));
+    var changed = false;
+    for (final n in db.generalNotes) {
+      if (!n.archived &&
+          n.isCompleted &&
+          n.completedAt != null &&
+          n.completedAt!.isBefore(cutoff)) {
+        n.archived = true;
+        n.archivedAt = DateTime.now();
+        changed = true;
+      }
+    }
+    if (changed) { save(); notifyListeners(); }
+  }
+
+  /// حذف ملاحظة عامة (نهائي — يُستخدم من الأرشيف فقط)
   void deleteGeneralNote(String noteId) {
     db.generalNotes.removeWhere((n) => n.id == noteId);
     NotificationService.cancelGeneralNoteReminder(noteId);
     save();
     notifyListeners();
   }
+
+  /// أرشفة ملاحظة (الحذف من الفقاعة العائمة) — بترجع من الأرشيف في أي وقت
+  void archiveGeneralNote(String noteId) {
+    final i = db.generalNotes.indexWhere((n) => n.id == noteId);
+    if (i < 0) return;
+    db.generalNotes[i].archived = true;
+    db.generalNotes[i].archivedAt = DateTime.now();
+    NotificationService.cancelGeneralNoteReminder(noteId);
+    save();
+    notifyListeners();
+  }
+
+  /// استرجاع ملاحظة من الأرشيف
+  void restoreGeneralNote(String noteId) {
+    final i = db.generalNotes.indexWhere((n) => n.id == noteId);
+    if (i < 0) return;
+    db.generalNotes[i].archived = false;
+    db.generalNotes[i].archivedAt = null;
+    // أعد جدولة التنبيه لو ميعاده لسه جاي (أو متكرر)
+    final n = db.generalNotes[i];
+    if (n.reminderTime != null &&
+        (n.repeat != 'none' || n.reminderTime!.isAfter(DateTime.now()))) {
+      NotificationService.scheduleGeneralNoteReminder(
+          noteId: n.id, content: n.content, when: n.reminderTime!, repeat: n.repeat);
+    }
+    save();
+    notifyListeners();
+  }
+
+  /// تعديل ملاحظة (النص / التذكير / التكرار / اللون / العميل المرتبط)
+  Future<void> editGeneralNote(String noteId,
+      {String? content,
+      DateTime? reminderTime,
+      bool clearReminder = false,
+      String? repeat,
+      String? color,
+      String? memberId,
+      String? memberName,
+      bool clearMember = false}) async {
+    final i = db.generalNotes.indexWhere((n) => n.id == noteId);
+    if (i < 0) return;
+    final n = db.generalNotes[i];
+    if (content != null && content.trim().isNotEmpty) n.content = content.trim();
+    if (color != null) n.color = color;
+    if (clearMember) { n.memberId = null; n.memberName = null; }
+    else if (memberId != null) { n.memberId = memberId; n.memberName = memberName; }
+    if (repeat != null) n.repeat = repeat;
+    if (clearReminder) {
+      n.reminderTime = null;
+      n.repeat = 'none';
+      await NotificationService.cancelGeneralNoteReminder(noteId);
+    } else if (reminderTime != null) {
+      n.reminderTime = reminderTime;
+      await NotificationService.cancelGeneralNoteReminder(noteId);
+      if (n.repeat != 'none' || reminderTime.isAfter(DateTime.now())) {
+        await NotificationService.scheduleGeneralNoteReminder(
+            noteId: n.id, content: n.content, when: reminderTime, repeat: n.repeat);
+      }
+    } else if (repeat != null && n.reminderTime != null) {
+      // اتغير التكرار بس — أعد الجدولة بنفس الميعاد
+      await NotificationService.cancelGeneralNoteReminder(noteId);
+      if (n.repeat != 'none' || n.reminderTime!.isAfter(DateTime.now())) {
+        await NotificationService.scheduleGeneralNoteReminder(
+            noteId: n.id, content: n.content, when: n.reminderTime!, repeat: n.repeat);
+      }
+    }
+    save();
+    notifyListeners();
+  }
+
+  /// الملاحظات النشطة (غير مؤرشفة وغير مكتملة) — عداد الفقاعة العائمة
+  List<GeneralNote> get activeNotes =>
+      db.generalNotes.where((n) => !n.archived && !n.isCompleted).toList();
+
+  /// عدد التذكيرات اللي فات معادها — يلوّن العداد أحمر
+  int get overdueNotesCount =>
+      db.generalNotes.where((n) => n.isOverdue).length;
+
+  /// فيه تذكير النهارده؟ — يشغّل نبض الفقاعة 📅
+  bool get hasNoteDueToday => db.generalNotes.any((n) => n.isDueToday);
 
   // ─── EXTRA BUNDLES (Phase 3) ──────────────────────────────────
   /// شحن باقة إضافية مؤقتة لخط — تضاف للسعة هذا الشهر فقط

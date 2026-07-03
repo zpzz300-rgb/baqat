@@ -1132,6 +1132,14 @@ class GeneralNote {
   DateTime createdAt;
   DateTime? reminderTime;
   bool isCompleted;
+  bool archived;        // الحذف من الفقاعة = أرشفة (مش مسح نهائي)
+  DateTime? archivedAt; // وقت الأرشفة
+  bool pinned;          // 📌 مثبتة — تظهر أول القائمة
+  String color;         // 🎨 'yellow' عادي | 'red' عاجل | 'green' شغل
+  String? memberId;     // 👤 ربط بعميل — الضغط يفتح ملفه
+  String? memberName;   // اسم العميل وقت الربط (للعرض السريع)
+  String repeat;        // 🔁 'none' | 'daily' | 'weekly' | 'monthly'
+  DateTime? completedAt; // وقت الإكمال — للأرشفة التلقائية بعد أسبوع
 
   GeneralNote({
     required this.id,
@@ -1139,7 +1147,34 @@ class GeneralNote {
     required this.createdAt,
     this.reminderTime,
     this.isCompleted = false,
+    this.archived = false,
+    this.archivedAt,
+    this.pinned = false,
+    this.color = 'yellow',
+    this.memberId,
+    this.memberName,
+    this.repeat = 'none',
+    this.completedAt,
   });
+
+  /// التذكير فات معاده ولسه الملاحظة شغالة؟ (المتكرر مبيفوتش معاده)
+  bool get isOverdue =>
+      !isCompleted &&
+      !archived &&
+      repeat == 'none' &&
+      reminderTime != null &&
+      reminderTime!.isBefore(DateTime.now());
+
+  /// عندها تذكير النهارده (لسه جاي)؟ — لنبض الفقاعة
+  bool get isDueToday {
+    if (isCompleted || archived || reminderTime == null) return false;
+    final now = DateTime.now();
+    final r = reminderTime!;
+    if (repeat == 'daily') return true;
+    if (repeat == 'weekly') return r.weekday == now.weekday;
+    if (repeat == 'monthly') return r.day == now.day;
+    return r.year == now.year && r.month == now.month && r.day == now.day;
+  }
 
   factory GeneralNote.fromJson(Map<String, dynamic> j) => GeneralNote(
         id: j['id'].toString(),
@@ -1149,6 +1184,18 @@ class GeneralNote {
             ? DateTime.tryParse(j['reminderTime'])
             : null,
         isCompleted: j['isCompleted'] ?? false,
+        archived: j['archived'] ?? false,
+        archivedAt: j['archivedAt'] != null
+            ? DateTime.tryParse(j['archivedAt'])
+            : null,
+        pinned: j['pinned'] ?? false,
+        color: j['color'] ?? 'yellow',
+        memberId: j['memberId'],
+        memberName: j['memberName'],
+        repeat: j['repeat'] ?? 'none',
+        completedAt: j['completedAt'] != null
+            ? DateTime.tryParse(j['completedAt'])
+            : null,
       );
 
   Map<String, dynamic> toJson() => {
@@ -1157,6 +1204,14 @@ class GeneralNote {
         'createdAt': createdAt.toIso8601String(),
         'reminderTime': reminderTime?.toIso8601String(),
         'isCompleted': isCompleted,
+        'archived': archived,
+        'archivedAt': archivedAt?.toIso8601String(),
+        'pinned': pinned,
+        'color': color,
+        'memberId': memberId,
+        'memberName': memberName,
+        'repeat': repeat,
+        'completedAt': completedAt?.toIso8601String(),
       };
 }
 
