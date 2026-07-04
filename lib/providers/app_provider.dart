@@ -13,10 +13,110 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 import '../services/demo_data.dart';
 
+/// 🗂️ جلسة تاب في مساحة العمل — شاشة مفتوحة بالتوازي بتحتفظ بحالتها
+/// (البحث/الفلاتر/السكرول/الكتابة غير المحفوظة) طول ما التاب مفتوح.
+class TabSession {
+  final String id;      // معرّف فريد
+  final String type;    // 'member' | 'group' | 'invoices' | 'guarantors' | 'filter' | 'assets'
+  final Map<String, dynamic> args; // مثال: {'mid': ...} أو {'gid': ...}
+  String title;
+  String emoji;
+  final GlobalKey<NavigatorState> navKey; // Navigator داخلي مستقل لكل تاب
+  // مراقب مسارات التاب: لما آخر شاشة جوه التاب تترجع → التاب يقفل نفسه
+  final RouteObserver<ModalRoute<void>> routeObserver;
+
+  TabSession({
+    required this.id,
+    required this.type,
+    this.args = const {},
+    required this.title,
+    required this.emoji,
+  })  : navKey = GlobalKey<NavigatorState>(),
+        routeObserver = RouteObserver<ModalRoute<void>>();
+
+  /// نفس الشاشة بنفس البيانات؟ (منع فتح تابين لنفس الحاجة)
+  bool sameAs(String t, Map<String, dynamic> a) {
+    if (type != t) return false;
+    if (type == 'member') return args['mid'] == a['mid'];
+    if (type == 'group') return args['gid'] == a['gid'];
+    return true; // الشاشات العامة: تاب واحد يكفي
+  }
+}
+
 class AppProvider extends ChangeNotifier {
   /// 🎭 وضع الديمو: بيانات وهمية للعرض/التصوير — لا قراءة ولا كتابة لبيانات حقيقية.
   /// يتفعّل وقت البناء فقط: flutter build apk --dart-define=DEMO=true
   static const bool kDemo = bool.fromEnvironment('DEMO');
+
+  // ─── 🗂️ WORKSPACE TABS (مساحة العمل متعددة التابات) ─────────────
+  // حالة واجهة فقط — مش بتتحفظ في الداتا ولا بتتزامن مع السحابة.
+  final List<TabSession> workspaceTabs = [];
+
+  /// التاب النشط: 0 = الرئيسية (ثابتة)، 1..n = التابات المفتوحة
+  int _activeWorkspaceIndex = 0;
+  int get activeWorkspaceIndex => _activeWorkspaceIndex;
+
+  static const int kMaxWorkspaceTabs = 7;
+
+  /// فتح تاب جديد (أو تنشيط الموجود لو نفس الشاشة مفتوحة بالفعل)
+  void openWorkspaceTab(String type,
+      {Map<String, dynamic> args = const {},
+      required String title,
+      required String emoji}) {
+    final existing = workspaceTabs.indexWhere((t) => t.sameAs(type, args));
+    if (existing >= 0) {
+      _activeWorkspaceIndex = existing + 1;
+      notifyListeners();
+      return;
+    }
+    // حد أقصى للتابات — الأقدم يتشال عشان الذاكرة
+    if (workspaceTabs.length >= kMaxWorkspaceTabs) {
+      workspaceTabs.removeAt(0);
+      if (_activeWorkspaceIndex > 0) _activeWorkspaceIndex--;
+    }
+    workspaceTabs.add(TabSession(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      type: type,
+      args: args,
+      title: title,
+      emoji: emoji,
+    ));
+    _activeWorkspaceIndex = workspaceTabs.length; // نشّط الجديد
+    notifyListeners();
+  }
+
+  /// قفل تاب وتصفيته من الذاكرة
+  void closeWorkspaceTab(int tabIndex) {
+    if (tabIndex < 0 || tabIndex >= workspaceTabs.length) return;
+    workspaceTabs.removeAt(tabIndex);
+    if (_activeWorkspaceIndex > workspaceTabs.length) {
+      _activeWorkspaceIndex = workspaceTabs.length;
+    } else if (_activeWorkspaceIndex == tabIndex + 1) {
+      // كنت واقف على اللي اتقفل → ارجع للي قبله (أو الرئيسية)
+      _activeWorkspaceIndex = tabIndex.clamp(0, workspaceTabs.length);
+    } else if (_activeWorkspaceIndex > tabIndex + 1) {
+      _activeWorkspaceIndex--;
+    }
+    notifyListeners();
+  }
+
+  /// قفل كل التابات ماعدا واحد (دوسة مطوّلة على تاب)
+  void closeOtherWorkspaceTabs(int keepIndex) {
+    if (keepIndex < 0 || keepIndex >= workspaceTabs.length) return;
+    final keep = workspaceTabs[keepIndex];
+    workspaceTabs
+      ..clear()
+      ..add(keep);
+    _activeWorkspaceIndex = 1;
+    notifyListeners();
+  }
+
+  /// التنقل اللحظي بين التابات (0 = الرئيسية)
+  void activateWorkspaceTab(int index) {
+    if (index < 0 || index > workspaceTabs.length) return;
+    _activeWorkspaceIndex = index;
+    notifyListeners();
+  }
 
   AppDB db = AppDB();
   bool _loading = true;

@@ -27,13 +27,12 @@ import 'main_lines_screen.dart';
 import 'admin_panel_screen.dart';
 import 'consolidated_screen.dart';
 import 'bulk_message_screen.dart';
-import 'member_filter_screen.dart';
 import '../widgets/notes_bubble.dart';
+import '../widgets/workspace_bar.dart';
 import 'flagged_members_screen.dart';
 import 'bills_screen.dart';
 import 'notes_screen.dart';
 import 'company_invoices_screen.dart';
-import 'assets_dashboard_screen.dart';
 import 'complaints_screen.dart';
 import 'unified_billing_screen.dart';
 import '../widgets/add_group_modal.dart';
@@ -131,26 +130,60 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: const Color(0xFFf5f7fa),
       drawer: _buildDrawer(prov),
       body: LayoutBuilder(
-        builder: (context, constraints) => Stack(
-          children: [
-            Column(
-              children: [
-                if (!keyboardOpen)
-                  ConstrainedBox(
-                    constraints:
-                        BoxConstraints(maxHeight: constraints.maxHeight * 0.55),
-                    child: SingleChildScrollView(child: _buildHeader(prov)),
-                  )
-                else
-                  SizedBox(height: MediaQuery.of(context).padding.top),
-                if (!prov.isOnline) _readOnlyBanner(),
-                Expanded(child: _buildBody(prov)),
-              ],
-            ),
-            // 📝 فقاعة الملاحظات العائمة (تختفي مع الكيبورد عشان ماتغطيش الكتابة)
-            if (!keyboardOpen) const NotesBubble(),
-          ],
-        ),
+        builder: (context, constraints) {
+          // ── محتوى الرئيسية (زي ما هو من غير أي تغيير) ──
+          final homeContent = Column(
+            children: [
+              if (!keyboardOpen)
+                ConstrainedBox(
+                  constraints:
+                      BoxConstraints(maxHeight: constraints.maxHeight * 0.55),
+                  child: SingleChildScrollView(child: _buildHeader(prov)),
+                )
+              else
+                SizedBox(height: MediaQuery.of(context).padding.top),
+              if (!prov.isOnline) _readOnlyBanner(),
+              Expanded(child: _buildBody(prov)),
+            ],
+          );
+
+          // ── من غير تابات مفتوحة: نفس الشكل القديم بالظبط ──
+          final hasTabs = prov.workspaceTabs.isNotEmpty;
+          final content = !hasTabs
+              ? homeContent
+              : Column(children: [
+                  // شريط أزرق غامق خلف شريط حالة النظام (عشان الساعة تبان)
+                  Container(
+                      color: const Color(0xFF0D1B3E),
+                      height: MediaQuery.of(context).padding.top),
+                  const WorkspaceBar(),
+                  // IndexedStack = كل التابات عايشة بحالتها في الذاكرة
+                  Expanded(
+                    child: IndexedStack(
+                      index: prov.activeWorkspaceIndex
+                          .clamp(0, prov.workspaceTabs.length),
+                      children: [
+                        // الرئيسية: نشيل حشوة شريط الحالة من هيدرها
+                        // لأن الشريط الأزرق فوق غطّاها خلاص
+                        MediaQuery.removePadding(
+                            context: context,
+                            removeTop: true,
+                            child: homeContent),
+                        for (final t in prov.workspaceTabs)
+                          WorkspaceTabHost(key: ValueKey(t.id), tab: t),
+                      ],
+                    ),
+                  ),
+                ]);
+
+          return Stack(
+            children: [
+              content,
+              // 📝 فقاعة الملاحظات العائمة (تختفي مع الكيبورد عشان ماتغطيش الكتابة)
+              if (!keyboardOpen) const NotesBubble(),
+            ],
+          );
+        },
       ),
     );
   }
@@ -774,13 +807,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.pop(context);
                 _printGroups(prov);
               }),
+              // 🗂 بيتفتحوا في تابات علوية — الشغل بيفضل محفوظ وانت بتنقّل
               _drawerItem('📊 لوحة الأصول والإكسيبشن', () {
                 Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => const AssetsDashboardScreen()),
-                );
+                prov.openWorkspaceTab('assets',
+                    title: 'الأصول', emoji: '📊');
+              }),
+              _drawerItem('🎛️ تصنيف العملاء', () {
+                Navigator.pop(context);
+                prov.openWorkspaceTab('filter',
+                    title: 'تصنيف العملاء', emoji: '🎛️');
               }),
               // إدارة الموظفين — للمالك فقط
               if (!SupabaseService.isEmployee)
@@ -1061,9 +1097,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(width: 8),
                 // 🎛️ تصنيف العملاء: باقات / دفع / شهر اشتراك / نوع
+                // بيتفتح في تاب علوي — فلترك بيفضل محفوظ وانت بتنقّل
                 GestureDetector(
-                  onTap: () => Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => const MemberFilterScreen())),
+                  onTap: () => prov.openWorkspaceTab('filter',
+                      title: 'تصنيف العملاء', emoji: '🎛️'),
                   child: Container(
                     height: 44, width: 44,
                     decoration: BoxDecoration(

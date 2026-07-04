@@ -1,5 +1,6 @@
 ﻿// lib/widgets/group_card.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
@@ -167,6 +168,18 @@ class _GroupCardState extends State<GroupCard> {
           // ─── GROUP HEADER ─────────────────────────────────────
           GestureDetector(
             onTap: () => setState(() => _expanded = !_expanded),
+            // 🗂 ضغطة مطوّلة → يفتح الخط في تاب علوي بمساحة العمل
+            onLongPress: () {
+              HapticFeedback.mediumImpact();
+              context.read<AppProvider>().openWorkspaceTab(
+                    'group',
+                    args: {'gid': widget.group.id},
+                    title: widget.group.ownerName?.isNotEmpty == true
+                        ? widget.group.ownerName!
+                        : widget.group.phone,
+                    emoji: '📶',
+                  );
+            },
             child: Container(
               padding: _expanded
                   ? const EdgeInsets.fromLTRB(16, 16, 12, 14)

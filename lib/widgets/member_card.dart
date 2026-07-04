@@ -1,5 +1,6 @@
 // lib/widgets/member_card.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -88,6 +89,8 @@ class MemberCard extends StatelessWidget {
 
     return GestureDetector(
       onTap: () => _openDrawer(context),
+      // 🗂 ضغطة مطوّلة → يفتح ملف العميل في تاب علوي (بيفضل مفتوح وانت بتنقّل)
+      onLongPress: () => openMemberTab(context, member),
       child: Container(
         height: 175,
         decoration: BoxDecoration(
@@ -286,6 +289,17 @@ class MemberCard extends StatelessWidget {
   }
 }
 
+/// 🗂 فتح ملف العميل في تاب علوي بمساحة العمل — مع اهتزازة خفيفة للتأكيد
+void openMemberTab(BuildContext context, Member m) {
+  HapticFeedback.mediumImpact();
+  context.read<AppProvider>().openWorkspaceTab(
+        'member',
+        args: {'mid': m.id},
+        title: m.name,
+        emoji: '👤',
+      );
+}
+
 // ─── COMPACT MEMBER CARD (3 per row grid) ────────────────────────
 class CompactMemberCard extends StatelessWidget {
   final Member member;
@@ -339,6 +353,8 @@ class CompactMemberCard extends StatelessWidget {
 
     return GestureDetector(
       onTap: () => MemberCard(member: member, group: group)._openDrawer(context),
+      // 🗂 ضغطة مطوّلة → ملف العميل في تاب علوي
+      onLongPress: () => openMemberTab(context, member),
       child: Container(
         decoration: BoxDecoration(
           color: highDebt
