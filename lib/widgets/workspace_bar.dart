@@ -17,8 +17,56 @@ import '../screens/guarantors_screen.dart';
 import '../screens/unified_billing_screen.dart';
 import '../screens/member_filter_screen.dart';
 import '../screens/assets_dashboard_screen.dart';
+import '../screens/reminders_screen.dart';
+import '../screens/worknums_screen.dart';
+import '../screens/profit_screen.dart';
+import '../screens/rentals_screen.dart';
+import '../screens/gifts_screen.dart';
+import '../screens/guests_screen.dart';
+import '../screens/archive_screen.dart';
+import '../screens/activity_screen.dart';
+import '../screens/dataio_screen.dart';
+import '../screens/deleted_screen.dart';
+import '../screens/waitlist_screen.dart';
+import '../screens/consolidated_screen.dart';
+import '../screens/bulk_message_screen.dart';
+import '../screens/flagged_members_screen.dart';
+import '../screens/notes_screen.dart';
+import '../screens/complaints_screen.dart';
 import 'member_card.dart';
 import 'group_card.dart';
+
+/// 📚 سجل شاشات مساحة العمل: type → (إيموجي، عنوان، بنّاء الشاشة، Scaffold كامل؟)
+/// بيستخدمه حاضن التاب + لوحة التنقّل السفلية 🗂 — تضيف شاشة هنا تظهر في الاتنين.
+typedef WorkspaceScreenDef = ({
+  String emoji,
+  String title,
+  Widget Function() build,
+  bool fullScreen, // الشاشة Scaffold كامل بنفسها (مش محتاجة غلاف)
+});
+
+final Map<String, WorkspaceScreenDef> kWorkspaceScreens = {
+  'reminders':   (emoji: '🔔', title: 'التنبيهات',      build: () => const RemindersScreen(),      fullScreen: false),
+  'guarantors':  (emoji: '🤝', title: 'الكفلاء',        build: () => const GuarantorsScreen(),     fullScreen: false),
+  'invoices':    (emoji: '🧾', title: 'الفواتير',       build: () => const UnifiedBillingScreen(), fullScreen: false),
+  'profit':      (emoji: '💰', title: 'الأرباح',        build: () => const ProfitScreen(),         fullScreen: false),
+  'filter':      (emoji: '🎛️', title: 'تصنيف العملاء',  build: () => const MemberFilterScreen(),   fullScreen: true),
+  'assets':      (emoji: '📊', title: 'لوحة الأصول',    build: () => const AssetsDashboardScreen(),fullScreen: true),
+  'flagged':     (emoji: '🚦', title: 'التصنيف',        build: () => const FlaggedMembersScreen(), fullScreen: false),
+  'consolidated':(emoji: '📈', title: 'كل العملاء',     build: () => const ConsolidatedScreen(),   fullScreen: false),
+  'worknums':    (emoji: '📋', title: 'أرقام العمل',    build: () => const WorkNumsScreen(),       fullScreen: false),
+  'rentals':     (emoji: '🏠', title: 'المؤجرة',        build: () => const RentalsScreen(),        fullScreen: false),
+  'gifts':       (emoji: '🎁', title: 'الهدايا',        build: () => const GiftsScreen(),          fullScreen: false),
+  'guests':      (emoji: '👥', title: 'الضيوف',         build: () => const GuestsScreen(),         fullScreen: false),
+  'bulk':        (emoji: '📤', title: 'رسائل جماعية',   build: () => const BulkMessageScreen(),    fullScreen: false),
+  'notes':       (emoji: '📝', title: 'الملاحظات',      build: () => const NotesScreen(),          fullScreen: false),
+  'complaints':  (emoji: '📢', title: 'الشكاوى',        build: () => const ComplaintsScreen(),     fullScreen: false),
+  'waitlist':    (emoji: '⏳', title: 'قائمة الانتظار', build: () => const WaitlistScreen(),       fullScreen: false),
+  'archive':     (emoji: '📦', title: 'الأرشيف',        build: () => const ArchiveScreen(),        fullScreen: false),
+  'deleted':     (emoji: '🗑', title: 'المحذوفون',      build: () => const DeletedScreen(),        fullScreen: false),
+  'activity':    (emoji: '📜', title: 'النشاط',         build: () => const ActivityScreen(),       fullScreen: false),
+  'dataio':      (emoji: '💾', title: 'البيانات',       build: () => const DataIOScreen(),         fullScreen: false),
+};
 
 // ─── شريط التابات ───────────────────────────────────────────────
 class WorkspaceBar extends StatelessWidget {
@@ -191,19 +239,6 @@ class _TabRoot extends StatelessWidget {
     final prov = context.watch<AppProvider>();
 
     switch (tab.type) {
-      // ── شاشات عامة (Column widgets بتتحضن في Scaffold بسيط) ──
-      case 'guarantors':
-        return _shell(context, body: const GuarantorsScreen());
-      case 'invoices':
-        return _shell(context, body: const UnifiedBillingScreen());
-
-      // ── شاشات كاملة بـ Scaffold خاص بها — زرار الرجوع بتاعها
-      //    بيرجّع لصفحة القاعدة فالتاب بيقفل نفسه تلقائياً ──
-      case 'filter':
-        return const MemberFilterScreen();
-      case 'assets':
-        return const AssetsDashboardScreen();
-
       // ── ملف عميل ──
       case 'member': {
         final mid = tab.args['mid'];
@@ -243,8 +278,15 @@ class _TabRoot extends StatelessWidget {
         );
       }
 
-      default:
-        return _gone(context, 'شاشة غير معروفة');
+      // ── باقي شاشات البرنامج من السجل الموحّد ──
+      default: {
+        final def = kWorkspaceScreens[tab.type];
+        if (def == null) return _gone(context, 'شاشة غير معروفة');
+        // الشاشات الكاملة (Scaffold خاص بها) بتتحط مباشرة —
+        // زرار الرجوع بتاعها بيرجّع لصفحة القاعدة فالتاب بيقفل نفسه
+        if (def.fullScreen) return def.build();
+        return _shell(context, body: def.build());
+      }
     }
   }
 

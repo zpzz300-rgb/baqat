@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import 'workspace_bar.dart' show kWorkspaceScreens;
 
 class WorkspaceSwitcherButton extends StatelessWidget {
   const WorkspaceSwitcherButton({super.key});
@@ -75,6 +76,8 @@ class _SwitcherSheet extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+      constraints:
+          BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
       decoration: const BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
@@ -96,55 +99,56 @@ class _SwitcherSheet extends StatelessWidget {
             style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted)),
         const SizedBox(height: 12),
 
-        // ── الرئيسية + التابات المفتوحة ──
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          _tabTile(
-            context,
-            label: '🏠 الرئيسية',
-            selected: active == 0,
-            onTap: () {
-              prov.activateWorkspaceTab(0);
-              Navigator.pop(context);
-            },
+        Flexible(
+          child: SingleChildScrollView(
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── الرئيسية + التابات المفتوحة ──
+                  Wrap(spacing: 8, runSpacing: 8, children: [
+                    _tabTile(
+                      context,
+                      label: '🏠 الرئيسية',
+                      selected: active == 0,
+                      onTap: () {
+                        prov.activateWorkspaceTab(0);
+                        Navigator.pop(context);
+                      },
+                    ),
+                    for (int i = 0; i < tabs.length; i++)
+                      _tabTile(
+                        context,
+                        label: '${tabs[i].emoji} ${tabs[i].title}',
+                        selected: active == i + 1,
+                        onTap: () {
+                          prov.activateWorkspaceTab(i + 1);
+                          Navigator.pop(context);
+                        },
+                        onClose: () => prov.closeWorkspaceTab(i),
+                      ),
+                  ]),
+
+                  const SizedBox(height: 14),
+                  Text('فتح في تاب جديد:',
+                      style: GoogleFonts.cairo(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.muted)),
+                  const SizedBox(height: 6),
+
+                  // ── كل شاشات البرنامج من السجل الموحّد ──
+                  Wrap(spacing: 8, runSpacing: 8, children: [
+                    for (final e in kWorkspaceScreens.entries)
+                      _shortcut(context, '${e.value.emoji} ${e.value.title}',
+                          () {
+                        prov.openWorkspaceTab(e.key,
+                            title: e.value.title, emoji: e.value.emoji);
+                        Navigator.pop(context);
+                      }),
+                  ]),
+                ]),
           ),
-          for (int i = 0; i < tabs.length; i++)
-            _tabTile(
-              context,
-              label: '${tabs[i].emoji} ${tabs[i].title}',
-              selected: active == i + 1,
-              onTap: () {
-                prov.activateWorkspaceTab(i + 1);
-                Navigator.pop(context);
-              },
-              onClose: () => prov.closeWorkspaceTab(i),
-            ),
-        ]),
-
-        const SizedBox(height: 14),
-        Text('فتح في تاب جديد:',
-            style: GoogleFonts.cairo(
-                fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.muted)),
-        const SizedBox(height: 6),
-
-        // ── اختصارات فتح تابات جديدة ──
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          _shortcut(context, '🧾 الفواتير', () {
-            prov.openWorkspaceTab('invoices', title: 'الفواتير', emoji: '🧾');
-            Navigator.pop(context);
-          }),
-          _shortcut(context, '🤝 الكفلاء', () {
-            prov.openWorkspaceTab('guarantors', title: 'الكفلاء', emoji: '🤝');
-            Navigator.pop(context);
-          }),
-          _shortcut(context, '🎛️ تصنيف العملاء', () {
-            prov.openWorkspaceTab('filter', title: 'تصنيف العملاء', emoji: '🎛️');
-            Navigator.pop(context);
-          }),
-          _shortcut(context, '📊 لوحة الأصول', () {
-            prov.openWorkspaceTab('assets', title: 'الأصول', emoji: '📊');
-            Navigator.pop(context);
-          }),
-        ]),
+        ),
       ]),
     );
   }
