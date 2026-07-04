@@ -29,6 +29,7 @@ import 'consolidated_screen.dart';
 import 'bulk_message_screen.dart';
 import '../widgets/notes_bubble.dart';
 import '../widgets/workspace_bar.dart';
+import '../widgets/workspace_switcher.dart';
 import 'flagged_members_screen.dart';
 import 'bills_screen.dart';
 import 'notes_screen.dart';
@@ -181,6 +182,8 @@ class _HomeScreenState extends State<HomeScreen> {
               content,
               // 📝 فقاعة الملاحظات العائمة (تختفي مع الكيبورد عشان ماتغطيش الكتابة)
               if (!keyboardOpen) const NotesBubble(),
+              // 🗂 زرار التنقّل السفلي — لوحة تنقّل سريعة بين التابات
+              if (!keyboardOpen) const WorkspaceSwitcherButton(),
             ],
           );
         },
