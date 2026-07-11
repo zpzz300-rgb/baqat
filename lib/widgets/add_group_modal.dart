@@ -24,6 +24,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
   final _ownerNameCtrl = TextEditingController();
   final _ownerFullNameCtrl = TextEditingController();
   final _ownerNatIdCtrl = TextEditingController();
+  final _accountEmailCtrl = TextEditingController(); // 📧 حساب الدخول
   final _notesCtrl = TextEditingController();
   final _maxClientsCtrl = TextEditingController();
   final _pointsMonthlyCtrl = TextEditingController();
@@ -137,6 +138,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
       _phoneCtrl.text = e.phone;
       _ownerNameCtrl.text = e.ownerName ?? '';
       _ownerNatIdCtrl.text = e.ownerNatId ?? '';
+      _accountEmailCtrl.text = e.accountEmail ?? '';
       _notesCtrl.text = e.notes ?? '';
       _type = e.type;
       _payer = e.payer;
@@ -192,12 +194,86 @@ class _AddGroupModalState extends State<AddGroupModal> {
     }
   }
 
+  /// 👇 قائمة الأصحاب المسجلين قبل كده — الاختيار بيملي الاسم + الرقم القومي
+  /// (بدل ما تكتبهم كل مرة). بتتجمع من كل الخطوط الموجودة بدون تكرار.
+  Widget _existingOwnerPicker() {
+    final groups = context.read<AppProvider>().db.groups;
+    // dedupe بالاسم: آخر رقم قومي/إيميل مسجّل لنفس الاسم يكسب
+    final owners = <String, ({String? natId, String? email})>{};
+    for (final g in groups) {
+      final name = g.ownerName?.trim() ?? '';
+      if (name.isEmpty) continue;
+      final prev = owners[name];
+      owners[name] = (
+        natId: g.ownerNatId?.isNotEmpty == true ? g.ownerNatId : prev?.natId,
+        email: g.accountEmail?.isNotEmpty == true
+            ? g.accountEmail
+            : prev?.email,
+      );
+    }
+    if (owners.isEmpty) return const SizedBox.shrink();
+
+    final names = owners.keys.toList()..sort();
+    return PopupMenuButton<String>(
+      tooltip: 'اختار صاحب مسجّل',
+      onSelected: (name) {
+        final o = owners[name]!;
+        setState(() {
+          _ownerNameCtrl.text = name;
+          if (o.natId?.isNotEmpty == true) _ownerNatIdCtrl.text = o.natId!;
+          // الإيميل بيتملي بس لو الخانة فاضية (كل خط ممكن يبقى له حساب مختلف)
+          if (_accountEmailCtrl.text.trim().isEmpty &&
+              o.email?.isNotEmpty == true) {
+            _accountEmailCtrl.text = o.email!;
+          }
+        });
+      },
+      itemBuilder: (_) => [
+        for (final name in names)
+          PopupMenuItem(
+            value: name,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(name,
+                    style: GoogleFonts.cairo(
+                        fontSize: 13, fontWeight: FontWeight.w800)),
+                if (owners[name]!.natId?.isNotEmpty == true)
+                  Text('🪪 ${owners[name]!.natId}',
+                      style: GoogleFonts.cairo(
+                          fontSize: 10.5, color: AppColors.muted),
+                      textDirection: TextDirection.ltr),
+              ],
+            ),
+          ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.blue2.withValues(alpha: 0.4)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text('اختار مسجّل',
+              style: GoogleFonts.cairo(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.blue2)),
+          const Icon(Icons.arrow_drop_down, size: 18, color: AppColors.blue2),
+        ]),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _phoneCtrl.dispose();
     _ownerNameCtrl.dispose();
     _ownerFullNameCtrl.dispose();
     _ownerNatIdCtrl.dispose();
+    _accountEmailCtrl.dispose();
     _notesCtrl.dispose();
     _maxClientsCtrl.dispose();
     _pointsMonthlyCtrl.dispose();
@@ -659,9 +735,16 @@ class _AddGroupModalState extends State<AddGroupModal> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('👤 بيانات صاحب الخط',
-                  style: GoogleFonts.cairo(
-                      color: AppColors.blue2, fontWeight: FontWeight.w900)),
+              Row(children: [
+                Expanded(
+                  child: Text('👤 بيانات صاحب الخط',
+                      style: GoogleFonts.cairo(
+                          color: AppColors.blue2,
+                          fontWeight: FontWeight.w900)),
+                ),
+                // 👇 اختيار صاحب مسجّل قبل كده — بيملي الاسم والرقم القومي
+                _existingOwnerPicker(),
+              ]),
               const SizedBox(height: 10),
               AppFormField(
                   label: 'الاسم',
@@ -675,6 +758,14 @@ class _AddGroupModalState extends State<AddGroupModal> {
                   maxLength: 14,
                   textDirection: TextDirection.ltr,
                   inputFormatters: [NatIdInputFormatter()]),
+              const SizedBox(height: 10),
+              // 📧 إيميل الحساب اللي بيتم الدخول بيه على الخط (ملاحظة تعريفية)
+              AppFormField(
+                  label: '📧 حساب (إيميل الدخول)',
+                  controller: _accountEmailCtrl,
+                  hint: 'example@gmail.com',
+                  textDirection: TextDirection.ltr,
+                  keyboardType: TextInputType.emailAddress),
             ],
           ),
         ),
@@ -1494,6 +1585,9 @@ class _AddGroupModalState extends State<AddGroupModal> {
           : null,
       ownerNatId: _ownerNatIdCtrl.text.trim().isNotEmpty
           ? _ownerNatIdCtrl.text.trim()
+          : null,
+      accountEmail: _accountEmailCtrl.text.trim().isNotEmpty
+          ? _accountEmailCtrl.text.trim()
           : null,
       notes: _notesCtrl.text.trim().isNotEmpty ? _notesCtrl.text.trim() : null,
       date: _date,

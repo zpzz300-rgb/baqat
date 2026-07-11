@@ -106,6 +106,7 @@ class Group {
   String? lastBillActual;
   String? ownerName;
   String? ownerNatId;
+  String? accountEmail; // 📧 إيميل الحساب اللي بيتم الدخول بيه على الخط
   String? ownerPhoto;
   String? notes;
   String? date;
@@ -199,6 +200,7 @@ class Group {
     this.lastBillActual,
     this.ownerName,
     this.ownerNatId,
+    this.accountEmail,
     this.ownerPhoto,
     this.notes,
     this.date,
@@ -272,6 +274,7 @@ class Group {
         lastBillActual: j['lastBillActual'],
         ownerName: j['ownerName'],
         ownerNatId: j['ownerNatId'],
+        accountEmail: j['accountEmail'],
         ownerPhoto: j['ownerPhoto'],
         notes: j['notes'],
         date: j['date'],
@@ -342,6 +345,7 @@ class Group {
         'lastBillActual': lastBillActual,
         'ownerName': ownerName,
         'ownerNatId': ownerNatId,
+        'accountEmail': accountEmail,
         'ownerPhoto': ownerPhoto,
         'notes': notes,
         'date': date,
