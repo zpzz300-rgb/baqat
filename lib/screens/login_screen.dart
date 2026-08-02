@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/supabase_service.dart';
+import '../services/auth_service.dart';
 import 'employee_login_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -13,26 +14,38 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _emailCtrl = TextEditingController();
   final _passCtrl  = TextEditingController();
+  final _phoneCtrl = TextEditingController();
   bool   _obscure  = true;
   bool   _loading  = false;
   bool   _isSignUp = false;
   String? _error;
 
+  static final _egyptMobileRegex = RegExp(r'^01[0125][0-9]{8}$');
+
   @override
-  void dispose() { _emailCtrl.dispose(); _passCtrl.dispose(); super.dispose(); }
+  void dispose() { _emailCtrl.dispose(); _passCtrl.dispose(); _phoneCtrl.dispose(); super.dispose(); }
 
   Future<void> _submit() async {
     final email = _emailCtrl.text.trim();
     final pass  = _passCtrl.text.trim();
+    final phone = _phoneCtrl.text.trim();
     if (email.isEmpty || pass.isEmpty) {
       setState(() => _error = 'أدخل البريد وكلمة السر');
+      return;
+    }
+    if (_isSignUp && !_egyptMobileRegex.hasMatch(phone)) {
+      setState(() => _error = 'أدخل رقم موبايل مصري صحيح (01xxxxxxxxx)');
       return;
     }
     setState(() { _loading = true; _error = null; });
 
     final r = _isSignUp
-        ? await SupabaseService.signUp(email, pass)
+        ? await SupabaseService.signUp(email, pass, phone: phone)
         : await SupabaseService.signIn(email, pass);
+
+    // التسجيل الجديد: نربط الرقم بالحساب فوراً لو الجلسة بدأت، وإلا نحتفظ بيه
+    // محلياً ويتربط أول ما يدخل — المهم إن المستخدم مايتسألش عنه تاني.
+    if (r.ok && _isSignUp) await AuthService.linkPhoneToDevice(phone);
 
     if (!mounted) return;
     if (!r.ok) setState(() { _error = r.msg; _loading = false; });
@@ -73,6 +86,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   _field(controller: _emailCtrl, label: 'البريد الإلكتروني',
                       keyboard: TextInputType.emailAddress, icon: Icons.email_outlined),
                   const SizedBox(height: 12),
+
+                  // Phone (sign-up only)
+                  if (_isSignUp) ...[
+                    _field(controller: _phoneCtrl, label: 'رقم الموبايل',
+                        keyboard: TextInputType.phone, icon: Icons.phone_outlined),
+                    const SizedBox(height: 12),
+                  ],
 
                   // Password
                   TextField(

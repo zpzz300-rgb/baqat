@@ -7,6 +7,7 @@ import '../services/app_theme.dart';
 import '../services/export_service.dart';
 import '../screens/activation_screen.dart';
 import '../screens/neumorphic_demo_screen.dart';
+import '../screens/admin_panel_screen.dart';
 import 'common.dart';
 import 'pin_dialog.dart';
 
@@ -79,7 +80,10 @@ class _SettingsModalState extends State<SettingsModal> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('⚙️ إعدادات البرنامج', style: GoogleFonts.cairo(fontSize: 17, fontWeight: FontWeight.w900, color: AppColors.blue2)),
+            GestureDetector(
+              onLongPress: () => showAdminPasswordDialog(context),
+              child: Text('⚙️ إعدادات البرنامج', style: GoogleFonts.cairo(fontSize: 17, fontWeight: FontWeight.w900, color: AppColors.blue2)),
+            ),
             const SizedBox(height: 16),
 
             // 🔄 تجديد الاشتراكات — اتنقل هنا من الشاشة الرئيسية، محمي برقم سري

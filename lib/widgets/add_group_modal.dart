@@ -61,6 +61,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
   String? _provider;
   String? _billingCycle;
   String? _offerEndDate;
+  String? _cancelDeadlineDate; // 📆 آخر فاتورة قابلة للإلغاء
   LineType _lineType = LineType.home4g;
 
   bool _showMainLineSection = false;
@@ -88,7 +89,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
   static const _presets = <String, List<Map<String, String>>>{
     'etisalat': [
       {'name': '4250', 'clients': '7', 'minutes': '12000', 'gb': '200', 'points': '4000', 'pointPrice': '0.04', 'bill': '4250', 'extra': '125'},
-      {'name': '2150', 'clients': '5', 'minutes': '10000', 'gb': '130', 'points': '1000', 'pointPrice': '0.04', 'bill': '2150', 'extra': '125'},
+      {'name': '2150', 'clients': '5', 'minutes': '10000', 'gb': '130', 'points': '2000', 'pointPrice': '0.04', 'bill': '2150', 'extra': '125'},
     ],
     'vodafone': [
       {'name': 'كبيرة', 'clients': '5', 'minutes': '10000', 'gb': '200', 'points': '0', 'pointPrice': '0', 'bill': '4000', 'extra': '100'},
@@ -148,6 +149,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
       _provider = e.provider;
       _billingCycle = e.billingCycle;
       _offerEndDate = e.offerEndDate;
+      _cancelDeadlineDate = e.cancelDeadlineDate;
       if (e.maxClients != null) _maxClientsCtrl.text = e.maxClients.toString();
       if (e.pointsMonthly != null && e.pointsMonthly! > 0) {
         _pointsMonthlyCtrl.text = e.pointsMonthly.toString();
@@ -1010,6 +1012,56 @@ class _AddGroupModalState extends State<AddGroupModal> {
           ],
           const SizedBox(height: 14),
 
+          // 📆 آخر فاتورة قابلة للإلغاء — الديدلاين العملي لإلغاء الخط
+          Container(
+            padding: const EdgeInsets.all(2),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFEF5350), width: 1.5),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 6),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text('📆 تاريخ آخر فاتورة قابلة للإلغاء',
+                      style: GoogleFonts.cairo(
+                          fontSize: 12,
+                          color: const Color(0xFFC62828),
+                          fontWeight: FontWeight.w800)),
+                ),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: _datePickerField(
+                      'اختر تاريخ آخر فاتورة تقدر تلغي عندها',
+                      _cancelDeadlineDate, (d) {
+                    setState(() => _cancelDeadlineDate = d);
+                  }),
+                ),
+                const SizedBox(height: 6),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                      '⏰ ده آخر تاريخ تقدر تلغي فيه الخط — العدّاد التنازلي '
+                      'هيظهر في الهيدر قبله بشهرين',
+                      style: GoogleFonts.cairo(
+                          fontSize: 10, color: const Color(0xFFC62828))),
+                ),
+                if (_cancelDeadlineDate != null) ...[
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: _buildCancelDeadlinePreview(_cancelDeadlineDate!),
+                  ),
+                ],
+                const SizedBox(height: 6),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
           // ───── Phase 2: إعدادات الخط الرئيسي المتقدمة ─────
           Container(
             padding: const EdgeInsets.all(12),
@@ -1437,6 +1489,52 @@ class _AddGroupModalState extends State<AddGroupModal> {
     );
   }
 
+  /// معاينة تاريخ آخر فاتورة قابلة للإلغاء (نفس ستايل معاينة العرض بس أحمر)
+  Widget _buildCancelDeadlinePreview(String dateStr) {
+    final end = DateTime.tryParse(dateStr);
+    if (end == null) return const SizedBox.shrink();
+    final now = DateTime.now();
+    final daysLeft =
+        end.difference(DateTime(now.year, now.month, now.day)).inDays;
+    final isExpired = daysLeft < 0;
+    final isWarning = daysLeft <= 60;
+    final color = isExpired || isWarning
+        ? const Color(0xFFC62828)
+        : AppColors.green2;
+    final bgColor = isExpired || isWarning
+        ? const Color(0xFFFFEBEE)
+        : AppColors.greenLight;
+    final label = isExpired
+        ? '🚫 فات ميعاد الإلغاء من ${-daysLeft} يوم'
+        : daysLeft == 0
+            ? '🚨 النهارده آخر يوم تقدر تلغي فيه!'
+            : 'تبقى $daysLeft يوم على آخر فاتورة تقدر تلغي عندها';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.5)),
+      ),
+      child: Row(children: [
+        Icon(
+            isExpired
+                ? Icons.block
+                : isWarning
+                    ? Icons.alarm
+                    : Icons.event_available,
+            size: 16,
+            color: color),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(label,
+              style: GoogleFonts.cairo(
+                  color: color, fontWeight: FontWeight.w700, fontSize: 13)),
+        ),
+      ]),
+    );
+  }
+
   Widget _buildManualSection() {
     final dueDate =
         _manualDueDate != null ? DateTime.tryParse(_manualDueDate!) : null;
@@ -1606,6 +1704,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
       extraClientFee: double.tryParse(_extraFeeCtrl.text.trim()),
       billingCycle: isManual ? null : _billingCycle,
       offerEndDate: _offerEndDate,
+      cancelDeadlineDate: _cancelDeadlineDate,
       actualBillAmount: double.tryParse(_actualBillCtrl.text.trim()),
       lineType: _lineType,
       lastBillAmount: isManual

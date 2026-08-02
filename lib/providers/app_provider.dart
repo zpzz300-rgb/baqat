@@ -1307,6 +1307,309 @@ class AppProvider extends ChangeNotifier {
     save();
   }
 
+  // ─── دليل الخطوط الرئيسية: فولدرات/تشجير ───────────────────────
+  List<GroupFolder> get groupFolders => db.groupFolders;
+
+  List<GroupFolder> foldersUnder(String? parentFolderId) {
+    final list = db.groupFolders
+        .where((f) => f.parentFolderId == parentFolderId)
+        .toList()
+      ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
+    return list;
+  }
+
+  List<Group> groupsInFolder(String? folderId) {
+    final list = db.groups.where((g) => g.folderId == folderId).toList()
+      ..sort((a, b) => a.directoryOrderIndex.compareTo(b.directoryOrderIndex));
+    return list;
+  }
+
+  GroupFolder createGroupFolder(String name, {String? parentFolderId}) {
+    final siblingsCount = foldersUnder(parentFolderId).length;
+    final folder = GroupFolder(
+      id: 'gf_${DateTime.now().millisecondsSinceEpoch}',
+      name: name.trim().isEmpty ? 'فولدر جديد' : name.trim(),
+      parentFolderId: parentFolderId,
+      orderIndex: siblingsCount,
+    );
+    db.groupFolders.add(folder);
+    save();
+    notifyListeners();
+    return folder;
+  }
+
+  void renameGroupFolder(String id, String name) {
+    final f = db.groupFolders.firstWhere((x) => x.id == id,
+        orElse: () => GroupFolder(id: '', name: ''));
+    if (f.id.isEmpty || name.trim().isEmpty) return;
+    f.name = name.trim();
+    save();
+    notifyListeners();
+  }
+
+  /// حذف فولدر — محتوياته (فولدرات فرعية وخطوط) بترحّل لمستوى الفولدر الأب
+  /// بدل ما تتحذف أو تتيه.
+  void deleteGroupFolder(String id) {
+    final idx = db.groupFolders.indexWhere((f) => f.id == id);
+    if (idx < 0) return;
+    final parentId = db.groupFolders[idx].parentFolderId;
+    for (final f in db.groupFolders.where((x) => x.parentFolderId == id)) {
+      f.parentFolderId = parentId;
+    }
+    for (final g in db.groups.where((x) => x.folderId == id)) {
+      g.folderId = parentId;
+    }
+    db.groupFolders.removeAt(idx);
+    save();
+    notifyListeners();
+  }
+
+  /// نقل فولدر لجوه فولدر تاني (أو لجذر الدليل لو parentFolderId = null)
+  void moveGroupFolder(String folderId, String? newParentFolderId) {
+    final f = db.groupFolders.firstWhere((x) => x.id == folderId,
+        orElse: () => GroupFolder(id: '', name: ''));
+    if (f.id.isEmpty || f.id == newParentFolderId) return;
+    // امنع النقل جوه واحد من أحفاده (يعمل حلقة لا نهائية)
+    var p = newParentFolderId;
+    while (p != null) {
+      if (p == folderId) return;
+      p = db.groupFolders.firstWhere((x) => x.id == p,
+              orElse: () => GroupFolder(id: '', name: ''))
+          .parentFolderId;
+    }
+    f.parentFolderId = newParentFolderId;
+    f.orderIndex = foldersUnder(newParentFolderId).length;
+    save();
+    notifyListeners();
+  }
+
+  /// نقل خط لفولدر (أو بدون تصنيف لو folderId = null)
+  void moveGroupToFolder(String groupId, String? folderId) {
+    final i = db.groups.indexWhere((g) => g.id == groupId);
+    if (i < 0) return;
+    db.groups[i].folderId = folderId;
+    db.groups[i].directoryOrderIndex = groupsInFolder(folderId).length;
+    save();
+    notifyListeners();
+  }
+
+  void reorderFoldersAt(String? parentFolderId, int oldIndex, int newIndex) {
+    if (newIndex > oldIndex) newIndex--;
+    final siblings = foldersUnder(parentFolderId);
+    final f = siblings.removeAt(oldIndex);
+    siblings.insert(newIndex, f);
+    for (var i = 0; i < siblings.length; i++) {
+      siblings[i].orderIndex = i;
+    }
+    save();
+    notifyListeners();
+  }
+
+  void reorderGroupsInFolder(String? folderId, int oldIndex, int newIndex) {
+    if (newIndex > oldIndex) newIndex--;
+    final siblings = groupsInFolder(folderId);
+    final g = siblings.removeAt(oldIndex);
+    siblings.insert(newIndex, g);
+    for (var i = 0; i < siblings.length; i++) {
+      siblings[i].directoryOrderIndex = i;
+    }
+    save();
+    notifyListeners();
+  }
+
+  // ─── حسابات الفوترة (تبادل نزول الفاتورة بين شقّين من الخطوط) ──────
+  List<BillingAccount> get billingAccounts => db.billingAccounts;
+
+  BillingAccount? accountOfGroup(String groupId) {
+    for (final a in db.billingAccounts) {
+      if (a.shiftA.contains(groupId) || a.shiftB.contains(groupId)) return a;
+    }
+    return null;
+  }
+
+  BillingAccount createBillingAccount(String name,
+      {List<String>? shiftA, List<String>? shiftB}) {
+    final acc = BillingAccount(
+      id: 'ba_${DateTime.now().millisecondsSinceEpoch}',
+      name: name.trim().isEmpty ? 'حساب جديد' : name.trim(),
+      shiftA: shiftA ?? [],
+      shiftB: shiftB ?? [],
+      orderIndex: db.billingAccounts.length,
+    );
+    db.billingAccounts.add(acc);
+    save();
+    notifyListeners();
+    return acc;
+  }
+
+  void updateBillingAccount(String id,
+      {String? name, List<String>? shiftA, List<String>? shiftB}) {
+    final a = db.billingAccounts.firstWhere((x) => x.id == id,
+        orElse: () => BillingAccount(id: '', name: ''));
+    if (a.id.isEmpty) return;
+    if (name != null && name.trim().isNotEmpty) a.name = name.trim();
+    if (shiftA != null) a.shiftA = shiftA;
+    if (shiftB != null) a.shiftB = shiftB;
+    save();
+    notifyListeners();
+  }
+
+  void deleteBillingAccount(String id) {
+    db.billingAccounts.removeWhere((a) => a.id == id);
+    save();
+    notifyListeners();
+  }
+
+  /// أي شق (A أو B) المفروض ينزله فاتورة الشهر المطلوب — بيحسبها نسبي من
+  /// آخر فاتورة فعلية اتسجلت للحساب (زي نظام «شهر وشهر» للخط الواحد بالظبط،
+  /// بس بيطبّقها على مجموعة خطوط سوا).
+  List<String> dueShiftGroupIds(BillingAccount acc, String targetMonth) {
+    final prevM = _prevMonthOf(targetMonth);
+    final aBilledPrev = db.companyBills.any((b) =>
+        acc.shiftA.contains(b.groupId) && b.month == prevM && b.actualAmount > 0);
+    final bBilledPrev = db.companyBills.any((b) =>
+        acc.shiftB.contains(b.groupId) && b.month == prevM && b.actualAmount > 0);
+    if (aBilledPrev && !bBilledPrev) return acc.shiftB;
+    if (bBilledPrev && !aBilledPrev) return acc.shiftA;
+    // مفيش تاريخ واضح (أول مرة أو الاتنين نزلهم فاتورة الشهر اللي فات) → العلم اليدوي
+    return acc.shiftAIsCurrent ? acc.shiftA : acc.shiftB;
+  }
+
+  /// هل الخط ده «دوره» الشهر المطلوب حسب حساب الفوترة بتاعه؟
+  /// بيرجع true لو الخط مش تابع لحساب فوترة أصلاً (منطبقش عليه القيد).
+  bool isGroupDueForBilling(String groupId, String targetMonth) {
+    final acc = accountOfGroup(groupId);
+    if (acc == null) return true;
+    return dueShiftGroupIds(acc, targetMonth).contains(groupId);
+  }
+
+  String _prevMonthOf(String month) {
+    final p = month.split('-');
+    final d = DateTime(int.parse(p[0]), int.parse(p[1]) - 1);
+    return '${d.year}-${d.month.toString().padLeft(2, '0')}';
+  }
+
+  // ─── قفل مراجعة فواتير الشهر (بعد ما تخلص مراجعة كاملة) ─────────────
+  bool isBillMonthLocked(String month) => db.lockedBillMonths.contains(month);
+
+  void toggleBillMonthLock(String month) {
+    if (db.lockedBillMonths.contains(month)) {
+      db.lockedBillMonths.remove(month);
+    } else {
+      db.lockedBillMonths.add(month);
+      _archiveMonth(month);
+    }
+    save();
+    notifyListeners();
+  }
+
+  /// أرشفة تلقائية لملخص الشهر وقت القفل — بديل عن رجوع تحسب تاني بعدين.
+  void _archiveMonth(String month) {
+    final billedGids =
+        db.companyBills.where((b) => b.month == month).map((b) => b.groupId).toSet();
+    var expectedCount = 0, billedCount = 0, missingCount = 0;
+    double expectedTotal = 0;
+    for (final g in db.groups) {
+      if (g.parentGroupId != null && g.parentGroupId!.isNotEmpty) continue;
+      if (g.fixedBillAmount <= 0) continue;
+      if (!isGroupDueForBilling(g.id, month)) continue;
+      expectedCount++;
+      final children = db.groups.where((c) => c.parentGroupId == g.id);
+      expectedTotal +=
+          g.fixedBillAmount + children.fold<double>(0, (s, c) => s + c.fixedBillAmount);
+      if (billedGids.contains(g.id)) {
+        billedCount++;
+      } else {
+        missingCount++;
+      }
+    }
+    final actualTotal = db.companyBills
+        .where((b) => b.month == month && b.isActual)
+        .fold(0.0, (s, b) => s + b.actualAmount);
+    db.billArchives.removeWhere((a) => a['month'] == month);
+    db.billArchives.insert(0, {
+      'month': month,
+      'lockedAt': DateTime.now().toIso8601String(),
+      'expectedCount': expectedCount,
+      'billedCount': billedCount,
+      'missingCount': missingCount,
+      'expectedTotal': expectedTotal,
+      'actualTotal': actualTotal,
+    });
+  }
+
+  /// يوم الشهر المتوقع نزول فاتورة الخط فيه — متوسط تواريخ آخر فواتير فعلية.
+  /// null لو مفيش تاريخ كافي (أقل من فاتورتين فعليتين).
+  int? expectedBillDay(String gid) {
+    final bills = db.companyBills
+        .where((b) => b.groupId == gid && b.isActual && b.actualAmount > 0)
+        .toList()
+      ..sort((a, c) => c.month.compareTo(a.month));
+    if (bills.length < 2) return null;
+    final days = <int>[];
+    for (final b in bills.take(3)) {
+      final parts = b.date.split('/');
+      if (parts.isNotEmpty) {
+        final d = int.tryParse(parts[0]);
+        if (d != null) days.add(d);
+      }
+    }
+    if (days.isEmpty) return null;
+    return (days.reduce((a, b) => a + b) / days.length).round();
+  }
+
+  // ─── مؤشر انتظام الخط في نزول فواتيره (آخر N شهر مستحقة) ───────────
+  /// بيرجع null لو مفيش تاريخ كافي يتحكم عليه (أقل من شهرين مستحقين).
+  double? groupBillingReliability(String gid, {int months = 6}) {
+    final g = db.groups.firstWhere((x) => x.id == gid, orElse: () => Group(id: '', phone: ''));
+    if (g.id.isEmpty || g.fixedBillAmount <= 0) return null;
+    final now = DateTime.now();
+    var expected = 0, billed = 0;
+    for (var i = 1; i <= months; i++) {
+      final d = DateTime(now.year, now.month - i);
+      final m = '${d.year}-${d.month.toString().padLeft(2, '0')}';
+      if (!isGroupDueForBilling(gid, m)) continue;
+      expected++;
+      if (db.companyBills.any((b) => b.groupId == gid && b.month == m && b.actualAmount > 0)) {
+        billed++;
+      }
+    }
+    if (expected < 2) return null;
+    return billed / expected;
+  }
+
+  // ─── تقرير: أكتر شركة بتغلط في الفواتير (بعدد التنبيهات/الشذوذ) ────
+  Map<String, int> providerAnomalyCounts(List<CompanyBill> bills) {
+    final counts = <String, int>{};
+    for (final b in bills) {
+      if (b.actualAmount <= 0) continue;
+      final g = db.groups.firstWhere((x) => x.id == b.groupId,
+          orElse: () => Group(id: '', phone: ''));
+      final prevM = _prevMonthOf(b.month);
+      final prev = bills.cast<CompanyBill?>().firstWhere(
+          (x) => x!.groupId == b.groupId && x.month == prevM,
+          orElse: () => null);
+      final sameMonthCount = bills
+          .where((x) => x.groupId == b.groupId && x.month == b.month && x.actualAmount > 0)
+          .length;
+      var isAnomaly = sameMonthCount > 1;
+      if (!isAnomaly && prev != null && prev.actualAmount > 0) {
+        if (b.actualAmount >= prev.actualAmount * 1.75) isAnomaly = true;
+      }
+      if (!isAnomaly &&
+          g.billingSystem == 'bimonthly' &&
+          prev != null &&
+          prev.actualAmount > 0) {
+        isAnomaly = true;
+      }
+      if (isAnomaly) {
+        final p = g.provider ?? 'unknown';
+        counts[p] = (counts[p] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }
+
   void deleteGroup(String gid) {
     final g = db.groups.firstWhere((x) => x.id == gid,
         orElse: () => Group(id: gid, phone: '—'));
@@ -3305,7 +3608,9 @@ class AppProvider extends ChangeNotifier {
     for (var i = 0; i < db.groups.length; i++) {
       final g = db.groups[i];
       if (g.lastBillActualMonth == key) continue;
-      final pts = g.pointsMonthly ?? (g.type == '3800' ? 1000 : 2000);
+      // الافتراضي لو عدد النقاط مش متحدد للمجموعة:
+    // '3800' = باقة 4250 (الكبيرة) → 4000 نقطة، وغيرها = 2150 (الصغيرة) → 2000
+    final pts = g.pointsMonthly ?? (g.type == '3800' ? 4000 : 2000);
       if (pts <= 0) continue;
       db.groups[i].rewardPoints += pts;
       // قيمة النقاط الجديدة تضاف للربح المعلق (لا للنقاط المتراكمة)
@@ -3380,11 +3685,12 @@ class AppProvider extends ChangeNotifier {
 
   /// إضافة فاتورة جديدة — تُسجَّل في CompanyBills وتُحدَّث المديونية.
   /// المبلغ هو الإجمالي المُجمَّع للخط الرئيسي + خطوطه المضمومة (فاتورة واحدة).
-  void addGroupBill(String gid, double amount, {String? note, String? issueDate}) {
+  void addGroupBill(String gid, double amount,
+      {String? note, String? issueDate, String? forMonth}) {
     final i = db.groups.indexWhere((g) => g.id == gid);
     if (i < 0) return;
     final now = DateTime.now();
-    final month = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    final month = forMonth ?? '${now.year}-${now.month.toString().padLeft(2, '0')}';
     final children = db.groups.where((g) => g.parentGroupId == gid).toList();
     // الفاتورة الثابتة المرجعية = الثابت للخط الرئيسي + الخطوط المضمومة
     final combinedFixed = db.groups[i].fixedBillAmount +
@@ -3429,7 +3735,7 @@ class AppProvider extends ChangeNotifier {
   }
 
   /// تعديل مبلغ فاتورة فعلية (تحكّم كامل + تصحيح الأخطاء مع الشركة)
-  void editBillAmount(String billId, double newAmount) {
+  void editBillAmount(String billId, double newAmount, {String? reason}) {
     final bi = db.companyBills.indexWhere((b) => b.id == billId);
     if (bi < 0 || newAmount < 0) return;
     final bill = db.companyBills[bi];
@@ -3437,13 +3743,19 @@ class AppProvider extends ChangeNotifier {
     final diff = newAmount - old;
     bill.actualAmount = newAmount;
     bill.isActual = true;
+    bill.editHistory.insert(0, {
+      'oldAmount': old,
+      'newAmount': newAmount,
+      'reason': (reason != null && reason.trim().isNotEmpty) ? reason.trim() : null,
+      'date': _today(),
+    });
     final gi = db.groups.indexWhere((g) => g.id == bill.groupId);
     if (gi >= 0) {
       db.groups[gi].billDebt = (db.groups[gi].billDebt + diff).clamp(0, double.infinity);
       db.groups[gi].actualBillAmount = newAmount;
     }
     _addLog(null, 'bill_edit',
-        'تعديل مبلغ فاتورة ${old.toStringAsFixed(0)} → ${newAmount.toStringAsFixed(0)} ج');
+        'تعديل مبلغ فاتورة ${old.toStringAsFixed(0)} → ${newAmount.toStringAsFixed(0)} ج${reason != null && reason.trim().isNotEmpty ? ' — $reason' : ''}');
     save(); notifyListeners();
   }
 
@@ -3820,7 +4132,9 @@ class AppProvider extends ChangeNotifier {
     final i = db.groups.indexWhere((g) => g.id == gid);
     if (i < 0) return;
     final g = db.groups[i];
-    final pts = g.pointsMonthly ?? (g.type == '3800' ? 1000 : 2000);
+    // الافتراضي لو عدد النقاط مش متحدد للمجموعة:
+    // '3800' = باقة 4250 (الكبيرة) → 4000 نقطة، وغيرها = 2150 (الصغيرة) → 2000
+    final pts = g.pointsMonthly ?? (g.type == '3800' ? 4000 : 2000);
     if (pts <= 0) return;
     db.groups[i].rewardPoints += pts;
     db.groups[i].pendingPointsProfit += pts * g.pointsValue;

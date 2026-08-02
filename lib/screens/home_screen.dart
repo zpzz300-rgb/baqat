@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/app_provider.dart';
 import '../models/models.dart';
 import '../services/app_theme.dart';
@@ -24,7 +25,8 @@ import 'reminders_screen.dart';
 import 'worknums_screen.dart';
 import 'guests_screen.dart';
 import 'main_lines_screen.dart';
-import 'admin_panel_screen.dart';
+import 'group_folders_screen.dart';
+import 'billing_accounts_screen.dart';
 import 'consolidated_screen.dart';
 import 'bulk_message_screen.dart';
 import '../widgets/notes_bubble.dart';
@@ -62,6 +64,42 @@ class _HomeScreenState extends State<HomeScreen> {
   final _groupsScrollCtrl = ScrollController();
   final Map<String, GlobalKey> _groupKeys = {};
   String? _focusExpandGid; // المجموعة اللي تتفتح تلقائياً بعد البحث
+
+  // ─── ترتيب عرض الخطوط في الشاشة الرئيسية ────────────────────────
+  // 'manual' = الترتيب اليدوي المحفوظ (بالسحب) — وهو الافتراضي.
+  // أي وضع تاني بيقفل السحب عشان مايبوّظش الترتيب المحفوظ.
+  static const _kSortPrefKey = 'groups_sort_mode';
+  String _groupSort = 'manual';
+  static const _sortModes = [
+    {'key': 'manual', 'label': '✋ يدوي'},
+    {'key': 'cancel', 'label': '📆 الأقرب للإلغاء'},
+    {'key': 'name', 'label': '🔤 الاسم'},
+    {'key': 'account', 'label': '🔁 الحساب'},
+    {'key': 'provider', 'label': '🏢 الشركة'},
+    {'key': 'cycle', 'label': '📅 السيكل'},
+    {'key': 'package', 'label': '📦 الباقة'},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSortMode();
+  }
+
+  Future<void> _loadSortMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_kSortPrefKey);
+    if (!mounted || saved == null) return;
+    if (_sortModes.any((m) => m['key'] == saved)) {
+      setState(() => _groupSort = saved);
+    }
+  }
+
+  Future<void> _setSortMode(String key) async {
+    setState(() => _groupSort = key);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kSortPrefKey, key);
+  }
 
   // الإحصائيات المالية (الربح/الديون/الملخص) تظهر فقط في تاب المجموعات.
   // شاشة الأرباح (تاب 4) ليها ملخصها الخاص — فمنظهرش الهيدر هناك عشان
@@ -256,16 +294,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Flexible(
-                        child: AdminUnlockWrapper(
-                          child: Text(
-                            '📡 باقات الاتصالات',
-                            style: GoogleFonts.cairo(
-                              color: Colors.white,
-                              fontSize: 17,
-                              fontWeight: FontWeight.w900,
-                            ),
-                            overflow: TextOverflow.ellipsis,
+                        child: Text(
+                          '📡 باقات الاتصالات',
+                          style: GoogleFonts.cairo(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w900,
                           ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       const SizedBox(width: 4),
@@ -821,6 +857,20 @@ class _HomeScreenState extends State<HomeScreen> {
                 prov.openWorkspaceTab('filter',
                     title: 'تصنيف العملاء', emoji: '🎛️');
               }),
+              _drawerItem('🗂 دليل الخطوط الرئيسية', () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const GroupFoldersScreen()),
+                );
+              }),
+              _drawerItem('🔁 حسابات الفوترة', () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const BillingAccountsScreen()),
+                );
+              }),
               // إدارة الموظفين — للمالك فقط
               if (!SupabaseService.isEmployee)
                 _drawerItem('👥 إدارة الموظفين', () {
@@ -1122,6 +1172,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
+        // شريط ترتيب الخطوط (مبيظهرش وانت بتدوّر)
+        if (!_searching) _buildSortBar(),
         // الموظف: تبديل بين «شغلي» و«القائمة العامة»
         if (SupabaseService.isEmployee && !_searching) _buildEmpViewToggle(prov),
         // Content
@@ -1261,10 +1313,171 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ─── شريط ترتيب الخطوط ─────────────────────────────────────────
+  Widget _buildSortBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 10, 0, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            height: 34,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              itemCount: _sortModes.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 6),
+              itemBuilder: (_, i) {
+                final m = _sortModes[i];
+                final active = _groupSort == m['key'];
+                return GestureDetector(
+                  onTap: () => _setSortMode(m['key']!),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: active ? AppColors.blue2 : Colors.white,
+                      borderRadius: BorderRadius.circular(17),
+                      border: Border.all(
+                          color: active ? AppColors.blue2 : AppColors.border,
+                          width: 1.5),
+                      boxShadow: active
+                          ? [
+                              BoxShadow(
+                                  color:
+                                      AppColors.blue2.withValues(alpha: 0.28),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 3))
+                            ]
+                          : null,
+                    ),
+                    child: Text(
+                      m['label']!,
+                      style: GoogleFonts.cairo(
+                        fontSize: 12,
+                        fontWeight: active ? FontWeight.w900 : FontWeight.w700,
+                        color: active ? Colors.white : AppColors.muted,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          if (_groupSort != 'manual')
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
+              child: Text(
+                  '✋ السحب متوقف — ارجع لـ«يدوي» عشان ترتّب الخطوط بإيدك',
+                  style: GoogleFonts.cairo(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.muted)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// بيرجّع الخطوط مرتّبة حسب الوضع المختار — من غير ما يمسّ الترتيب المحفوظ
+  List<Group> _sortedGroups(AppProvider prov, List<Group> src) {
+    if (_groupSort == 'manual') return src;
+    final list = List<Group>.from(src);
+
+    switch (_groupSort) {
+      // 📆 الأقرب لميعاد الإلغاء الأول، بعدهم اللي فات ميعاده، وآخر حاجة
+      // الخطوط اللي مالهاش تاريخ إلغاء أصلاً
+      case 'cancel':
+        int rank(Group g) {
+          final d = g.daysUntilCancelDeadline;
+          if (d == null) return 1000000;
+          if (d < 0) return 500000 - d;
+          return d;
+        }
+        list.sort((a, b) {
+          final c = rank(a).compareTo(rank(b));
+          return c != 0 ? c : a.phone.compareTo(b.phone);
+        });
+
+      // 🔤 بالاسم (اسم صاحب الخط، وإلا اسم الفاتورة، وإلا الرقم)
+      case 'name':
+        String key(Group g) {
+          final o = g.ownerName?.trim();
+          if (o != null && o.isNotEmpty) return o;
+          final inv = g.groupInvoiceName?.trim();
+          if (inv != null && inv.isNotEmpty) return inv;
+          return g.phone;
+        }
+        list.sort((a, b) => key(a).compareTo(key(b)));
+
+      // 🔁 خطوط الحساب الواحد ورا بعض — بترتيب الحساب ثم الشق A ثم B
+      case 'account':
+        final keys = <String, List<int>>{};
+        for (var i = 0; i < prov.billingAccounts.length; i++) {
+          final acc = prov.billingAccounts[i];
+          for (var j = 0; j < acc.shiftA.length; j++) {
+            keys[acc.shiftA[j]] = [i, 0, j];
+          }
+          for (var j = 0; j < acc.shiftB.length; j++) {
+            keys[acc.shiftB[j]] = [i, 1, j];
+          }
+        }
+        // الخطوط اللي مش في أي حساب تنزل الآخر
+        List<int> key(Group g) => keys[g.id] ?? const [999999, 0, 0];
+        list.sort((a, b) {
+          final ka = key(a), kb = key(b);
+          for (var i = 0; i < 3; i++) {
+            final c = ka[i].compareTo(kb[i]);
+            if (c != 0) return c;
+          }
+          return a.phone.compareTo(b.phone);
+        });
+
+      // 🏢 حسب الشركة
+      case 'provider':
+        const order = {'vodafone': 0, 'etisalat': 1, 'orange': 2, 'we': 3};
+        list.sort((a, b) {
+          final c =
+              (order[a.provider] ?? 9).compareTo(order[b.provider] ?? 9);
+          return c != 0 ? c : a.phone.compareTo(b.phone);
+        });
+
+      // 📅 حسب سيكل الفوترة
+      case 'cycle':
+        const order = {
+          'day1': 0,
+          'day4': 1,
+          'mid': 2,
+          'cycle1': 3,
+          'cycle2': 4
+        };
+        list.sort((a, b) {
+          final c =
+              (order[a.billingCycle] ?? 9).compareTo(order[b.billingCycle] ?? 9);
+          return c != 0 ? c : a.phone.compareTo(b.phone);
+        });
+
+      // 📦 حسب الباقة — الفاتورة الكبيرة الأول (4250 ← 2150 ← الأصغر)
+      case 'package':
+        double amount(Group g) {
+          if (g.tier == 'tier1_4250') return 4250;
+          if (g.tier == 'tier2_smaller') return 2150;
+          if (g.fixedBillAmount > 0) return g.fixedBillAmount;
+          return g.actualBillAmount ?? 0;
+        }
+        list.sort((a, b) {
+          final c = amount(b).compareTo(amount(a));
+          return c != 0 ? c : a.phone.compareTo(b.phone);
+        });
+    }
+    return list;
+  }
+
   Widget _buildGroupsList(AppProvider prov) {
     // الموالك يشوف الكل؛ الموظف: «شغلي» = الموكلة، «القائمة العامة» = الكل
     final showAll = !SupabaseService.isEmployee || _empViewAll;
-    final groups = showAll ? prov.db.groups : prov.visibleGroups;
+    final groups = _sortedGroups(prov, showAll ? prov.db.groups : prov.visibleGroups);
     if (groups.isEmpty) {
       final isEmp = SupabaseService.isEmployee;
       return Center(
@@ -1290,7 +1503,9 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
     // الموظف: قائمة عادية (مفيش إعادة ترتيب على مجموعات مش بتاعته)
-    final canReorder = !SupabaseService.isEmployee;
+    // وكمان: السحب بيتقفل في أي وضع ترتيب غير «يدوي» عشان مايبوّظش
+    // الترتيب المحفوظ (لأن الـ indexes ساعتها مش بتاعة الترتيب الأصلي)
+    final canReorder = !SupabaseService.isEmployee && _groupSort == 'manual';
     return ReorderableListView.builder(
       scrollController: _groupsScrollCtrl,
       padding: const EdgeInsets.all(12),
@@ -1304,7 +1519,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return GroupCard(
           key: key,
           group: groups[i],
-          initiallyExpanded: groups[i].id == _focusExpandGid,
+          initiallyMembersExpanded: groups[i].id == _focusExpandGid,
         );
       },
     );

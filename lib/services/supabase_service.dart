@@ -280,9 +280,13 @@ class SupabaseService {
     }
   }
 
-  static Future<({bool ok, String msg})> signUp(String email, String pass) async {
+  static Future<({bool ok, String msg})> signUp(String email, String pass, {String? phone}) async {
     try {
-      final r = await client.auth.signUp(email: email, password: pass);
+      final r = await client.auth.signUp(
+        email: email,
+        password: pass,
+        data: phone != null ? {'phone': phone} : null,
+      );
       if (r.user != null) return (ok: true, msg: '');
       return (ok: false, msg: 'فشل إنشاء الحساب');
     } on AuthException catch (e) {

@@ -17,6 +17,7 @@ import 'screens/login_screen.dart';
 import 'screens/activation_screen.dart';
 import 'services/notification_service.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'widgets/phone_required_dialog.dart';
 
 /// مفتاح عام للـ ScaffoldMessenger عشان نعرض رسالة (SnackBar) فوق أي شاشة،
 /// حتى من داخل الـ Provider اللي مالوش BuildContext.
@@ -224,6 +225,10 @@ class _AuthGateState extends State<_AuthGate> with WidgetsBindingObserver {
       // مزامنة لحظية بين الأجهزة على نفس البيانات
       prov.startRealtime();
 
+      // سجّل هوية الجهاز بعد الدخول — عشان لوحة الإدارة تعرف مين ده
+      // (مالك ولا موظف، وتابع لأنهي محل) بدل ما يفضل «بدون اسم».
+      AuthService.reportIdentity();
+
       if (SupabaseService.isEmployee) {
         // الموظف: حمّل المجموعات الموكلة له (للفلترة والسرية)
         await prov.loadMyAssignments();
@@ -234,6 +239,12 @@ class _AuthGateState extends State<_AuthGate> with WidgetsBindingObserver {
       } else {
         // المالك: اتأكد إن عنده ملف وكود محل
         await SupabaseService.ensureOwnerProfile();
+
+        // الرقم مربوط بالحساب — فمبنسألش غير لو الحساب نفسه مالوش رقم خالص
+        final hasPhone = await AuthService.accountHasPhone();
+        if (!hasPhone && mounted) {
+          await showPhoneRequiredDialog(context);
+        }
       }
     } catch (e) {
       debugPrint('❌ Failed to load cloud data: $e');

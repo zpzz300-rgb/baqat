@@ -18,8 +18,14 @@ import '../services/notification_service.dart';
 
 class GroupCard extends StatefulWidget {
   final Group group;
-  final bool initiallyExpanded; // يتفتح تلقائياً (مثلاً بعد البحث عن عميل)
-  const GroupCard({super.key, required this.group, this.initiallyExpanded = false});
+  final bool initiallyExpanded; // بيانات الخط الكاملة تفتح افتراضياً
+  final bool initiallyMembersExpanded; // يتفتح تلقائياً (مثلاً بعد البحث عن عميل)
+  const GroupCard({
+    super.key,
+    required this.group,
+    this.initiallyExpanded = true,
+    this.initiallyMembersExpanded = false,
+  });
 
   @override
   State<GroupCard> createState() => _GroupCardState();
@@ -27,6 +33,7 @@ class GroupCard extends StatefulWidget {
 
 class _GroupCardState extends State<GroupCard> {
   late bool _expanded = widget.initiallyExpanded;
+  late bool _membersExpanded = widget.initiallyMembersExpanded;
 
   @override
   void didUpdateWidget(GroupCard oldWidget) {
@@ -34,6 +41,11 @@ class _GroupCardState extends State<GroupCard> {
     // لو اتطلب فتحها بعد البحث وهي كانت مقفولة → افتحها
     if (!oldWidget.initiallyExpanded && widget.initiallyExpanded && !_expanded) {
       setState(() => _expanded = true);
+    }
+    if (!oldWidget.initiallyMembersExpanded &&
+        widget.initiallyMembersExpanded &&
+        !_membersExpanded) {
+      setState(() => _membersExpanded = true);
     }
   }
 
@@ -116,6 +128,8 @@ class _GroupCardState extends State<GroupCard> {
         .inDays;
     final isOfferWarning =
         offerDaysLeft != null && offerDaysLeft >= 0 && offerDaysLeft <= 60;
+    // 📆 تحذير آخر فاتورة قابلة للإلغاء — أولوية أعلى من تحذير نهاية العرض
+    final isCancelWarning = group.isCancelCountdownActive;
 
     // Detect landline / Home 4G sub-lines inside this group
     final landlineCount = members.where((m) => m.type == 'landline').length;
@@ -127,22 +141,29 @@ class _GroupCardState extends State<GroupCard> {
     final unresolvedComplaints =
         group.complaints.where((c) => c['resolved'] != true).length;
 
-    final headerGrad = isSpecialLine
+    final headerGrad = isCancelWarning
         ? const LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFFFFEB3B), Color(0xFFFFC107)])
-        : isOfferWarning
+            colors: [Color(0xFFB71C1C), Color(0xFFE53935)])
+        : isSpecialLine
             ? const LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [Color(0xFF0D47A1), Color(0xFF1976D2)])
-            : _providerGradient(group.provider);
-    final headerTextColor = isSpecialLine
-        ? const Color(0xFF5D4037)
-        : isOfferWarning
-            ? Colors.white
-            : _providerTextColor(group.provider);
+                colors: [Color(0xFFFFEB3B), Color(0xFFFFC107)])
+            : isOfferWarning
+                ? const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF0D47A1), Color(0xFF1976D2)])
+                : _providerGradient(group.provider);
+    final headerTextColor = isCancelWarning
+        ? Colors.white
+        : isSpecialLine
+            ? const Color(0xFF5D4037)
+            : isOfferWarning
+                ? Colors.white
+                : _providerTextColor(group.provider);
 
     final accent = _providerAccent(group.provider);
     return Container(
@@ -182,7 +203,7 @@ class _GroupCardState extends State<GroupCard> {
             },
             child: Container(
               padding: _expanded
-                  ? const EdgeInsets.fromLTRB(16, 16, 12, 14)
+                  ? const EdgeInsets.fromLTRB(14, 12, 10, 10)
                   : const EdgeInsets.fromLTRB(14, 8, 6, 8),
               decoration: BoxDecoration(
                 gradient: headerGrad,
@@ -225,7 +246,7 @@ class _GroupCardState extends State<GroupCard> {
                           child: Text(
                             group.phone,
                             style: GoogleFonts.cairo(
-                              fontSize: 22,
+                              fontSize: 19,
                               fontWeight: FontWeight.w900,
                               color: headerTextColor,
                               letterSpacing: 0.5,
@@ -237,7 +258,7 @@ class _GroupCardState extends State<GroupCard> {
                       ),
                       PopupMenuButton<String>(
                         icon: const Icon(Icons.more_vert,
-                            color: AppColors.muted, size: 22),
+                            color: AppColors.muted, size: 20),
                         onSelected: (v) => _onAction(v, context, prov),
                         itemBuilder: (_) => [
                           _menuItem('edit', '✏️ تعديل'),
@@ -254,16 +275,16 @@ class _GroupCardState extends State<GroupCard> {
                             ? Icons.keyboard_arrow_up
                             : Icons.keyboard_arrow_down,
                         color: AppColors.muted,
-                        size: 22,
+                        size: 20,
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
 
                   // ── Row B: badges ────────────────────────────────
                   Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
+                    spacing: 5,
+                    runSpacing: 5,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       // LineType badge
@@ -308,11 +329,11 @@ class _GroupCardState extends State<GroupCard> {
                   // ── Sticky Note ──────────────────────────────────
                   if (group.stickyNote != null &&
                       group.stickyNote!.isNotEmpty) ...[
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     _buildStickyNote(context, prov, group),
                   ],
 
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
 
                   // ── Row C: GB bar (full width) ───────────────────
                   _buildGbBar(prov),
@@ -320,8 +341,11 @@ class _GroupCardState extends State<GroupCard> {
                   // ── Minutes Bar (Phase 2) ────────────────────────
                   _buildMinutesBar(prov),
 
-                  // ── Offer Countdown (Phase 2) ────────────────────
-                  _buildOfferCountdown(),
+                  // ── 📆 عدّاد الإلغاء (الأهم) + دايرة نهاية العرض ──
+                  _buildDeadlineCountdowns(),
+
+                  // ── 🗓 الشريط الزمني للعرض ───────────────────────
+                  _buildOfferTimeline(),
 
                   // ── Insurance / WE coupon badges ─────────────────
                   _buildInsuranceBadge(),
@@ -337,52 +361,89 @@ class _GroupCardState extends State<GroupCard> {
             ),
           ),
 
-          // ─── MEMBERS GRID ──────────────────────────────────────
-          if (_expanded)
-            members.isEmpty
-                ? Padding(
-                    padding: const EdgeInsets.all(18),
-                    child: Text(
-                      'لا يوجد عملاء في هذه المجموعة',
-                      style: GoogleFonts.cairo(
-                          color: AppColors.muted, fontSize: 13),
-                    ),
-                  )
-                : prov.compactMembers
-                    ? Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-                        child: GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: members.length,
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
-                            mainAxisSpacing: 8,
-                            crossAxisSpacing: 8,
-                            childAspectRatio: 0.92,
-                          ),
-                          itemBuilder: (_, i) => CompactMemberCard(
-                              member: members[i], group: group),
-                        ),
-                      )
-                    : Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-                        child: ReorderableListView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: members.length,
-                          onReorder: (o, n) =>
-                              prov.reorderMembers(group.id, o, n),
-                          itemBuilder: (_, i) => Padding(
-                            key: ValueKey(members[i].id),
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: MemberCard(
+          // ─── MEMBERS TOGGLE + GRID ─────────────────────────────
+          if (_expanded) ...[
+            _buildMembersToggleBar(members.length),
+            if (_membersExpanded)
+              members.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Text(
+                        'لا يوجد عملاء في هذه المجموعة',
+                        style: GoogleFonts.cairo(
+                            color: AppColors.muted, fontSize: 13),
+                      ),
+                    )
+                  : prov.compactMembers
+                      ? Padding(
+                          padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+                          child: GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: members.length,
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 3,
+                              mainAxisSpacing: 8,
+                              crossAxisSpacing: 8,
+                              childAspectRatio: 0.92,
+                            ),
+                            itemBuilder: (_, i) => CompactMemberCard(
                                 member: members[i], group: group),
                           ),
+                        )
+                      : Padding(
+                          padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+                          child: ReorderableListView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: members.length,
+                            onReorder: (o, n) =>
+                                prov.reorderMembers(group.id, o, n),
+                            itemBuilder: (_, i) => Padding(
+                              key: ValueKey(members[i].id),
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: MemberCard(
+                                  member: members[i], group: group),
+                            ),
+                          ),
                         ),
-                      ),
+          ],
         ],
+      ),
+    );
+  }
+
+  // ── Members Toggle Bar — قائمة منسدلة صغيرة مستقلة لأرقام العملاء ──
+  Widget _buildMembersToggleBar(int count) {
+    return GestureDetector(
+      onTap: () => setState(() => _membersExpanded = !_membersExpanded),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: const BoxDecoration(
+          color: Color(0xFFF5F7FA),
+          border: Border(top: BorderSide(color: AppColors.border)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.people_outline, size: 16, color: AppColors.blue3),
+            const SizedBox(width: 6),
+            Text('أرقام العملاء ($count)',
+                style: GoogleFonts.cairo(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.blue3)),
+            const Spacer(),
+            Icon(
+              _membersExpanded
+                  ? Icons.keyboard_arrow_up
+                  : Icons.keyboard_arrow_down,
+              size: 20,
+              color: AppColors.muted,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -440,6 +501,30 @@ class _GroupCardState extends State<GroupCard> {
         _miniChip(Icons.people, '$memberCount',
             AppColors.blue3, AppColors.blueLight),
         const SizedBox(width: 4),
+        // 📆 عدّاد آخر فاتورة قابلة للإلغاء — يفضل ظاهر والكارت مقفول
+        ...() {
+          final d = group.daysUntilCancelDeadline;
+          if (d == null || d > 60 || d < -30) return const <Widget>[];
+          final expired = d < 0;
+          return [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFCDD2),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.red2, width: 1.5),
+              ),
+              child: Text(
+                expired ? '🚫 فات الإلغاء' : '📆 $d ي للإلغاء',
+                style: GoogleFonts.cairo(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.red2),
+              ),
+            ),
+            const SizedBox(width: 4),
+          ];
+        }(),
         // عداد انتهاء الخط — يظهر مختصر حتى والكارت مقفول وقت الخطورة
         ...() {
           final info = _expiryInfo(prov);
@@ -833,6 +918,337 @@ class _GroupCardState extends State<GroupCard> {
                 style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
           ),
         ],
+      ),
+    );
+  }
+
+  // ── 📆 عدّاد آخر فاتورة قابلة للإلغاء (الأهم) ──────────────────
+  /// بيظهر في الهيدر قبل التاريخ بشهرين (60 يوم) وبيفضل ظاهر لحد 30 يوم بعده
+  /// كتحذير إن ميعاد الإلغاء فات. لو مفيش تاريخ إلغاء بنرجع لعدّاد العرض العادي.
+  Widget _buildDeadlineCountdowns() {
+    final g = widget.group;
+    final cancelDays = g.daysUntilCancelDeadline;
+    final showCancel =
+        cancelDays != null && cancelDays <= 60 && cancelDays >= -30;
+    if (!showCancel) return _buildOfferCountdown();
+
+    final expired = cancelDays < 0;
+    final urgent = !expired && cancelDays <= 14;
+    // كل ما الوقت يقل، الخلفية تحمرّ أكتر
+    final intensity = expired ? 1.0 : (60 - cancelDays) / 60;
+    final mainColor =
+        expired || urgent ? AppColors.red2 : const Color(0xFFC62828);
+
+    final label = expired
+        ? '🚫 فات ميعاد الإلغاء من ${-cancelDays} يوم'
+        : cancelDays == 0
+            ? '🚨 النهارده آخر يوم تقدر تلغي فيه!'
+            : urgent
+                ? '🚨 باقي $cancelDays يوم على آخر فاتورة تقدر تلغي عندها'
+                : '📆 باقي $cancelDays يوم على آخر فاتورة قابلة للإلغاء';
+
+    return Row(children: [
+      Expanded(
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: Color.lerp(const Color(0xFFFFF3E0),
+                const Color(0xFFFFCDD2), intensity),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+                color: mainColor, width: expired || urgent ? 2 : 1.2),
+          ),
+          child: Row(children: [
+            Icon(
+                expired
+                    ? Icons.block
+                    : urgent
+                        ? Icons.notification_important_rounded
+                        : Icons.alarm,
+                size: 18,
+                color: mainColor),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: GoogleFonts.cairo(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w900,
+                          color: mainColor)),
+                  if (g.cancelDeadlineDate != null)
+                    Text(g.cancelDeadlineDate!,
+                        style: GoogleFonts.cairo(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: mainColor.withValues(alpha: 0.75))),
+                ],
+              ),
+            ),
+          ]),
+        ),
+      ),
+      // دايرة صغيرة لنهاية العرض (الهارد) جنب العدّاد الكبير
+      _buildOfferEndCircle(),
+    ]);
+  }
+
+  // ── 🗓 الشريط الزمني للعرض ──────────────────────────────────────
+  /// خط واحد بيوضّح العلاقة بين التواريخ التلاتة بنظرة واحدة (RTL — البداية
+  /// على اليمين):
+  ///   ● بداية العرض ━━━ (أخضر: لسه تقدر تلغي) ━━━ ◆ ميعاد الإلغاء
+  ///   ━━━ (أحمر: الإلغاء اتقفل) ━━━ ● نهاية العرض
+  /// وعلامة «إنت هنا» بتتحرك على الخط حسب النهاردة.
+  Widget _buildOfferTimeline() {
+    final g = widget.group;
+    DateTime? p(String? s) => s == null ? null : DateTime.tryParse(s);
+
+    final offerEnd = p(g.offerEndDate);
+    final cancel = p(g.cancelDeadlineDate);
+    if (offerEnd == null && cancel == null) return const SizedBox.shrink();
+
+    // نهاية الشريط = أبعد تاريخ عندنا (عادةً نهاية العرض)
+    var last = offerEnd ?? cancel!;
+    if (cancel != null && cancel.isAfter(last)) last = cancel;
+
+    // بداية الشريط: تاريخ بداية العرض، وإلا نحسبها من مدة العرض، وإلا سنة
+    final start = p(g.offerStartDate) ??
+        DateTime(last.year, last.month - (g.offerDuration ?? 12), last.day);
+    final totalDays = last.difference(start).inDays;
+    if (totalDays <= 0) return const SizedBox.shrink();
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final progress =
+        (today.difference(start).inDays / totalDays).clamp(0.0, 1.0);
+    final cancelPos = cancel == null
+        ? null
+        : (cancel.difference(start).inDays / totalDays).clamp(0.0, 1.0);
+    final started = !today.isBefore(start);
+    final finished = today.isAfter(last);
+
+    String short(DateTime d) => '${d.day}/${d.month}';
+
+    const trackH = 8.0;
+    const dotR = 6.0;
+    const pad = 12.0; // مسافة أمان على الطرفين عشان النقط ما تتقصّش
+
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('🗓 خط زمن العرض',
+              style: GoogleFonts.cairo(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.muted)),
+          const SizedBox(height: 6),
+          LayoutBuilder(builder: (_, c) {
+            final w = c.maxWidth;
+            final span = w - pad * 2;
+            // المسافة من يمين الشريط لأي نسبة (RTL: 0 = يمين)
+            double x(double pos) => pad + pos * span;
+            final cancelX = cancelPos == null ? null : x(cancelPos);
+            final nowX = x(progress);
+
+            return SizedBox(
+              height: 46,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  // ── المسار: أخضر لحد ميعاد الإلغاء، وأحمر بعده ──
+                  Positioned(
+                    top: 26,
+                    right: pad,
+                    width: span,
+                    height: trackH,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: Row(children: [
+                        // الشمال = بعد ميعاد الإلغاء (مقفول)
+                        // (الحد الأدنى 1 لأن flex = 0 بيدي عرض غير محدود)
+                        Expanded(
+                          flex: (((1 - (cancelPos ?? 1)) * 1000).round())
+                              .clamp(1, 1000),
+                          child: Container(color: const Color(0xFFEF9A9A)),
+                        ),
+                        // اليمين = لسه تقدر تلغي
+                        Expanded(
+                          flex: (((cancelPos ?? 1) * 1000).round())
+                              .clamp(1, 1000),
+                          child: Container(color: const Color(0xFFA5D6A7)),
+                        ),
+                      ]),
+                    ),
+                  ),
+                  // ── الجزء اللي عدّى (تغميق خفيف من اليمين) ──
+                  if (started)
+                    Positioned(
+                      top: 26,
+                      right: pad,
+                      width: (nowX - pad).clamp(0.0, span),
+                      height: trackH,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.22),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ),
+                    ),
+                  // ── نقطة بداية العرض (يمين) ──
+                  Positioned(
+                    top: 26 + trackH / 2 - dotR,
+                    right: pad - dotR,
+                    child: _tlDot(const Color(0xFF2E7D32)),
+                  ),
+                  // ── نقطة نهاية العرض (شمال) ──
+                  Positioned(
+                    top: 26 + trackH / 2 - dotR,
+                    right: x(1) - dotR,
+                    child: _tlDot(const Color(0xFFC62828)),
+                  ),
+                  // ── ◆ ميعاد الإلغاء ──
+                  if (cancelX != null)
+                    Positioned(
+                      top: 26 + trackH / 2 - 8,
+                      right: cancelX - 8,
+                      child: Transform.rotate(
+                        angle: 0.7854, // 45°
+                        child: Container(
+                          width: 14,
+                          height: 14,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFD32F2F),
+                            border: Border.all(color: Colors.white, width: 2),
+                          ),
+                        ),
+                      ),
+                    ),
+                  // ── علامة «إنت هنا» ──
+                  if (started && !finished) ...[
+                    Positioned(
+                      top: 20,
+                      right: nowX - 1.5,
+                      child: Container(
+                        width: 3,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1565C0),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 0,
+                      right: (nowX - 26).clamp(0.0, (w - 52).clamp(0.0, w)),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1565C0),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text('إنت هنا',
+                            style: GoogleFonts.cairo(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white)),
+                      ),
+                    ),
+                  ],
+                  // ── التواريخ تحت الخط ──
+                  Positioned(
+                    top: 26 + trackH + 4,
+                    right: 0,
+                    child: _tlLabel('بداية ${short(start)}',
+                        const Color(0xFF2E7D32)),
+                  ),
+                  if (cancelX != null)
+                    Positioned(
+                      top: 26 + trackH + 4,
+                      right: (cancelX - 24).clamp(46.0, (w - 96).clamp(46.0, w)),
+                      child: _tlLabel('إلغاء ${short(cancel!)}',
+                          const Color(0xFFD32F2F)),
+                    ),
+                  Positioned(
+                    top: 26 + trackH + 4,
+                    right: (w - 46).clamp(0.0, w),
+                    child: _tlLabel('نهاية ${short(last)}',
+                        const Color(0xFFC62828)),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _tlDot(Color c) => Container(
+        width: 12,
+        height: 12,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: c,
+          border: Border.all(color: Colors.white, width: 2),
+        ),
+      );
+
+  Widget _tlLabel(String t, Color c) => Text(t,
+      style: GoogleFonts.cairo(
+          fontSize: 8.5, fontWeight: FontWeight.w800, color: c));
+
+  /// دايرة صغيرة بتوضح الأيام المتبقية على نهاية العرض (الديدلاين النهائي)
+  Widget _buildOfferEndCircle() {
+    final days = widget.group.daysUntilOfferEnd;
+    if (days == null) return const SizedBox.shrink();
+    final expired = days < 0;
+    final color = expired || days <= 14
+        ? AppColors.red2
+        : days <= 60
+            ? const Color(0xFFE65100)
+            : AppColors.green2;
+    return Tooltip(
+      message: expired
+          ? 'العرض انتهى من ${-days} يوم'
+          : 'نهاية العرض بعد $days يوم (${widget.group.offerEndDate})',
+      child: Container(
+        margin: const EdgeInsets.only(right: 6),
+        width: 42,
+        height: 42,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color.withValues(alpha: 0.10),
+          border: Border.all(color: color, width: 1.6),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(expired ? '—' : '$days',
+                style: GoogleFonts.cairo(
+                    fontSize: days > 999 ? 10 : 13,
+                    fontWeight: FontWeight.w900,
+                    height: 1,
+                    color: color)),
+            Text('عرض',
+                style: GoogleFonts.cairo(
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                    height: 1.3,
+                    color: color)),
+          ],
+        ),
       ),
     );
   }
@@ -1858,7 +2274,7 @@ class _GroupCardState extends State<GroupCard> {
   // ── Badge helper ──────────────────────────────────────────────
   Widget _badge(String label, Color bg, Color textColor, Color borderColor) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(20),
@@ -1867,7 +2283,7 @@ class _GroupCardState extends State<GroupCard> {
       child: Text(
         label,
         style: GoogleFonts.cairo(
-            fontSize: 11, fontWeight: FontWeight.w700, color: textColor),
+            fontSize: 10, fontWeight: FontWeight.w700, color: textColor),
         softWrap: false,
         overflow: TextOverflow.ellipsis,
       ),

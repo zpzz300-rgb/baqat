@@ -141,6 +141,10 @@ class Group {
   int? offerDuration; // months
   String? offerStartDate;
   String? offerEndDate;
+  /// 📆 تاريخ آخر فاتورة قابلة للإلغاء — آخر فاتورة على الشركة تقدر تلغي عندها
+  /// العرض/الخط (الفاتورة الـ 11 مثلاً). بيسبق [offerEndDate] عادةً وهو
+  /// التاريخ العملي اللي بيتاخد عنده القرار.
+  String? cancelDeadlineDate;
   double? actualBillAmount; // المبلغ الفعلي للفاتورة (لحساب الربح)
   LineType lineType; // home4g / adsl / guest / mobile
 
@@ -159,6 +163,10 @@ class Group {
   String? lastGiftResetMonth; // YYYY-M — لتصفير giftProfit شهرياً
   String? manualDueDate; // YYYY-MM-DD — موعد سداد الفاتورة اليدوية
   String? parentGroupId; // ربط هذا الخط بخط رئيسي (parent-child linking)
+
+  // ── دليل الخطوط الرئيسية (تصنيف/تشجير) ─────────────────────────
+  String? folderId; // null = بدون تصنيف (في جذر الدليل)
+  int directoryOrderIndex; // ترتيب الخط بين إخوته جوه نفس الفولدر
 
   // ── Master Line Refactor (Phase 2) ────────────────────────────
   String? ownerFullName;        // اسم صاحب الخط رباعي
@@ -227,6 +235,7 @@ class Group {
     this.offerDuration,
     this.offerStartDate,
     this.offerEndDate,
+    this.cancelDeadlineDate,
     this.actualBillAmount,
     this.lineType = LineType.home4g,
     this.stickyNote,
@@ -239,6 +248,8 @@ class Group {
     this.lastGiftResetMonth,
     this.manualDueDate,
     this.parentGroupId,
+    this.folderId,
+    this.directoryOrderIndex = 0,
     this.ownerFullName,
     this.contractPhotoPath,
     this.mainLineAllocationGb = 0,
@@ -302,6 +313,7 @@ class Group {
         offerDuration: j['offerDuration'] as int?,
         offerStartDate: j['offerStartDate'],
         offerEndDate: j['offerEndDate'],
+        cancelDeadlineDate: j['cancelDeadlineDate'],
         actualBillAmount: (j['actualBillAmount'] as num?)?.toDouble(),
         lineType: LineTypeX.fromString(j['lineType']),
         stickyNote: j['stickyNote'],
@@ -314,6 +326,8 @@ class Group {
         lastGiftResetMonth: j['lastGiftResetMonth'],
         manualDueDate: j['manualDueDate'],
         parentGroupId: j['parentGroupId'],
+        folderId: j['folderId'],
+        directoryOrderIndex: (j['directoryOrderIndex'] ?? 0) as int,
         ownerFullName: j['ownerFullName'],
         contractPhotoPath: j['contractPhotoPath'],
         mainLineAllocationGb: (j['mainLineAllocationGb'] ?? 0) as int,
@@ -372,6 +386,7 @@ class Group {
         'offerDuration': offerDuration,
         'offerStartDate': offerStartDate,
         'offerEndDate': offerEndDate,
+        'cancelDeadlineDate': cancelDeadlineDate,
         'actualBillAmount': actualBillAmount,
         'lineType': lineType.key,
         'stickyNote': stickyNote,
@@ -384,6 +399,8 @@ class Group {
         'lastGiftResetMonth': lastGiftResetMonth,
         'manualDueDate': manualDueDate,
         'parentGroupId': parentGroupId,
+        'folderId': folderId,
+        'directoryOrderIndex': directoryOrderIndex,
         'ownerFullName': ownerFullName,
         'contractPhotoPath': contractPhotoPath,
         'mainLineAllocationGb': mainLineAllocationGb,
@@ -433,6 +450,23 @@ class Group {
     final end = DateTime.tryParse(date);
     if (end == null) return null;
     return end.difference(DateTime.now()).inDays;
+  }
+
+  /// عدد الأيام المتبقية على آخر فاتورة قابلة للإلغاء (null لو مفيش تاريخ).
+  /// سالب = التاريخ فات وبقيت مش قادر تلغي.
+  int? get daysUntilCancelDeadline {
+    final date = cancelDeadlineDate;
+    if (date == null) return null;
+    final end = DateTime.tryParse(date);
+    if (end == null) return null;
+    final now = DateTime.now();
+    return end.difference(DateTime(now.year, now.month, now.day)).inDays;
+  }
+
+  /// هل إحنا جوه نافذة التنبيه بالإلغاء (آخر شهرين قبل التاريخ)؟
+  bool get isCancelCountdownActive {
+    final days = daysUntilCancelDeadline;
+    return days != null && days <= 60 && days >= 0;
   }
 
   /// هل التطبيق دلوقتي في فترة العداد التنازلي (آخر 75 يوم)؟
@@ -1069,6 +1103,9 @@ class CompanyBill {
   String date;         // تاريخ الإضافة dd/mm/yyyy
   String? deferDate;   // YYYY-MM-DD — ميعاد السماح المؤجَّل من الشركة
   String? deferNote;   // سبب/ملاحظة التأجيل
+  // سجل تعديلات المبلغ: [{oldAmount, newAmount, reason, date}] — عشان تقدر
+  // ترجع تشوف ليه اتغيّر رقم الفاتورة بعد ما كان متسجل.
+  List<Map<String, dynamic>> editHistory;
 
   CompanyBill({
     required this.id,
@@ -1082,7 +1119,9 @@ class CompanyBill {
     required this.date,
     this.deferDate,
     this.deferNote,
-  }) : payments = payments ?? [];
+    List<Map<String, dynamic>>? editHistory,
+  })  : payments = payments ?? [],
+        editHistory = editHistory ?? [];
 
   /// مؤجَّلة فعلاً (فيها ميعاد سماح لسه ما عداش وغير مسددة)
   bool get isDeferred => deferDate != null && deferDate!.isNotEmpty && !isPaid;
@@ -1112,6 +1151,7 @@ class CompanyBill {
         date: j['date'] ?? '',
         deferDate: j['deferDate'],
         deferNote: j['deferNote'],
+        editHistory: List<Map<String, dynamic>>.from(j['editHistory'] ?? []),
       );
 
   Map<String, dynamic> toJson() => {
@@ -1126,6 +1166,7 @@ class CompanyBill {
         'date': date,
         'deferDate': deferDate,
         'deferNote': deferNote,
+        'editHistory': editHistory,
       };
 }
 
@@ -1237,8 +1278,82 @@ String buildPackageName(int gb, double price, String? label) {
   return '$base (${label.trim()})';
 }
 
+// ── دليل الخطوط الرئيسية: فولدر/تصنيف قابل للتعشيش (تشجير) ──────────
+class GroupFolder {
+  String id;
+  String name;
+  String? parentFolderId; // null = فولدر جذر
+  int orderIndex; // ترتيب الفولدر بين إخوته
+  String? emoji;
+
+  GroupFolder({
+    required this.id,
+    required this.name,
+    this.parentFolderId,
+    this.orderIndex = 0,
+    this.emoji,
+  });
+
+  factory GroupFolder.fromJson(Map<String, dynamic> j) => GroupFolder(
+        id: j['id'].toString(),
+        name: j['name'] ?? '',
+        parentFolderId: j['parentFolderId'],
+        orderIndex: (j['orderIndex'] ?? 0) as int,
+        emoji: j['emoji'],
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'parentFolderId': parentFolderId,
+        'orderIndex': orderIndex,
+        'emoji': emoji,
+      };
+}
+
+// ── حساب فوترة: مجموعة خطوط بتتبادل نزول الفاتورة بينهم (شقّين) ──────
+class BillingAccount {
+  String id;
+  String name;
+  List<String> shiftA; // ids الخطوط في الشق الأول
+  List<String> shiftB; // ids الخطوط في الشق التاني
+  // مين الدور عليه لما مفيش تاريخ فواتير كفاية نحدد منه تلقائي (أول مرة)
+  bool shiftAIsCurrent;
+  int orderIndex;
+
+  BillingAccount({
+    required this.id,
+    required this.name,
+    List<String>? shiftA,
+    List<String>? shiftB,
+    this.shiftAIsCurrent = true,
+    this.orderIndex = 0,
+  })  : shiftA = shiftA ?? [],
+        shiftB = shiftB ?? [];
+
+  factory BillingAccount.fromJson(Map<String, dynamic> j) => BillingAccount(
+        id: j['id'].toString(),
+        name: j['name'] ?? '',
+        shiftA: List<String>.from(j['shiftA'] ?? []),
+        shiftB: List<String>.from(j['shiftB'] ?? []),
+        shiftAIsCurrent: j['shiftAIsCurrent'] ?? true,
+        orderIndex: (j['orderIndex'] ?? 0) as int,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'shiftA': shiftA,
+        'shiftB': shiftB,
+        'shiftAIsCurrent': shiftAIsCurrent,
+        'orderIndex': orderIndex,
+      };
+}
+
 class AppDB {
   List<Group> groups;
+  List<GroupFolder> groupFolders;
+  List<BillingAccount> billingAccounts;
   List<Member> members;
   List<Member> deleted;
   List<Rental> rentals;
@@ -1255,6 +1370,10 @@ class AppDB {
   List<GeneralNote> generalNotes; // Phase 5: ملاحظات عامة للشغل
   /// قفل الفوترة الشهري: key = 'cycle1'/'cycle2'/'cycle4'/'all', value = 'YYYY-MM'
   Map<String, String> billingLocks;
+  /// شهور مراجعة فواتير الشركات المقفولة بعد المراجعة الكاملة ('YYYY-MM')
+  List<String> lockedBillMonths;
+  /// أرشيف تلقائي لملخص كل شهر وقت ما اتقفل (متوقع/فعلي/ناقص)
+  List<Map<String, dynamic>> billArchives;
   int gid;
   int mid;
 
@@ -1264,6 +1383,8 @@ class AppDB {
 
   AppDB({
     List<Group>? groups,
+    List<GroupFolder>? groupFolders,
+    List<BillingAccount>? billingAccounts,
     List<Member>? members,
     List<Member>? deleted,
     List<Rental>? rentals,
@@ -1279,10 +1400,14 @@ class AppDB {
     List<CompanyBill>? companyBills,
     List<GeneralNote>? generalNotes,
     Map<String, String>? billingLocks,
+    List<String>? lockedBillMonths,
+    List<Map<String, dynamic>>? billArchives,
     this.gid = 1,
     this.mid = 1,
     this.updatedAt = 0,
   })  : groups = groups ?? [],
+        groupFolders = groupFolders ?? [],
+        billingAccounts = billingAccounts ?? [],
         members = members ?? [],
         deleted = deleted ?? [],
         rentals = rentals ?? [],
@@ -1297,7 +1422,9 @@ class AppDB {
         mainLines = mainLines ?? [],
         companyBills = companyBills ?? [],
         generalNotes = generalNotes ?? [],
-        billingLocks = billingLocks ?? {};
+        billingLocks = billingLocks ?? {},
+        lockedBillMonths = lockedBillMonths ?? [],
+        billArchives = billArchives ?? [];
 
   /// All packages = defaults merged with custom overrides
   /// If a custom package has the same name as a default, it overrides it.
@@ -1319,6 +1446,12 @@ class AppDB {
   factory AppDB.fromJson(Map<String, dynamic> j) => AppDB(
         groups:
             (j['groups'] as List? ?? []).map((e) => Group.fromJson(e)).toList(),
+        groupFolders: (j['groupFolders'] as List? ?? [])
+            .map((e) => GroupFolder.fromJson(e))
+            .toList(),
+        billingAccounts: (j['billingAccounts'] as List? ?? [])
+            .map((e) => BillingAccount.fromJson(e))
+            .toList(),
         members: (j['members'] as List? ?? [])
             .map((e) => Member.fromJson(e))
             .toList(),
@@ -1355,6 +1488,8 @@ class AppDB {
             .map((e) => GeneralNote.fromJson(e as Map<String, dynamic>))
             .toList(),
         billingLocks: Map<String, String>.from(j['billingLocks'] ?? {}),
+        lockedBillMonths: List<String>.from(j['lockedBillMonths'] ?? []),
+        billArchives: List<Map<String, dynamic>>.from(j['billArchives'] ?? []),
         gid: j['gid'] ?? 1,
         mid: j['mid'] ?? 1,
         updatedAt: j['updatedAt'] ?? 0,
@@ -1362,6 +1497,8 @@ class AppDB {
 
   Map<String, dynamic> toJson() => {
         'groups': groups.map((e) => e.toJson()).toList(),
+        'groupFolders': groupFolders.map((e) => e.toJson()).toList(),
+        'billingAccounts': billingAccounts.map((e) => e.toJson()).toList(),
         'members': members.map((e) => e.toJson()).toList(),
         'deleted': deleted.map((e) => e.toJson()).toList(),
         'rentals': rentals.map((e) => e.toJson()).toList(),
@@ -1378,6 +1515,8 @@ class AppDB {
         'companyBills': companyBills.map((e) => e.toJson()).toList(),
         'generalNotes': generalNotes.map((e) => e.toJson()).toList(),
         'billingLocks': billingLocks,
+        'lockedBillMonths': lockedBillMonths,
+        'billArchives': billArchives,
         'gid': gid,
         'mid': mid,
         'updatedAt': updatedAt,

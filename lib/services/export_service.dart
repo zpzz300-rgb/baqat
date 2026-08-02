@@ -334,6 +334,45 @@ class ExportService {
     await Share.shareXFiles([XFile(file.path)], text: '🤝 كشف الكفلاء');
   }
 
+  // ── Subscriptions (admin panel) Excel export ─────────────────────
+  static Future<void> exportSubscriptionsExcel(
+      BuildContext context, List<Map<String, dynamic>> rows) async {
+    final excel = Excel.createExcel();
+    excel.delete('Sheet1');
+    final sheet = excel['العملاء'];
+    const headers = [
+      'الاسم', 'التليفون', 'الكود', 'الحالة', 'VIP', 'مرتبط بجهاز',
+      'تاريخ الانتهاء', 'فترة سماح', 'ملاحظات',
+    ];
+    sheet.appendRow(headers.map((h) => TextCellValue(h)).toList());
+
+    for (final r in rows) {
+      final expiry = r['expiry_date'] != null ? DateTime.tryParse(r['expiry_date'].toString()) : null;
+      final grace = (r['grace_days'] as num?)?.toInt() ?? 0;
+      final expired = expiry != null && DateTime.now().isAfter(expiry.add(Duration(days: grace)));
+      final status = r['is_active'] == false ? 'مجمّد/معطّل' : (expired ? 'منتهي' : 'نشط');
+      sheet.appendRow(<CellValue>[
+        TextCellValue((r['customer_name'] ?? '').toString()),
+        TextCellValue((r['customer_phone'] ?? '').toString()),
+        TextCellValue((r['key_code'] ?? '').toString()),
+        TextCellValue(status),
+        TextCellValue(r['is_vip'] == true ? '⭐' : '-'),
+        TextCellValue(r['device_id'] != null ? 'نعم' : 'لا'),
+        TextCellValue(expiry != null ? '${expiry.year}-${expiry.month.toString().padLeft(2, '0')}-${expiry.day.toString().padLeft(2, '0')}' : 'دائم'),
+        IntCellValue(grace),
+        TextCellValue((r['notes'] ?? '').toString()),
+      ]);
+    }
+
+    final bytes = excel.save();
+    if (bytes == null) { _snack(context, 'فشل إنشاء الملف'); return; }
+    final dir = await getApplicationDocumentsDirectory();
+    final ts = intl.DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
+    final file = File('${dir.path}/subscriptions_$ts.xlsx');
+    await file.writeAsBytes(bytes);
+    await Share.shareXFiles([XFile(file.path)], text: '📋 كشف العملاء');
+  }
+
   // ── Invoices-only Excel export ──────────────────────────────────
   static Future<void> exportInvoicesExcel(
       BuildContext context, AppProvider prov) async {

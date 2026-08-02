@@ -949,6 +949,7 @@ class _EditGroupModalState extends State<EditGroupModal> {
       extraClientFee: _tier.isNotEmpty ? 125 : g.extraClientFee,
       billingCycle: g.billingCycle,
       offerEndDate: g.offerEndDate,
+      cancelDeadlineDate: g.cancelDeadlineDate,
       actualBillAmount: g.actualBillAmount,
       lineType: g.lineType,
       stickyNote: g.stickyNote,

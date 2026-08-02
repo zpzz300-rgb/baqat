@@ -272,7 +272,12 @@ class _TabRoot extends StatelessWidget {
           context,
           body: ListView(
             padding: const EdgeInsets.all(10),
-            children: [GroupCard(group: g, initiallyExpanded: true)],
+            children: [
+              GroupCard(
+                  group: g,
+                  initiallyExpanded: true,
+                  initiallyMembersExpanded: true),
+            ],
           ),
           bg: const Color(0xFFEDF2F8),
         );
