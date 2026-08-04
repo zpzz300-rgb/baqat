@@ -253,7 +253,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: AppColors.blue2.withValues(alpha: 0.4)),
         ),
@@ -263,7 +263,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
                   fontSize: 11,
                   fontWeight: FontWeight.w800,
                   color: AppColors.blue2)),
-          const Icon(Icons.arrow_drop_down, size: 18, color: AppColors.blue2),
+          Icon(Icons.arrow_drop_down, size: 18, color: AppColors.blue2),
         ]),
       ),
     );
@@ -421,7 +421,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: const Color(0xFFE1BEE7)),
       ),
@@ -518,7 +518,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
                       border: Border.all(color: AppColors.border),
                     ),
                     child: Row(children: [
-                      const Icon(Icons.calendar_today,
+                      Icon(Icons.calendar_today,
                           size: 16, color: AppColors.muted),
                       const SizedBox(width: 8),
                       Text(dueDate ?? '📅 ميعاد نزول القسيمة',
@@ -830,7 +830,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.border),
       ),
@@ -1089,7 +1089,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: const Color(0xFFFFB74D)),
                   ),
@@ -1426,7 +1426,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: AppColors.blueMid),
               ),
-              child: const Icon(Icons.camera_alt_outlined,
+              child: Icon(Icons.camera_alt_outlined,
                   color: AppColors.blue2, size: 30),
             ),
           ),
@@ -1633,7 +1633,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
           border: Border.all(color: AppColors.border),
         ),
         child: Row(children: [
-          const Icon(Icons.calendar_today, size: 15, color: AppColors.muted),
+          Icon(Icons.calendar_today, size: 15, color: AppColors.muted),
           const SizedBox(width: 8),
           Expanded(
               child: Text(value ?? label,

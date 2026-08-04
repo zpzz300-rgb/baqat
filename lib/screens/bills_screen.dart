@@ -6,6 +6,9 @@ import 'package:url_launcher/url_launcher.dart';
 import '../providers/app_provider.dart';
 import '../models/models.dart';
 import '../services/app_theme.dart';
+import '../services/app_search.dart';
+import '../services/view_prefs.dart';
+import '../widgets/app_search_bar.dart';
 import '../utils/print_helper.dart';
 import '../services/export_service.dart';
 import '../widgets/common.dart';
@@ -28,6 +31,23 @@ class _BillsScreenState extends State<BillsScreen> {
     {'key': 'partial', 'label': '🟡 جزئي', 'color': 0xFFe65100},
     {'key': 'paid', 'label': '✅ مسدد', 'color': 0xFF2e7d32},
   ];
+
+  // 💾 بيفتكر الفلتر
+  final _viewPrefs = ViewPrefs('bills');
+
+  @override
+  void initState() {
+    super.initState();
+    _viewPrefs.load().then((m) {
+      if (!mounted || m.isEmpty) return;
+      setState(() => _filter = m['filter'] ?? 'all');
+    });
+  }
+
+  void _set(VoidCallback change) {
+    setState(change);
+    _viewPrefs.save({'filter': _filter});
+  }
 
   @override
   void dispose() {
@@ -63,14 +83,15 @@ class _BillsScreenState extends State<BillsScreen> {
       if (_filter == 'partial' && b.status != 'partial') return false;
       if (_filter == 'paid' && b.status != 'paid') return false;
       if (_groupFilter != 'all' && b.groupId != _groupFilter) return false;
-      if (_searchQ.isNotEmpty) {
+      // 🔍 محرّك البحث الموحّد — مجموعة/صاحبها/شهر/مبلغ
+      final terms = searchTerms(_searchQ);
+      if (terms.isNotEmpty) {
         final g = db.groups.firstWhere((x) => x.id == b.groupId,
             orElse: () => Group(id: '', phone: ''));
-        final q = _searchQ.toLowerCase();
-        if (!g.phone.contains(q) &&
-            !(g.ownerName ?? '').toLowerCase().contains(q) &&
-            !b.month.contains(q) &&
-            !b.actualAmount.toString().contains(q)) {
+        if (searchHitsOf(terms, [
+              g.phone, g.ownerName ?? '', g.groupInvoiceName ?? '',
+              b.month, b.actualAmount.toString(), b.paidAmount.toString(),
+            ]) == null) {
           return false;
         }
       }
@@ -92,7 +113,7 @@ class _BillsScreenState extends State<BillsScreen> {
     return Column(children: [
       // ── Header ──────────────────────────────────────────────────
       Container(
-        decoration: const BoxDecoration(gradient: AppColors.headerGradient),
+        decoration: BoxDecoration(gradient: AppColors.headerGradient),
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
         child: Column(children: [
           Row(children: [
@@ -136,39 +157,10 @@ class _BillsScreenState extends State<BillsScreen> {
         ]),
       ),
       // ── Search ──────────────────────────────────────────────────
-      Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-        child: TextField(
-          controller: _searchCtrl,
-          textDirection: TextDirection.rtl,
-          onChanged: (v) => setState(() => _searchQ = v.trim()),
-          decoration: InputDecoration(
-            hintText: '🔍 بحث بالرقم أو الشهر أو المبلغ...',
-            hintStyle: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
-            filled: true,
-            fillColor: Colors.white,
-            border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(24),
-                borderSide: const BorderSide(color: AppColors.border)),
-            enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(24),
-                borderSide: const BorderSide(color: AppColors.border)),
-            focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(24),
-                borderSide:
-                    const BorderSide(color: AppColors.blue, width: 1.5)),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-            suffixIcon: _searchQ.isNotEmpty
-                ? IconButton(
-                    icon: const Icon(Icons.close, size: 16),
-                    onPressed: () {
-                      _searchCtrl.clear();
-                      setState(() => _searchQ = '');
-                    })
-                : null,
-          ),
-        ),
+      AppSearchBar(
+        controller: _searchCtrl,
+        onChanged: (v) => setState(() => _searchQ = v.trim()),
+        hint: '🔍 رقم · صاحب الخط · شهر · مبلغ',
       ),
       // ── Filter chips ────────────────────────────────────────────
       SizedBox(
@@ -176,28 +168,15 @@ class _BillsScreenState extends State<BillsScreen> {
         child: ListView(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          children: _filters.map((f) {
-            final active = _filter == f['key'];
-            return GestureDetector(
-              onTap: () => setState(() => _filter = f['key'] as String),
-              child: Container(
-                margin: const EdgeInsets.only(right: 8),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                decoration: BoxDecoration(
-                  color: active
-                      ? Color(f['color'] as int)
-                      : const Color(0xFFf0f4f8),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(f['label'] as String,
-                    style: GoogleFonts.cairo(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: active ? Colors.white : AppColors.text)),
-              ),
-            );
-          }).toList(),
+          children: _filters
+              .map((f) => Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: AppChip(f['label'] as String,
+                        selected: _filter == f['key'],
+                        color: Color(f['color'] as int),
+                        onTap: () => _set(() => _filter = f['key'] as String)),
+                  ))
+              .toList(),
         ),
       ),
       // ── Bills List ──────────────────────────────────────────────
@@ -310,7 +289,7 @@ class _BillsScreenState extends State<BillsScreen> {
                         color: AppColors.blueLight,
                         borderRadius: BorderRadius.circular(10)),
                     child: Row(children: [
-                      const Icon(Icons.info_outline,
+                      Icon(Icons.info_outline,
                           size: 14, color: AppColors.blue2),
                       const SizedBox(width: 6),
                       Text(
@@ -455,7 +434,7 @@ class _BillCardState extends State<_BillCard> {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border, width: 1.5),
         boxShadow: [
@@ -549,7 +528,7 @@ class _BillCardState extends State<_BillCard> {
                     value: percent.clamp(0.0, 1.0),
                     backgroundColor: AppColors.redLight,
                     valueColor:
-                        const AlwaysStoppedAnimation<Color>(AppColors.green),
+                        AlwaysStoppedAnimation<Color>(AppColors.green),
                     minHeight: 6,
                   ),
                 ),
@@ -681,7 +660,7 @@ class _BillCardState extends State<_BillCard> {
                   decoration: BoxDecoration(
                       color: AppColors.redLight,
                       borderRadius: BorderRadius.circular(10)),
-                  child: const Icon(Icons.delete_outline,
+                  child: Icon(Icons.delete_outline,
                       size: 16, color: AppColors.red),
                 ),
               ),
@@ -700,7 +679,7 @@ class _BillCardState extends State<_BillCard> {
                       color: AppColors.redLight,
                       borderRadius: BorderRadius.circular(10)),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    const Icon(Icons.delete_outline,
+                    Icon(Icons.delete_outline,
                         size: 14, color: AppColors.red),
                     const SizedBox(width: 4),
                     Text('حذف',
@@ -713,7 +692,7 @@ class _BillCardState extends State<_BillCard> {
           ),
         // ── Payment history ────────────────────────────────────────
         if (_expanded && b.payments.isNotEmpty) ...[
-          const Divider(height: 1, color: AppColors.border),
+          Divider(height: 1, color: AppColors.border),
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
             child:
@@ -727,7 +706,7 @@ class _BillCardState extends State<_BillCard> {
               ...b.payments.map((p) => Padding(
                     padding: const EdgeInsets.symmetric(vertical: 3),
                     child: Row(children: [
-                      const Icon(Icons.check_circle,
+                      Icon(Icons.check_circle,
                           size: 14, color: AppColors.green),
                       const SizedBox(width: 6),
                       Expanded(
@@ -752,7 +731,7 @@ class _BillCardState extends State<_BillCard> {
           ),
         ],
         if (_expanded && b.payments.isEmpty && b.isPaid) ...[
-          const Divider(height: 1, color: AppColors.border),
+          Divider(height: 1, color: AppColors.border),
           Padding(
             padding: const EdgeInsets.all(12),
             child: Text('لا يوجد سجل دفعات',

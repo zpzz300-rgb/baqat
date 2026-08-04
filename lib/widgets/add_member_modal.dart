@@ -221,13 +221,13 @@ class _AddMemberModalState extends State<AddMemberModal> {
               Container(
                 height: 48,
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppColors.surface,
                   border: Border.all(color: AppColors.border),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: IconButton(
                   onPressed: () => _pickContactPhone(_phoneCtrl, prov),
-                  icon: const Icon(Icons.contacts, color: AppColors.blue2),
+                  icon: Icon(Icons.contacts, color: AppColors.blue2),
                   tooltip: 'استيراد من جهات الاتصال',
                 ),
               ),
@@ -275,13 +275,13 @@ class _AddMemberModalState extends State<AddMemberModal> {
               Container(
                 height: 48,
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppColors.surface,
                   border: Border.all(color: AppColors.border),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: IconButton(
                   onPressed: () => _pickContactPhone(_phone2Ctrl, prov),
-                  icon: const Icon(Icons.contacts, color: AppColors.blue2),
+                  icon: Icon(Icons.contacts, color: AppColors.blue2),
                   tooltip: 'استيراد من جهات الاتصال',
                 ),
               ),
@@ -372,7 +372,7 @@ class _AddMemberModalState extends State<AddMemberModal> {
                 DropdownMenuItem<String>(
                   value: '__ADD_NEW__',
                   child: Row(children: [
-                    const Icon(Icons.add_circle,
+                    Icon(Icons.add_circle,
                         color: AppColors.blue2, size: 18),
                     const SizedBox(width: 6),
                     Text('إضافة باقة مخصصة جديدة',
@@ -739,14 +739,14 @@ class _AddMemberModalState extends State<AddMemberModal> {
                         Container(
                           height: 48,
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: AppColors.surface,
                             border: Border.all(color: AppColors.border),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: IconButton(
                             onPressed: () =>
                                 _pickContactPhone(_guarantorPhoneCtrl, prov),
-                            icon: const Icon(Icons.contacts,
+                            icon: Icon(Icons.contacts,
                                 color: AppColors.blue2),
                             tooltip: 'استيراد من جهات الاتصال',
                           ),
@@ -953,7 +953,7 @@ class _PackageManagerDialogState extends State<PackageManagerDialog> {
                   ),
                   IconButton(
                     onPressed: () => _editPackage(prov, pkg),
-                    icon: const Icon(Icons.edit_outlined,
+                    icon: Icon(Icons.edit_outlined,
                         size: 18, color: AppColors.blue2),
                     tooltip: 'تعديل',
                     padding: EdgeInsets.zero,
@@ -965,7 +965,7 @@ class _PackageManagerDialogState extends State<PackageManagerDialog> {
                       onPressed: () {
                         prov.deleteCustomPackageByName(name);
                       },
-                      icon: const Icon(Icons.delete_outline,
+                      icon: Icon(Icons.delete_outline,
                           size: 18, color: AppColors.red),
                       tooltip: 'حذف',
                       padding: EdgeInsets.zero,
@@ -1122,7 +1122,7 @@ class AddPackageDialogState extends State<AddPackageDialog> {
               decoration: InputDecoration(
                 labelText: 'السعر (قابل للتعديل)',
                 labelStyle: GoogleFonts.cairo(fontSize: 12),
-                prefixIcon: const Icon(Icons.monetization_on_outlined,
+                prefixIcon: Icon(Icons.monetization_on_outlined,
                     color: AppColors.green),
                 suffixText: 'ج',
                 filled: true,
@@ -1145,7 +1145,7 @@ class AddPackageDialogState extends State<AddPackageDialog> {
                 hintStyle: GoogleFonts.cairo(
                     fontSize: 12, color: AppColors.muted),
                 prefixIcon:
-                    const Icon(Icons.label_outline, color: AppColors.blue2),
+                    Icon(Icons.label_outline, color: AppColors.blue2),
                 filled: true,
                 fillColor: AppColors.blueLight,
                 border: OutlineInputBorder(

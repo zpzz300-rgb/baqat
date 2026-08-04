@@ -214,7 +214,7 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 12),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.surface,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Center(
@@ -253,13 +253,13 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          const CircleAvatar(radius: 18, backgroundColor: Color(0xFFe3f2fd),
+          CircleAvatar(radius: 18, backgroundColor: const Color(0xFFe3f2fd),
               child: Icon(Icons.person, color: AppColors.blue2)),
           const SizedBox(width: 10),
           Expanded(
@@ -511,7 +511,7 @@ class _AssignSheetState extends State<_AssignSheet> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 12, vertical: 4),
                               decoration: BoxDecoration(
-                                color: Colors.white,
+                                color: AppColors.surface,
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
                                     color: mine
@@ -633,9 +633,9 @@ class _DistributeSheetState extends State<_DistributeSheet> {
         maxChildSize: 0.95,
         expand: false,
         builder: (_, scroll) => Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
           ),
           child: Column(children: [
             Container(
@@ -861,9 +861,9 @@ class _PerformanceSheetState extends State<_PerformanceSheet> {
         maxChildSize: 0.95,
         expand: false,
         builder: (_, scroll) => Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
           ),
           child: Column(children: [
             Container(
@@ -919,7 +919,7 @@ class _PerformanceSheetState extends State<_PerformanceSheet> {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
       ),

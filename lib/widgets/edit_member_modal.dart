@@ -245,13 +245,13 @@ class _EditMemberModalState extends State<EditMemberModal> {
               Container(
                 height: 48,
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppColors.surface,
                   border: Border.all(color: AppColors.border),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: IconButton(
                   onPressed: () => _pickContactPhone(_phoneCtrl, prov),
-                  icon: const Icon(Icons.contacts, color: AppColors.blue2),
+                  icon: Icon(Icons.contacts, color: AppColors.blue2),
                   tooltip: 'استيراد من جهات الاتصال',
                 ),
               ),
@@ -299,13 +299,13 @@ class _EditMemberModalState extends State<EditMemberModal> {
               Container(
                 height: 48,
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppColors.surface,
                   border: Border.all(color: AppColors.border),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: IconButton(
                   onPressed: () => _pickContactPhone(_phone2Ctrl, prov),
-                  icon: const Icon(Icons.contacts, color: AppColors.blue2),
+                  icon: Icon(Icons.contacts, color: AppColors.blue2),
                   tooltip: 'استيراد من جهات الاتصال',
                 ),
               ),
@@ -430,7 +430,7 @@ class _EditMemberModalState extends State<EditMemberModal> {
                 DropdownMenuItem<String>(
                   value: '__ADD_NEW__',
                   child: Row(children: [
-                    const Icon(Icons.add_circle,
+                    Icon(Icons.add_circle,
                         color: AppColors.blue2, size: 18),
                     const SizedBox(width: 6),
                     Text('إضافة باقة مخصصة جديدة',
@@ -600,7 +600,7 @@ class _EditMemberModalState extends State<EditMemberModal> {
               Container(
                 height: 48,
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppColors.surface,
                   border: Border.all(color: AppColors.border),
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -761,14 +761,14 @@ class _EditMemberModalState extends State<EditMemberModal> {
                         Container(
                           height: 48,
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: AppColors.surface,
                             border: Border.all(color: AppColors.border),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: IconButton(
                             onPressed: () =>
                                 _pickContactPhone(_guarantorPhoneCtrl, prov),
-                            icon: const Icon(Icons.contacts,
+                            icon: Icon(Icons.contacts,
                                 color: AppColors.blue2),
                             tooltip: 'استيراد من جهات الاتصال',
                           ),

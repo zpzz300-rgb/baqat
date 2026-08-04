@@ -45,7 +45,7 @@ class _RemindersScreenState extends State<RemindersScreen>
     return Column(children: [
       // ── Tab bar ─────────────────────────────────────────────
       Container(
-        color: Colors.white,
+        color: AppColors.surface,
         child: TabBar(
           controller: _tab,
           labelStyle:
@@ -335,7 +335,7 @@ class _SettingsTab extends StatelessWidget {
                   fontWeight: FontWeight.w700, color: AppColors.blue2)),
           style: OutlinedButton.styleFrom(
             minimumSize: const Size.fromHeight(44),
-            side: const BorderSide(color: AppColors.blue2),
+            side: BorderSide(color: AppColors.blue2),
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
@@ -426,7 +426,7 @@ class _ScheduleTab extends StatelessWidget {
             border: Border.all(color: AppColors.blueMid),
           ),
           child: Row(children: [
-            const Icon(Icons.notifications_active,
+            Icon(Icons.notifications_active,
                 color: AppColors.blue2, size: 20),
             const SizedBox(width: 8),
             Expanded(
@@ -438,7 +438,7 @@ class _ScheduleTab extends StatelessWidget {
             GestureDetector(
               onTap: onRefresh,
               child:
-                  const Icon(Icons.refresh, color: AppColors.blue2, size: 20),
+                  Icon(Icons.refresh, color: AppColors.blue2, size: 20),
             ),
           ]),
         ),
@@ -492,11 +492,11 @@ class _ScheduleTab extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: AppColors.border)),
                 child: Row(children: [
-                  const Icon(Icons.alarm, size: 16, color: AppColors.blue2),
+                  Icon(Icons.alarm, size: 16, color: AppColors.blue2),
                   const SizedBox(width: 8),
                   Expanded(
                       child: Column(
@@ -517,7 +517,7 @@ class _ScheduleTab extends StatelessWidget {
                       await NotificationService.cancelVoucherAlert(n.id);
                       onRefresh();
                     },
-                    child: const Icon(Icons.close,
+                    child: Icon(Icons.close,
                         size: 16, color: AppColors.muted),
                   ),
                 ]),
@@ -683,7 +683,7 @@ class _EventRow extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
             color: diff <= 7
@@ -815,7 +815,7 @@ class _DebtorsTab extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.surface,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
                     color: m.paymentFlag == 'red'
@@ -1294,7 +1294,7 @@ class _NotifCardState extends State<_NotifCard> {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
             color: widget.active ? AppColors.blueMid : AppColors.border,
@@ -1364,9 +1364,9 @@ class _NotifCardState extends State<_NotifCard> {
         if (_expanded && widget.children.isNotEmpty)
           Container(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-            decoration: const BoxDecoration(
-              color: Color(0xFFf8fbff),
-              borderRadius: BorderRadius.vertical(bottom: Radius.circular(13)),
+            decoration: BoxDecoration(
+              color: const Color(0xFFf8fbff),
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(13)),
               border:
                   Border(top: BorderSide(color: AppColors.blueMid, width: 1)),
             ),

@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/auth_service.dart';
 import '../services/app_theme.dart';
+import '../services/app_search.dart';
 import '../services/export_service.dart';
 
 // ─────────────────────────────────────────────────────────────────
@@ -242,7 +243,7 @@ class _GenerateKeyTabState extends State<_GenerateKeyTab> {
                 hintText: 'ملاحظات إضافية (اختياري)',
                 hintStyle: GoogleFonts.cairo(color: AppColors.muted),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                filled: true, fillColor: Colors.white,
+                filled: true, fillColor: AppColors.surface,
               ),
             ),
           ]),
@@ -314,7 +315,7 @@ class _GenerateKeyTabState extends State<_GenerateKeyTab> {
           labelStyle: GoogleFonts.cairo(),
           prefixIcon: icon != null ? Icon(icon, size: 18) : null,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-          filled: true, fillColor: Colors.white,
+          filled: true, fillColor: AppColors.surface,
           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         ),
       );
@@ -460,12 +461,18 @@ class _SalesListTabState extends State<_SalesListTab> {
   }
 
   void _applyFilters() {
-    final q = _searchCtrl.text.toLowerCase();
+    // 🔍 محرّك البحث الموحّد
+    final terms = searchTerms(_searchCtrl.text);
     setState(() {
       _filtered = _all.where((r) {
-        if (q.isNotEmpty) {
-          final hay = '${r['customer_name'] ?? ''} ${r['customer_phone'] ?? ''} ${r['key_code'] ?? ''}'.toLowerCase();
-          if (!hay.contains(q)) return false;
+        if (terms.isNotEmpty &&
+            searchHitsOf(terms, [
+                  '${r['customer_name'] ?? ''}',
+                  '${r['customer_phone'] ?? ''}',
+                  '${r['key_code'] ?? ''}',
+                  '${r['device_id'] ?? ''}',
+                ]) == null) {
+          return false;
         }
         switch (_quickFilter) {
           case 'active':
@@ -518,8 +525,8 @@ class _SalesListTabState extends State<_SalesListTab> {
             decoration: InputDecoration(
               hintText: '🔍 بحث بالاسم أو الرقم أو الكود...',
               hintStyle: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
-              filled: true, fillColor: Colors.white,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: const BorderSide(color: AppColors.border)),
+              filled: true, fillColor: AppColors.surface,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: BorderSide(color: AppColors.border)),
               contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               suffixIcon: _searchCtrl.text.isNotEmpty
                   ? IconButton(icon: const Icon(Icons.close, size: 16),
@@ -552,12 +559,12 @@ class _SalesListTabState extends State<_SalesListTab> {
             const Spacer(),
             GestureDetector(
               onTap: () => ExportService.exportSubscriptionsExcel(context, _filtered),
-              child: const Icon(Icons.table_view, color: AppColors.muted, size: 18),
+              child: Icon(Icons.table_view, color: AppColors.muted, size: 18),
             ),
             const SizedBox(width: 12),
             GestureDetector(
               onTap: _load,
-              child: const Icon(Icons.refresh, color: AppColors.muted, size: 18),
+              child: Icon(Icons.refresh, color: AppColors.muted, size: 18),
             ),
           ]),
         ),
@@ -659,7 +666,7 @@ class _SubCard extends StatelessWidget {
                 style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 14))),
             GestureDetector(
               onTap: () => _showTimeline(context),
-              child: const Icon(Icons.history, size: 18, color: AppColors.muted),
+              child: Icon(Icons.history, size: 18, color: AppColors.muted),
             ),
             const SizedBox(width: 8),
             if (!active)
@@ -683,7 +690,7 @@ class _SubCard extends StatelessWidget {
             ),
             GestureDetector(
               onTap: () { Clipboard.setData(ClipboardData(text: key)); },
-              child: const Icon(Icons.copy_rounded, size: 16, color: AppColors.muted),
+              child: Icon(Icons.copy_rounded, size: 16, color: AppColors.muted),
             ),
           ]),
           const SizedBox(height: 6),
@@ -1110,13 +1117,19 @@ class _InstallationsTabState extends State<_InstallationsTab> {
         }
         final id = _identityOf(inst);
         if (_kindFilter != 'all' && id.kind != _kindFilter) return false;
-        if (q.isNotEmpty) {
-          final hay = '${inst['customer_name'] ?? ''} ${inst['customer_phone'] ?? ''} '
-                  '${inst['device_id'] ?? ''} ${inst['key_code'] ?? ''} '
-                  '${inst['employee_name'] ?? ''} ${inst['login_email'] ?? ''} '
-                  '${id.title} ${id.phone ?? ''}'
-              .toLowerCase();
-          if (!hay.contains(q)) return false;
+        // 🔍 محرّك البحث الموحّد
+        final terms = searchTerms(q);
+        if (terms.isNotEmpty &&
+            searchHitsOf(terms, [
+                  '${inst['customer_name'] ?? ''}',
+                  '${inst['customer_phone'] ?? ''}',
+                  '${inst['device_id'] ?? ''}',
+                  '${inst['key_code'] ?? ''}',
+                  '${inst['employee_name'] ?? ''}',
+                  '${inst['login_email'] ?? ''}',
+                  id.title, id.phone ?? '',
+                ]) == null) {
+          return false;
         }
         return true;
       }).toList();
@@ -1160,8 +1173,8 @@ class _InstallationsTabState extends State<_InstallationsTab> {
             decoration: InputDecoration(
               hintText: '🔍 بحث بالاسم أو الرقم أو الجهاز أو الكود...',
               hintStyle: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
-              filled: true, fillColor: Colors.white,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: const BorderSide(color: AppColors.border)),
+              filled: true, fillColor: AppColors.surface,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: BorderSide(color: AppColors.border)),
               contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               suffixIcon: _searchCtrl.text.isNotEmpty
                   ? IconButton(icon: const Icon(Icons.close, size: 16),
@@ -1208,7 +1221,7 @@ class _InstallationsTabState extends State<_InstallationsTab> {
             Text('${_filtered.length} جهاز',
                 style: GoogleFonts.cairo(color: AppColors.muted, fontSize: 12)),
             const Spacer(),
-            GestureDetector(onTap: _load, child: const Icon(Icons.refresh, color: AppColors.muted, size: 18)),
+            GestureDetector(onTap: _load, child: Icon(Icons.refresh, color: AppColors.muted, size: 18)),
           ]),
         ),
         Expanded(
@@ -1398,7 +1411,7 @@ class _InstallCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
       ),

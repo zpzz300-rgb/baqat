@@ -71,7 +71,7 @@ class _FlaggedMembersScreenState extends State<FlaggedMembersScreen> {
           margin: const EdgeInsets.fromLTRB(14, 12, 14, 0),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppColors.border),
             boxShadow: [BoxShadow(color: AppColors.blue2.withValues(alpha: 0.06), blurRadius: 8)],
@@ -87,7 +87,7 @@ class _FlaggedMembersScreenState extends State<FlaggedMembersScreen> {
               _vDivider(),
               IconButton(
                 onPressed: () => _printFiltered(context, filtered, prov),
-                icon: const Icon(Icons.print_outlined, color: AppColors.blue2, size: 22),
+                icon: Icon(Icons.print_outlined, color: AppColors.blue2, size: 22),
                 tooltip: 'طباعة',
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(),
@@ -214,7 +214,7 @@ class _MemberFlagCard extends StatelessWidget {
       onTap: () => _openDrawer(context),
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: flagColor.withValues(alpha: 0.5), width: 1.5),
           boxShadow: [BoxShadow(color: flagColor.withValues(alpha: 0.12), blurRadius: 8)],

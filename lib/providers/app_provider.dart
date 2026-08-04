@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 import '../services/demo_data.dart';
+import '../services/menu_catalog.dart';
 
 /// 🗂️ جلسة تاب في مساحة العمل — شاشة مفتوحة بالتوازي بتحتفظ بحالتها
 /// (البحث/الفلاتر/السكرول/الكتابة غير المحفوظة) طول ما التاب مفتوح.
@@ -116,6 +117,219 @@ class AppProvider extends ChangeNotifier {
     if (index < 0 || index > workspaceTabs.length) return;
     _activeWorkspaceIndex = index;
     notifyListeners();
+  }
+
+  // ─── 🔀 ترتيب قوايم التنقّل ──────────────────────────────────────
+  // ترتيب واحد مشترك بيتطبّق على القايمة الجانبية ☰ ولوحة التنقّل السريع 🗂.
+  // بنخزّن مفاتيح البنود بس — مفيش أي بند بيتشال أو يتمسح: البنود اللي
+  // مالهاش ترتيب محفوظ بتظهر في الآخر بترتيبها الأصلي، والمخفي بيفضل
+  // موجود في المحرّر وتقدر ترجّعه في أي وقت.
+  static const _kMenuOrderKey     = 'menu_order_v1';
+  static const _kMenuHiddenKey    = 'menu_hidden_v1';
+  static const _kMenuSectionsKey  = 'menu_sections_v1';
+  static const _kMenuItemSecKey   = 'menu_item_section_v1';
+  static const _kMenuCollapsedKey = 'menu_collapsed_v1';
+  List<String>        _menuOrder = [];
+  Set<String>         _menuHidden = {};
+  List<String>        _menuSectionOrder = [];
+  Map<String, String> _menuItemSection = {};
+  Set<String>         _menuCollapsed = {};
+
+  List<String> get menuOrder  => List.unmodifiable(_menuOrder);
+  Set<String>  get menuHidden => Set.unmodifiable(_menuHidden);
+
+  /// القايمة الجانبية بتسمّي شاشة الفواتير `billing` ولوحة التنقّل بتسمّيها
+  /// `invoices` — بنوحّدهم عشان الترتيب يبقى واحد في الاتنين.
+  static String menuKeyAlias(String key) => key == 'billing' ? 'invoices' : key;
+
+  /// البنود دي ممنوع تختفي — من غيرها الشاشة تبقى من غير طريق رجوع.
+  static const kMenuAlwaysVisible = {'groups'};
+
+  bool isMenuHidden(String key) =>
+      !kMenuAlwaysVisible.contains(menuKeyAlias(key)) &&
+      _menuHidden.contains(menuKeyAlias(key));
+
+  /// كاش رُتب البنود — بيتمسح مع أي تغيير في الترتيب.
+  Map<String, double>? _menuRankCache;
+
+  /// رُتب كل البنود.
+  ///
+  /// البند اللي المستخدم رتّبه بياخد رتبته المحفوظة. البند **الجديد**
+  /// (شاشة اتضافت للبرنامج بعد ما المستخدم رتّب) ماينفعش يروح آخر
+  /// القايمة وإلا محدش هيلاقيه — فبياخد رتبة **جنب البند اللي قبله في
+  /// السجل**، يعني بيظهر في مكانه الطبيعي.
+  Map<String, double> get _menuRanks {
+    final cached = _menuRankCache;
+    if (cached != null) return cached;
+
+    final saved = <String, double>{
+      for (int i = 0; i < _menuOrder.length; i++) _menuOrder[i]: i.toDouble()
+    };
+    final out = <String, double>{...saved};
+    final step = 1.0 / (kMenuCatalog.length + 1);
+    double last = -1;
+    var gap = 0;
+    for (final e in kMenuCatalog) {
+      final r = saved[e.key];
+      if (r != null) {
+        last = r;
+        gap = 0;
+        continue;
+      }
+      gap++;
+      out[e.key] = last + gap * step; // بين اللي قبله واللي بعده
+    }
+    return _menuRankCache = out;
+  }
+
+  /// ترتيب البند: كل ما الرقم أصغر كل ما طلع فوق.
+  double menuRank(String key) => _menuRanks[menuKeyAlias(key)] ?? 99999;
+
+  /// بيرتّب أي قايمة حسب الترتيب المحفوظ. البنود اللي مالهاش ترتيب بتفضل
+  /// في الآخر بترتيبها الأصلي — يعني أي شاشة جديدة تتضاف للبرنامج بتظهر
+  /// عادي من غير ما المستخدم يعمل حاجة.
+  List<T> applyMenuOrder<T>(List<T> items, String Function(T) keyOf,
+      {bool dropHidden = true}) {
+    final list = dropHidden
+        ? items.where((e) => !isMenuHidden(keyOf(e))).toList()
+        : List<T>.from(items);
+    // بنسحب الترتيب الأصلي مع كل بند عشان الـ sort يفضل ثابت (sort في دارت
+    // مش stable) — البنود المتساوية في الرُتبة تفضل زي ما هي بالظبط.
+    final indexed = [for (int i = 0; i < list.length; i++) (i, list[i])];
+    indexed.sort((a, b) {
+      final c = menuRank(keyOf(a.$2)).compareTo(menuRank(keyOf(b.$2)));
+      return c != 0 ? c : a.$1.compareTo(b.$1);
+    });
+    return [for (final e in indexed) e.$2];
+  }
+
+  // ── 📂 الأقسام: كل بند بيقع تحت قسم، والقسم بيتفتح ويتقفل ──────
+  /// الأقسام بترتيب المستخدم. أي قسم جديد يتضاف للسجل بيظهر في الآخر.
+  List<MenuSectionDef> get orderedMenuSections {
+    final saved = <String, double>{
+      for (int i = 0; i < _menuSectionOrder.length; i++)
+        _menuSectionOrder[i]: i.toDouble()
+    };
+    // قسم جديد بياخد مكانه من السجل جنب اللي قبله — مش آخر القايمة.
+    final rank = <String, double>{...saved};
+    final step = 1.0 / (kMenuSections.length + 1);
+    double last = -1;
+    var gap = 0;
+    for (final s in kMenuSections) {
+      final r = saved[s.id];
+      if (r != null) {
+        last = r;
+        gap = 0;
+        continue;
+      }
+      gap++;
+      rank[s.id] = last + gap * step;
+    }
+    final list = [
+      for (int i = 0; i < kMenuSections.length; i++) (i, kMenuSections[i])
+    ];
+    list.sort((a, b) {
+      final c = (rank[a.$2.id] ?? 99999).compareTo(rank[b.$2.id] ?? 99999);
+      return c != 0 ? c : a.$1.compareTo(b.$1);
+    });
+    return [for (final e in list) e.$2];
+  }
+
+  /// قسم البند: اللي المستخدم نقله ليه، وإلا الافتراضي من السجل.
+  String menuSectionOf(String key) {
+    final k = menuKeyAlias(key);
+    return _menuItemSection[k] ??
+        menuItemDef(k)?.section ??
+        kMenuSections.last.id;
+  }
+
+  bool isMenuSectionCollapsed(String id) => _menuCollapsed.contains(id);
+
+  Future<void> toggleMenuSection(String id) async {
+    _menuCollapsed.contains(id)
+        ? _menuCollapsed.remove(id)
+        : _menuCollapsed.add(id);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_kMenuCollapsedKey, _menuCollapsed.toList());
+  }
+
+  Future<void> setMenuSectionOrder(List<String> ids) async {
+    _menuSectionOrder = List<String>.from(ids);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_kMenuSectionsKey, _menuSectionOrder);
+  }
+
+  /// نقل بند لقسم تاني — البند بيتحرك بس، مفيش أي حذف.
+  Future<void> setMenuItemSection(String key, String sectionId) async {
+    _menuItemSection[menuKeyAlias(key)] = sectionId;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kMenuItemSecKey, jsonEncode(_menuItemSection));
+  }
+
+  /// بنود قسم واحد، مرتّبة بترتيب المستخدم. [dropHidden] بيشيل المخفي.
+  List<T> menuItemsOfSection<T>(
+      List<T> items, String Function(T) keyOf, String sectionId,
+      {bool dropHidden = true}) {
+    return applyMenuOrder(
+        items.where((e) => menuSectionOf(keyOf(e)) == sectionId).toList(),
+        keyOf,
+        dropHidden: dropHidden);
+  }
+
+  Future<void> _loadMenuPrefs(SharedPreferences prefs) async {
+    _menuRankCache    = null;
+    _menuOrder        = prefs.getStringList(_kMenuOrderKey) ?? [];
+    _menuHidden       = (prefs.getStringList(_kMenuHiddenKey) ?? []).toSet();
+    _menuSectionOrder = prefs.getStringList(_kMenuSectionsKey) ?? [];
+    _menuCollapsed    = (prefs.getStringList(_kMenuCollapsedKey) ?? []).toSet();
+    final secRaw = prefs.getString(_kMenuItemSecKey);
+    if (secRaw != null && secRaw.isNotEmpty) {
+      try {
+        _menuItemSection = (jsonDecode(secRaw) as Map)
+            .map((k, v) => MapEntry(k as String, v as String));
+      } catch (_) {}
+    }
+  }
+
+  Future<void> setMenuOrder(List<String> keys) async {
+    _menuOrder = keys.map(menuKeyAlias).toList();
+    _menuRankCache = null;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_kMenuOrderKey, _menuOrder);
+  }
+
+  Future<void> toggleMenuHidden(String key) async {
+    final k = menuKeyAlias(key);
+    if (kMenuAlwaysVisible.contains(k)) return;
+    _menuHidden.contains(k) ? _menuHidden.remove(k) : _menuHidden.add(k);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_kMenuHiddenKey, _menuHidden.toList());
+  }
+
+  /// رجوع للترتيب الأصلي — بيمسح التفضيلات بس، مفيش أي بيانات بتتلمس.
+  Future<void> resetMenuPrefs() async {
+    _menuOrder = [];
+    _menuHidden = {};
+    _menuSectionOrder = [];
+    _menuItemSection = {};
+    _menuCollapsed = {};
+    _menuRankCache = null;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    for (final k in [
+      _kMenuOrderKey,
+      _kMenuHiddenKey,
+      _kMenuSectionsKey,
+      _kMenuItemSecKey,
+      _kMenuCollapsedKey,
+    ]) {
+      await prefs.remove(k);
+    }
   }
 
   AppDB db = AppDB();
@@ -538,6 +752,7 @@ class AppProvider extends ChangeNotifier {
     _telegramEnabled    = prefs.getBool('tcm_tg_enabled')  ?? false;
     _telegramOffset     = prefs.getInt('tcm_tg_offset')    ?? 0;
     _dataVersion        = prefs.getInt('tcm_data_version')  ?? 0;
+    await _loadMenuPrefs(prefs); // 🔀 ترتيب/إخفاء بنود قوايم التنقّل
     // استرجاع طابور السجل المعلّق (الصندوق الأسود) — لو فيه حركات لسه ماترحّلتش
     final pendRaw = prefs.getString('tcm_pending_audit');
     if (pendRaw != null) {
@@ -979,11 +1194,13 @@ class AppProvider extends ChangeNotifier {
   void setWorknumDeactivationDays(int v) { _worknumDeactivationDays = v; saveSettings(); notifyListeners(); }
   void setWorknumReminderDays(int v)     { _worknumReminderDays = v; saveSettings(); notifyListeners(); }
 
-  /// تسجيل اتصال على رقم — يحدّث lastContactDate لاليوم (ISO)
-  void recordWorkNumContact(String id) {
+  /// تسجيل اتصال على رقم — يحدّث lastContactDate (ISO).
+  /// `at` بتخليك تسجّل اتصال حصل في يوم فات (لو اتصلت من تليفون تاني
+  /// ونسيت تسجّل) — من غيرها بيتحسب النهاردة.
+  void recordWorkNumContact(String id, {DateTime? at}) {
     final i = db.workNums.indexWhere((w) => w.id == id);
     if (i < 0) return;
-    final now = DateTime.now();
+    final now = at ?? DateTime.now();
     db.workNums[i].lastContactDate =
         '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
     _addLog(null, 'service', 'تسجيل اتصال على رقم العمل ${db.workNums[i].phone}',
@@ -2465,18 +2682,9 @@ class AppProvider extends ChangeNotifier {
 
   // ─── SEARCH ──────────────────────────────────────────────────
 
-  /// تحويل الأرقام الهندية → لاتينية وتطبيع أحرف الألف وتاء مربوطة
-  static String _normalizeQuery(String q) {
-    const indic = '٠١٢٣٤٥٦٧٨٩';
-    var r = q;
-    for (var i = 0; i < indic.length; i++) {
-      r = r.replaceAll(indic[i], '$i');
-    }
-    return r
-        .replaceAll('أ', 'ا').replaceAll('إ', 'ا').replaceAll('آ', 'ا')
-        .replaceAll('ة', 'ه').replaceAll('ى', 'ي')
-        .toLowerCase();
-  }
+  /// تطبيع نص البحث — بيعتمد على محرّك البحث الموحّد (app_search.dart)
+  /// فبيشيل التشكيل كمان ويوحّد ؤ/ئ والأرقام الفارسية.
+  static String _normalizeQuery(String q) => normalizeArabic(q);
 
   /// تحويل الأحرف العربية إلى مكافئ لاتيني صوتي
   static String _latinize(String q) {
@@ -2593,8 +2801,11 @@ class AppProvider extends ChangeNotifier {
     // Work numbers
     if (filter == 'all' || filter == 'worknums') {
       for (final w in db.workNums) {
-        if (w.phone.contains(ql) ||
-            w.label.toLowerCase().contains(ql)) {
+        if (_matchesQuery(w.phone, ql, qlLatin) ||
+            _matchesQuery(w.label, ql, qlLatin) ||
+            _matchesQuery(w.lastSerial ?? '', ql, qlLatin) ||
+            _matchesQuery(w.previousOwner ?? '', ql, qlLatin) ||
+            _matchesQuery(w.notes ?? '', ql, qlLatin)) {
           results.add({
             'type': 'worknum',
             'id': w.id,
@@ -2646,6 +2857,47 @@ class AppProvider extends ChangeNotifier {
             'extra': 'كفيل',
             'positive': true,
             'tab': 2,
+          });
+        }
+      }
+    }
+
+    // 📝 الملاحظات — تدوّر في نص الملاحظة نفسها واسم العميل المربوط
+    if (filter == 'all' || filter == 'notes') {
+      for (final n in db.generalNotes) {
+        if (n.archived) continue;
+        if (_matchesQuery(n.content, ql, qlLatin) ||
+            _matchesQuery(n.memberName ?? '', ql, qlLatin)) {
+          final t = n.content;
+          results.add({
+            'type': 'note',
+            'id': n.id,
+            'label': t.length > 45 ? '${t.substring(0, 45)}…' : t,
+            'subtitle': n.memberName ?? 'ملاحظة',
+            'extra': n.isCompleted ? '✅' : '',
+            'positive': n.isCompleted,
+            'tab': 18,
+          });
+        }
+      }
+    }
+
+    // 📢 الشكاوى — بعنوانها أو نصها
+    if (filter == 'all' || filter == 'complaints') {
+      for (final c in allComplaints()) {
+        final title = (c['title'] ?? '').toString();
+        final text = (c['text'] ?? '').toString();
+        if (_matchesQuery(title, ql, qlLatin) ||
+            _matchesQuery(text, ql, qlLatin) ||
+            (c['_groupPhone'] ?? '').toString().contains(ql)) {
+          results.add({
+            'type': 'complaint',
+            'id': (c['id'] ?? '').toString(),
+            'label': title.isNotEmpty ? title : text,
+            'subtitle': 'شكوى على ${c['_groupPhone'] ?? ''}',
+            'extra': '',
+            'positive': c['_status'] == 'resolved',
+            'tab': 21,
           });
         }
       }

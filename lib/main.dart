@@ -141,13 +141,28 @@ class TelecomApp extends StatelessWidget {
             GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: const [Locale('ar', 'EG')],
-          // شريط أحمر دائم أعلى كل الشاشات وقت عدم الاتصال.
-          builder: (context, child) => Column(
-            children: [
-              const _OfflineBanner(),
-              Expanded(child: child ?? const SizedBox.shrink()),
-            ],
-          ),
+          // 🔠 حجم الخط + 🔴 شريط عدم الاتصال — الاتنين فوق كل الشاشات.
+          //
+          // حجم الخط: البرنامج مكتوب فيه أكتر من ١٧٠٠ `fontSize` بالإيد،
+          // فإعداد «صغير/كبير» كان مابيعملش حاجة. الـ textScaler هنا
+          // بيكبّر/يصغّر **كل** نص في البرنامج دفعة واحدة من غير ما نلمسهم.
+          builder: (context, child) {
+            final body = Column(
+              children: [
+                const _OfflineBanner(),
+                Expanded(child: child ?? const SizedBox.shrink()),
+              ],
+            );
+            final scale = AppTheme.textScale(prov.fontSize);
+            // «متوسط» = سيبه على إعداد الموبايل نفسه (لو حد مكبّر الخط
+            // من إعدادات الأندرويد ما نلغيهوش عليه).
+            if (scale == 1.0) return body;
+            return MediaQuery.withClampedTextScaling(
+              minScaleFactor: scale,
+              maxScaleFactor: scale,
+              child: body,
+            );
+          },
           home: prov.loading ? const _Splash() : const _AuthGate(),
         );
       },

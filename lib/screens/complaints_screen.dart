@@ -9,6 +9,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:audioplayers/audioplayers.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/app_search.dart';
+import '../services/view_prefs.dart';
+import '../widgets/app_search_bar.dart';
 
 class ComplaintsScreen extends StatefulWidget {
   const ComplaintsScreen({super.key});
@@ -22,17 +25,32 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
   final _player = AudioPlayer();
   String? _playingId;
 
+  final _searchCtrl = TextEditingController();
+
+  // 💾 بيفتكر الفلتر
+  final _viewPrefs = ViewPrefs('complaints');
+
   @override
   void initState() {
     super.initState();
     _player.onPlayerComplete.listen((_) {
       if (mounted) setState(() => _playingId = null);
     });
+    _viewPrefs.load().then((m) {
+      if (!mounted || m.isEmpty) return;
+      setState(() => _filter = m['filter'] ?? 'all');
+    });
+  }
+
+  void _set(VoidCallback change) {
+    setState(change);
+    _viewPrefs.save({'filter': _filter});
   }
 
   @override
   void dispose() {
     _player.dispose();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -47,7 +65,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
     }
   }
 
-  static const _statusInfo = {
+  static final _statusInfo = {
     'pending': {'label': '🔴 لسه', 'color': AppColors.red2},
     'inProgress': {'label': '🟡 شغّالة', 'color': AppColors.orange},
     'resolved': {'label': '🟢 تمت', 'color': AppColors.green2},
@@ -62,15 +80,17 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
     if (_filter != 'all') {
       complaints = complaints.where((c) => c['_status'] == _filter).toList();
     }
-    // بحث
-    if (_search.isNotEmpty) {
-      final q = _search.toLowerCase();
-      complaints = complaints.where((c) {
-        return (c['_groupPhone'] ?? '').toString().contains(_search) ||
-            (c['_groupOwner'] ?? '').toString().toLowerCase().contains(q) ||
-            (c['title'] ?? '').toString().toLowerCase().contains(q) ||
-            (c['text'] ?? '').toString().toLowerCase().contains(q);
-      }).toList();
+    // 🔍 محرّك البحث الموحّد
+    final terms = searchTerms(_search);
+    if (terms.isNotEmpty) {
+      complaints = complaints
+          .where((c) => searchHitsOf(terms, [
+                (c['_groupPhone'] ?? '').toString(),
+                (c['_groupOwner'] ?? '').toString(),
+                (c['title'] ?? '').toString(),
+                (c['text'] ?? '').toString(),
+              ]) != null)
+          .toList();
     }
 
     // إحصائيات
@@ -83,7 +103,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
       // Header
       Container(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-        decoration: const BoxDecoration(gradient: AppColors.headerGradient),
+        decoration: BoxDecoration(gradient: AppColors.headerGradient),
         child: Row(children: [
           const Text('📣', style: TextStyle(fontSize: 20)),
           const SizedBox(width: 8),
@@ -103,35 +123,27 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
       ),
       // عدّادات + بحث + فلاتر
       Container(
-        color: Colors.white,
+        color: AppColors.surface,
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
         child: Column(children: [
-          TextField(
+          AppSearchBar(
+            controller: _searchCtrl,
             onChanged: (v) => setState(() => _search = v),
-            style: GoogleFonts.cairo(fontSize: 13),
-            decoration: InputDecoration(
-              hintText: 'بحث بالخط أو الاسم أو نص الشكوى...',
-              hintStyle: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
-              prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.muted),
-              filled: true,
-              fillColor: const Color(0xFFf5f7fa),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            ),
+            hint: '🔍 رقم الخط · صاحبه · عنوان الشكوى · نصها',
+            padding: EdgeInsets.zero,
           ),
           const SizedBox(height: 8),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(children: [
               _filterChip('الكل (${all.length})', _filter == 'all',
-                  () => setState(() => _filter = 'all')),
+                  () => _set(() => _filter = 'all')),
               _filterChip('🔴 لسه ($pending)', _filter == 'pending',
-                  () => setState(() => _filter = 'pending')),
+                  () => _set(() => _filter = 'pending')),
               _filterChip('🟡 شغّالة ($inProgress)', _filter == 'inProgress',
-                  () => setState(() => _filter = 'inProgress')),
+                  () => _set(() => _filter = 'inProgress')),
               _filterChip('🟢 تمت ($resolved)', _filter == 'resolved',
-                  () => setState(() => _filter = 'resolved')),
+                  () => _set(() => _filter = 'resolved')),
             ]),
           ),
         ]),
@@ -173,7 +185,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: statusColor.withValues(alpha: 0.4), width: 1.5),
       ),
@@ -186,7 +198,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
             borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
           ),
           child: Row(children: [
-            const Icon(Icons.router, size: 15, color: AppColors.blue2),
+            Icon(Icons.router, size: 15, color: AppColors.blue2),
             const SizedBox(width: 5),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -225,7 +237,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
               const Spacer(),
               GestureDetector(
                 onTap: () => prov.deleteComplaint(gid, id),
-                child: const Icon(Icons.delete_outline, size: 18, color: AppColors.muted),
+                child: Icon(Icons.delete_outline, size: 18, color: AppColors.muted),
               ),
             ]),
             if ((c['title'] ?? '').toString().isNotEmpty) ...[

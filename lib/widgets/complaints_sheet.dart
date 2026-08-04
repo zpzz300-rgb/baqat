@@ -94,9 +94,9 @@ class _ComplaintsSheetState extends State<ComplaintsSheet> {
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.88,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(
         children: [
@@ -117,7 +117,7 @@ class _ComplaintsSheetState extends State<ComplaintsSheet> {
           // Header
           Container(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-            decoration: const BoxDecoration(gradient: AppColors.headerGradient),
+            decoration: BoxDecoration(gradient: AppColors.headerGradient),
             child: Row(
               children: [
                 Expanded(
@@ -371,7 +371,7 @@ class _ComplaintsSheetState extends State<ComplaintsSheet> {
               const SizedBox(width: 4),
               GestureDetector(
                 onTap: () => _deleteComplaint(prov, group, id),
-                child: const Icon(Icons.delete_outline, size: 18, color: AppColors.muted),
+                child: Icon(Icons.delete_outline, size: 18, color: AppColors.muted),
               ),
             ],
           ),
@@ -553,9 +553,9 @@ class _AddComplaintSheetState extends State<_AddComplaintSheet> {
         bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
       child: Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         child: SingleChildScrollView(
@@ -711,7 +711,7 @@ class _AddComplaintSheetState extends State<_AddComplaintSheet> {
                   const SizedBox(height: 6),
                   Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.check_circle,
                         color: AppColors.green,
                         size: 16,
@@ -791,7 +791,7 @@ class _AddComplaintSheetState extends State<_AddComplaintSheet> {
                           ),
                           child: Column(
                             children: [
-                              const Icon(
+                              Icon(
                                 Icons.camera_alt,
                                 color: AppColors.blue2,
                                 size: 28,
@@ -861,7 +861,7 @@ class _AddComplaintSheetState extends State<_AddComplaintSheet> {
                   const SizedBox(height: 6),
                   Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.check_circle,
                         color: AppColors.green,
                         size: 16,

@@ -120,11 +120,11 @@ class _MemberFilterScreenState extends State<MemberFilterScreen> {
                 hintText: '🔍 بحث بالاسم أو الرقم جوّه النتيجة...',
                 hintStyle: GoogleFonts.cairo(fontSize: 12.5, color: AppColors.muted),
                 isDense: true,
-                filled: true, fillColor: Colors.white,
+                filled: true, fillColor: AppColors.surface,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.border)),
+                    borderSide: BorderSide(color: AppColors.border)),
               ),
             ),
           ),
@@ -297,7 +297,7 @@ class _MemberFilterScreenState extends State<MemberFilterScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: debt > 0 ? const Color(0xFFEF9A9A) : AppColors.border),
         ),
@@ -305,7 +305,7 @@ class _MemberFilterScreenState extends State<MemberFilterScreen> {
           // باقة الجيجا — دايرة زرقا
           Container(
             width: 40, height: 40,
-            decoration: const BoxDecoration(color: AppColors.blueLight, shape: BoxShape.circle),
+            decoration: BoxDecoration(color: AppColors.blueLight, shape: BoxShape.circle),
             child: Center(child: Text(m.gb > 0 ? '${m.gb}\nGB' : '—',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.cairo(fontSize: 10, fontWeight: FontWeight.w900,
@@ -399,8 +399,8 @@ class _MembersBulkMsgSheetState extends State<_MembersBulkMsgSheet> {
     return Container(
       padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 20),
       constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
-      decoration: const BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      decoration: BoxDecoration(
+          color: AppColors.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Center(child: Container(width: 40, height: 4,
             decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)))),

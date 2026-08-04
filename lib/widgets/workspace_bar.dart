@@ -13,6 +13,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/menu_catalog.dart' show menuItemDef;
+import '../screens/today_screen.dart';
+import '../screens/help_screen.dart';
 import '../screens/guarantors_screen.dart';
 import '../screens/unified_billing_screen.dart';
 import '../screens/member_filter_screen.dart';
@@ -45,27 +48,42 @@ typedef WorkspaceScreenDef = ({
   bool fullScreen, // الشاشة Scaffold كامل بنفسها (مش محتاجة غلاف)
 });
 
+/// بيجيب الاسم والإيموچي من سجل القوايم (menu_catalog) بدل ما نكتبهم
+/// هنا تاني — عشان لو غيّرنا اسم شاشة يتغيّر في كل مكان مرة واحدة.
+WorkspaceScreenDef _def(String key, Widget Function() build,
+    {bool fullScreen = false}) {
+  final d = menuItemDef(key);
+  return (
+    emoji: d?.emoji ?? '📄',
+    title: d?.title ?? key,
+    build: build,
+    fullScreen: fullScreen,
+  );
+}
+
 final Map<String, WorkspaceScreenDef> kWorkspaceScreens = {
-  'reminders':   (emoji: '🔔', title: 'التنبيهات',      build: () => const RemindersScreen(),      fullScreen: false),
-  'guarantors':  (emoji: '🤝', title: 'الكفلاء',        build: () => const GuarantorsScreen(),     fullScreen: false),
-  'invoices':    (emoji: '🧾', title: 'الفواتير',       build: () => const UnifiedBillingScreen(), fullScreen: false),
-  'profit':      (emoji: '💰', title: 'الأرباح',        build: () => const ProfitScreen(),         fullScreen: false),
-  'filter':      (emoji: '🎛️', title: 'تصنيف العملاء',  build: () => const MemberFilterScreen(),   fullScreen: true),
-  'assets':      (emoji: '📊', title: 'لوحة الأصول',    build: () => const AssetsDashboardScreen(),fullScreen: true),
-  'flagged':     (emoji: '🚦', title: 'التصنيف',        build: () => const FlaggedMembersScreen(), fullScreen: false),
-  'consolidated':(emoji: '📈', title: 'كل العملاء',     build: () => const ConsolidatedScreen(),   fullScreen: false),
-  'worknums':    (emoji: '📋', title: 'أرقام العمل',    build: () => const WorkNumsScreen(),       fullScreen: false),
-  'rentals':     (emoji: '🏠', title: 'المؤجرة',        build: () => const RentalsScreen(),        fullScreen: false),
-  'gifts':       (emoji: '🎁', title: 'الهدايا',        build: () => const GiftsScreen(),          fullScreen: false),
-  'guests':      (emoji: '👥', title: 'الضيوف',         build: () => const GuestsScreen(),         fullScreen: false),
-  'bulk':        (emoji: '📤', title: 'رسائل جماعية',   build: () => const BulkMessageScreen(),    fullScreen: false),
-  'notes':       (emoji: '📝', title: 'الملاحظات',      build: () => const NotesScreen(),          fullScreen: false),
-  'complaints':  (emoji: '📢', title: 'الشكاوى',        build: () => const ComplaintsScreen(),     fullScreen: false),
-  'waitlist':    (emoji: '⏳', title: 'قائمة الانتظار', build: () => const WaitlistScreen(),       fullScreen: false),
-  'archive':     (emoji: '📦', title: 'الأرشيف',        build: () => const ArchiveScreen(),        fullScreen: false),
-  'deleted':     (emoji: '🗑', title: 'المحذوفون',      build: () => const DeletedScreen(),        fullScreen: false),
-  'activity':    (emoji: '📜', title: 'النشاط',         build: () => const ActivityScreen(),       fullScreen: false),
-  'dataio':      (emoji: '💾', title: 'البيانات',       build: () => const DataIOScreen(),         fullScreen: false),
+  'today':       _def('today',       () => const TodayScreen()),
+  'reminders':   _def('reminders',   () => const RemindersScreen()),
+  'guarantors':  _def('guarantors',  () => const GuarantorsScreen()),
+  'invoices':    _def('invoices',    () => const UnifiedBillingScreen()),
+  'profit':      _def('profit',      () => const ProfitScreen()),
+  'filter':      _def('filter',      () => const MemberFilterScreen(), fullScreen: true),
+  'assets':      _def('assets',      () => const AssetsDashboardScreen(), fullScreen: true),
+  'flagged':     _def('flagged',     () => const FlaggedMembersScreen()),
+  'consolidated':_def('consolidated',() => const ConsolidatedScreen()),
+  'worknums':    _def('worknums',    () => const WorkNumsScreen()),
+  'rentals':     _def('rentals',     () => const RentalsScreen()),
+  'gifts':       _def('gifts',       () => const GiftsScreen()),
+  'guests':      _def('guests',      () => const GuestsScreen()),
+  'bulk':        _def('bulk',        () => const BulkMessageScreen()),
+  'notes':       _def('notes',       () => const NotesScreen()),
+  'complaints':  _def('complaints',  () => const ComplaintsScreen()),
+  'waitlist':    _def('waitlist',    () => const WaitlistScreen()),
+  'archive':     _def('archive',     () => const ArchiveScreen()),
+  'deleted':     _def('deleted',     () => const DeletedScreen()),
+  'activity':    _def('activity',    () => const ActivityScreen()),
+  'dataio':      _def('dataio',      () => const DataIOScreen()),
+  'help':        _def('help',        () => const HelpScreen(), fullScreen: true),
 };
 
 // ─── شريط التابات ───────────────────────────────────────────────
@@ -81,9 +99,9 @@ class WorkspaceBar extends StatelessWidget {
 
     return Container(
       height: 44,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFDBE4EF))),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: const Border(bottom: BorderSide(color: Color(0xFFDBE4EF))),
       ),
       child: ListView(
         scrollDirection: Axis.horizontal,

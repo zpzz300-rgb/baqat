@@ -8,8 +8,11 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/app_search.dart';
 import '../services/export_service.dart';
+import '../services/view_prefs.dart';
 import '../utils/phone_utils.dart';
+import '../widgets/app_search_bar.dart';
 import '../widgets/common.dart';
 import '../widgets/member_card.dart';
 
@@ -23,6 +26,33 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
   String _search = '';
   String _filter = 'all'; // all | debt | clear | personal | company | relative | hasClients | noClients
   String _sort = 'debt';  // debt | clients | name
+  final _searchCtrl = TextEditingController();
+
+  // 💾 بيفتكر الفلتر والترتيب
+  final _viewPrefs = ViewPrefs('guarantors');
+
+  @override
+  void initState() {
+    super.initState();
+    _viewPrefs.load().then((m) {
+      if (!mounted || m.isEmpty) return;
+      setState(() {
+        _filter = m['filter'] ?? 'all';
+        _sort = m['sort'] ?? 'debt';
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _set(VoidCallback change) {
+    setState(change);
+    _viewPrefs.save({'filter': _filter, 'sort': _sort});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -48,26 +78,11 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
           child: Row(children: [
             Expanded(
-              child: TextField(
+              child: AppSearchBar(
+                controller: _searchCtrl,
                 onChanged: (v) => setState(() => _search = v.trim()),
-                style: GoogleFonts.cairo(fontSize: 13),
-                decoration: InputDecoration(
-                  hintText: '🔍 بحث باسم أو رقم الكفيل...',
-                  hintStyle: GoogleFonts.cairo(color: AppColors.muted, fontSize: 13),
-                  prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.muted),
-                  suffixIcon: _search.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear, size: 16, color: AppColors.muted),
-                          onPressed: () => setState(() => _search = ''),
-                        )
-                      : null,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: AppColors.border)),
-                  filled: true,
-                  fillColor: Colors.white,
-                ),
+                hint: '🔍 كفيل · رقمه · أي عميل تحته',
+                padding: EdgeInsets.zero,
               ),
             ),
             const SizedBox(width: 8),
@@ -240,7 +255,7 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
     margin: const EdgeInsets.only(right: 8),
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
     decoration: BoxDecoration(
-      color: Colors.white,
+      color: AppColors.surface,
       borderRadius: BorderRadius.circular(12),
       border: Border.all(color: color.withValues(alpha: 0.4)),
     ),
@@ -262,7 +277,7 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
     const labels = {'debt': 'أعلى مديونية', 'clients': 'أكتر عملاء', 'name': 'بالاسم'};
     return PopupMenuButton<String>(
       tooltip: 'ترتيب',
-      onSelected: (v) => setState(() => _sort = v),
+      onSelected: (v) => _set(() => _sort = v),
       itemBuilder: (_) => [
         for (final e in labels.entries)
           PopupMenuItem(
@@ -279,11 +294,11 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppColors.blueMid)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.sort, size: 14, color: AppColors.blue2),
+          Icon(Icons.sort, size: 14, color: AppColors.blue2),
           const SizedBox(width: 4),
           Text(labels[_sort] ?? 'ترتيب',
               style: GoogleFonts.cairo(fontSize: 11, color: AppColors.blue2, fontWeight: FontWeight.w700)),
@@ -295,7 +310,7 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
   Widget _chip(String label, String value, String emoji) {
     final active = _filter == value;
     return GestureDetector(
-      onTap: () => setState(() => _filter = value),
+      onTap: () => _set(() => _filter = value),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         margin: const EdgeInsets.only(right: 6),
@@ -348,12 +363,13 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
 
   List<_GuarantorEntry> _applyFilter(List<_GuarantorEntry> all) {
     var list = all;
-    if (_search.isNotEmpty) {
-      final q = _search.toLowerCase();
-      list = list.where((e) =>
-        e.name.toLowerCase().contains(q) || e.phone.contains(q) ||
-        e.members.any((m) => m.name.toLowerCase().contains(q) || m.phone.contains(q))
-      ).toList();
+    // 🔍 محرّك البحث الموحّد — الكفيل نفسه أو أي عميل تحته
+    final terms = searchTerms(_search);
+    if (terms.isNotEmpty) {
+      list = list.where((e) => searchHitsOf(terms, [
+            e.name, e.phone,
+            for (final m in e.members) ...[m.name, m.phone, m.natId ?? ''],
+          ]) != null).toList();
     }
     switch (_filter) {
       case 'debt':       return list.where((e) => e.totalDebt > 0).toList();
@@ -437,7 +453,7 @@ class _GuarantorCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
             color: entry.overLimit
@@ -457,7 +473,7 @@ class _GuarantorCard extends StatelessWidget {
               bottom: entry.members.isEmpty ? const Radius.circular(15) : Radius.zero,
             ),
             border: entry.members.isNotEmpty
-                ? const Border(bottom: BorderSide(color: AppColors.blueMid, width: 1))
+                ? Border(bottom: BorderSide(color: AppColors.blueMid, width: 1))
                 : null,
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -492,7 +508,7 @@ class _GuarantorCard extends StatelessWidget {
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
                       Text(entry.phone, style: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted), textDirection: TextDirection.ltr),
                       const SizedBox(width: 4),
-                      const Icon(Icons.copy, size: 11, color: AppColors.muted),
+                      Icon(Icons.copy, size: 11, color: AppColors.muted),
                     ]),
                   ),
                   if (entry.phone2 != null)
@@ -847,7 +863,7 @@ class _MemberRow extends StatelessWidget {
               ),
             ),
           if (!hasDebt)
-            const Icon(Icons.chevron_right, size: 16, color: AppColors.muted),
+            Icon(Icons.chevron_right, size: 16, color: AppColors.muted),
         ]),
       ),
     );
@@ -877,8 +893,8 @@ class _SingleMemberPaySheetState extends State<_SingleMemberPaySheet> {
 
     return Container(
       padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 24),
-      decoration: const BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      decoration: BoxDecoration(
+          color: AppColors.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
       child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Center(child: Container(width: 40, height: 4,
             decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)))),
@@ -1008,8 +1024,8 @@ class _BulkPaySheetState extends State<_BulkPaySheet> {
 
     return Container(
       padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 20),
-      decoration: const BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      decoration: BoxDecoration(
+          color: AppColors.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
       child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Center(child: Container(width: 40, height: 4,
             decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)))),
@@ -1096,7 +1112,7 @@ class _BulkPaySheetState extends State<_BulkPaySheet> {
               child: Text('إلغاء', style: GoogleFonts.cairo()))),
           const SizedBox(width: 8),
           Expanded(child: OutlinedButton(
-            style: OutlinedButton.styleFrom(side: const BorderSide(color: AppColors.blue3)),
+            style: OutlinedButton.styleFrom(side: BorderSide(color: AppColors.blue3)),
             onPressed: _buildPreview,
             child: Text('👁 معاينة', style: GoogleFonts.cairo(color: AppColors.blue3, fontWeight: FontWeight.w700)),
           )),
@@ -1195,7 +1211,7 @@ class _GuarantorFormState extends State<_GuarantorForm> {
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Container(
-        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+        decoration: BoxDecoration(color: AppColors.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         child: SingleChildScrollView(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
@@ -1420,16 +1436,16 @@ class _GuarantorMsgSheetState extends State<_GuarantorMsgSheet> {
     if (!_loaded) {
       return Container(
         height: 160,
-        decoration: const BoxDecoration(
-            color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+        decoration: BoxDecoration(
+            color: AppColors.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
         child: const Center(child: CircularProgressIndicator()),
       );
     }
     final preview = _compose();
     return Container(
       padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 20),
-      decoration: const BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      decoration: BoxDecoration(
+          color: AppColors.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
       child: SingleChildScrollView(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
           Center(child: Container(width: 40, height: 4,
@@ -1559,8 +1575,8 @@ class _GuarantorLogSheetState extends State<_GuarantorLogSheet> {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.82),
-      decoration: const BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      decoration: BoxDecoration(
+          color: AppColors.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Center(child: Container(width: 40, height: 4,
             decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)))),
@@ -1627,7 +1643,7 @@ class _GuarantorLogSheetState extends State<_GuarantorLogSheet> {
                                   color: amt > 0 ? AppColors.green : AppColors.red)),
                         GestureDetector(
                           onTap: () => _confirmDelete(i),
-                          child: const Padding(padding: EdgeInsets.only(right: 6),
+                          child: Padding(padding: const EdgeInsets.only(right: 6),
                               child: Icon(Icons.close, size: 16, color: AppColors.muted)),
                         ),
                       ]),
@@ -1769,8 +1785,8 @@ class _BroadcastSheetState extends State<_BroadcastSheet> {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
-      decoration: const BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      decoration: BoxDecoration(
+          color: AppColors.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Center(child: Container(width: 40, height: 4,
             decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)))),

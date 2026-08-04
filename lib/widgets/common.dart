@@ -1,4 +1,4 @@
-﻿// lib/widgets/common.dart
+// lib/widgets/common.dart
 import 'package:flutter/material.dart';
 // ignore: unnecessary_import
 import 'package:flutter/services.dart';
@@ -243,7 +243,7 @@ class _AppDateFieldState extends State<AppDateField> {
       lastDate: DateTime(2035),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
-          colorScheme: const ColorScheme.light(primary: AppColors.blue2),
+          colorScheme: ColorScheme.light(primary: AppColors.blue2),
         ),
         child: child!,
       ),
@@ -286,13 +286,13 @@ class _AppDateFieldState extends State<AppDateField> {
           Container(
             height: 48,
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surface,
               border: Border.all(color: AppColors.border),
               borderRadius: BorderRadius.circular(12),
             ),
             child: IconButton(
               onPressed: _pick,
-              icon: const Icon(Icons.calendar_today, color: AppColors.blue2),
+              icon: Icon(Icons.calendar_today, color: AppColors.blue2),
               tooltip: 'اختيار التاريخ',
             ),
           ),

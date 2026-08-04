@@ -38,7 +38,7 @@ class _WaitlistScreenState extends State<WaitlistScreen> {
             margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surface,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: AppColors.border),
               boxShadow: [BoxShadow(color: AppColors.blue2.withValues(alpha: 0.08), blurRadius: 12)],
@@ -137,7 +137,7 @@ class _WaitlistScreenState extends State<WaitlistScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
         boxShadow: [BoxShadow(color: AppColors.blue2.withValues(alpha: 0.06), blurRadius: 8)],
@@ -204,9 +204,9 @@ class _WaitlistScreenState extends State<WaitlistScreen> {
             ),
           // Actions
           Container(
-            decoration: const BoxDecoration(
-              color: Color(0xFFf8fafc),
-              borderRadius: BorderRadius.vertical(bottom: Radius.circular(14)),
+            decoration: BoxDecoration(
+              color: const Color(0xFFf8fafc),
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
               border: Border(top: BorderSide(color: AppColors.border)),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -328,9 +328,9 @@ class _WaitlistFormState extends State<_WaitlistForm> {
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
         child: SingleChildScrollView(
@@ -371,7 +371,7 @@ class _WaitlistFormState extends State<_WaitlistForm> {
                   child: OutlinedButton(
                     onPressed: () => Navigator.pop(context),
                     style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.border),
+                      side: BorderSide(color: AppColors.border),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       padding: const EdgeInsets.symmetric(vertical: 13),
                     ),
@@ -418,8 +418,8 @@ class _WaitlistFormState extends State<_WaitlistForm> {
               hintStyle: GoogleFonts.cairo(color: AppColors.muted, fontSize: 12),
               filled: true,
               fillColor: const Color(0xFFf8fafc),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: AppColors.border)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: AppColors.border)),
               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             ),
           ),

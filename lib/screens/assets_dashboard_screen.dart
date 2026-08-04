@@ -10,6 +10,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/app_search.dart';
+import '../services/view_prefs.dart';
+import '../widgets/app_search_bar.dart';
 import '../widgets/common.dart';
 import '../widgets/member_card.dart';
 
@@ -24,6 +27,30 @@ class _AssetsDashboardScreenState extends State<AssetsDashboardScreen> {
   String _query = '';
   // فلتر: all / landline / home4g / empty
   String _filter = 'all';
+  final _searchCtrl = TextEditingController();
+
+  // 💾 بيفتكر الفلتر
+  final _viewPrefs = ViewPrefs('assets');
+
+  @override
+  void initState() {
+    super.initState();
+    _viewPrefs.load().then((m) {
+      if (!mounted || m.isEmpty) return;
+      setState(() => _filter = m['filter'] ?? 'all');
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _set(VoidCallback change) {
+    setState(change);
+    _viewPrefs.save({'filter': _filter});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -57,11 +84,13 @@ class _AssetsDashboardScreenState extends State<AssetsDashboardScreen> {
           if (hasL || hasH) return false;
           break;
       }
-      if (_query.isEmpty) return true;
-      final q = _query.trim();
-      return g.phone.contains(q) ||
-          (g.ownerName ?? '').contains(q) ||
-          (g.groupInvoiceName ?? '').contains(q);
+      // 🔍 محرّك البحث الموحّد
+      final terms = searchTerms(_query);
+      if (terms.isEmpty) return true;
+      return searchHitsOf(terms, [
+            g.phone, g.ownerName ?? '', g.groupInvoiceName ?? '',
+            g.notes ?? '',
+          ]) != null;
     }).toList();
 
     return Scaffold(
@@ -77,36 +106,29 @@ class _AssetsDashboardScreenState extends State<AssetsDashboardScreen> {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-            decoration: const BoxDecoration(gradient: AppColors.headerGradient),
+            decoration: BoxDecoration(gradient: AppColors.headerGradient),
             child: Row(
               children: [
                 _statChip('الإجمالي', groups.length, Colors.white,
-                    active: _filter == 'all', onTap: () => setState(() => _filter = 'all')),
+                    active: _filter == 'all', onTap: () => _set(() => _filter = 'all')),
                 _statChip('☎️ أرضي', withLandline, AppColors.greenLight,
                     active: _filter == 'landline',
-                    onTap: () => setState(() => _filter = 'landline')),
+                    onTap: () => _set(() => _filter = 'landline')),
                 _statChip('🏠 هوم 4G', withHome4g, AppColors.blueLight,
                     active: _filter == 'home4g',
-                    onTap: () => setState(() => _filter = 'home4g')),
+                    onTap: () => _set(() => _filter = 'home4g')),
                 _statChip('➖ فاضي', empty, AppColors.orangeLight,
                     active: _filter == 'empty',
-                    onTap: () => setState(() => _filter = 'empty')),
+                    onTap: () => _set(() => _filter = 'empty')),
               ],
             ),
           ),
           // ── بحث ─────────────────────────────────────────────────
-          Padding(
+          AppSearchBar(
+            controller: _searchCtrl,
+            onChanged: (v) => setState(() => _query = v),
+            hint: '🔍 رقم الخط · صاحبه · اسم الفاتورة · ملاحظات',
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-            child: TextField(
-              onChanged: (v) => setState(() => _query = v),
-              style: GoogleFonts.cairo(),
-              decoration: InputDecoration(
-                hintText: 'ابحث برقم الخط أو اسم صاحبه…',
-                hintStyle: GoogleFonts.cairo(color: AppColors.muted),
-                prefixIcon: const Icon(Icons.search),
-                isDense: true,
-              ),
-            ),
           ),
           // ── رأس الجدول ──────────────────────────────────────────
           Padding(
@@ -270,7 +292,7 @@ class _AssetsDashboardScreenState extends State<AssetsDashboardScreen> {
             : Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.add, size: 14, color: AppColors.muted),
+                  Icon(Icons.add, size: 14, color: AppColors.muted),
                   const SizedBox(width: 3),
                   Text('فاضي',
                       style: GoogleFonts.cairo(
@@ -430,7 +452,7 @@ class _ExceptionEditDialogState extends State<_ExceptionEditDialog> {
         if (isEdit)
           TextButton.icon(
             onPressed: _delete,
-            icon: const Icon(Icons.delete_outline, color: AppColors.red),
+            icon: Icon(Icons.delete_outline, color: AppColors.red),
             label: Text('حذف',
                 style: GoogleFonts.cairo(color: AppColors.red)),
           ),

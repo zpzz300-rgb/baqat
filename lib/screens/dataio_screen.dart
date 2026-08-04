@@ -1,4 +1,4 @@
-﻿// lib/screens/dataio_screen.dart
+// lib/screens/dataio_screen.dart
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -23,7 +23,7 @@ class DataIOScreen extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.border),
           boxShadow: [BoxShadow(color: AppColors.blue2.withValues(alpha: 0.08), blurRadius: 20)],
@@ -445,7 +445,7 @@ class DataIOScreen extends StatelessWidget {
           children: [
             ListTile(
               title: Text('العملاء فقط', style: GoogleFonts.cairo()),
-              leading: const Icon(Icons.people, color: AppColors.orange),
+              leading: Icon(Icons.people, color: AppColors.orange),
               onTap: () {
                 Navigator.pop(context);
                 showDialog(
@@ -462,7 +462,7 @@ class DataIOScreen extends StatelessWidget {
             ),
             ListTile(
               title: Text('سجل النشاط', style: GoogleFonts.cairo()),
-              leading: const Icon(Icons.history, color: AppColors.blue),
+              leading: Icon(Icons.history, color: AppColors.blue),
               onTap: () {
                 Navigator.pop(context);
                 showDialog(

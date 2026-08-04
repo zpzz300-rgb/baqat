@@ -370,7 +370,7 @@ class _EditGroupModalState extends State<EditGroupModal> {
             initialValue: _parentGroupId,
             decoration: InputDecoration(
               filled: true,
-              fillColor: Colors.white,
+              fillColor: AppColors.surface,
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: const BorderSide(color: Color(0xFFCE93D8))),
@@ -432,7 +432,7 @@ class _EditGroupModalState extends State<EditGroupModal> {
                     : null,
               ),
               child: !exists
-                  ? const Icon(Icons.add_a_photo_outlined, color: AppColors.blue2, size: 28)
+                  ? Icon(Icons.add_a_photo_outlined, color: AppColors.blue2, size: 28)
                   : null,
             ),
           ),
@@ -780,7 +780,7 @@ class _EditGroupModalState extends State<EditGroupModal> {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: AppColors.blueMid),
               ),
-              child: const Icon(Icons.camera_alt_outlined,
+              child: Icon(Icons.camera_alt_outlined,
                   color: AppColors.blue2, size: 30),
             ),
           ),
@@ -1112,7 +1112,7 @@ class _FormulaPreview extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: const Color(0xFFA5D6A7))),
       child: Column(

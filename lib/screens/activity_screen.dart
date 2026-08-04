@@ -199,7 +199,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surface,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppColors.border, width: 1.5),
             ),
@@ -265,7 +265,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
         if (_dayFilter != null)
           IconButton(
             onPressed: () => setState(() => _dayFilter = null),
-            icon: const Icon(Icons.close, size: 18, color: AppColors.red),
+            icon: Icon(Icons.close, size: 18, color: AppColors.red),
             visualDensity: VisualDensity.compact,
           ),
       ]),
@@ -300,7 +300,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
               ),
               IconButton(
                 onPressed: _refresh,
-                icon: const Icon(Icons.refresh, color: AppColors.blue2),
+                icon: Icon(Icons.refresh, color: AppColors.blue2),
                 tooltip: 'تحديث',
               ),
               GestureDetector(
@@ -416,7 +416,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
                     return Container(
                       margin: const EdgeInsets.only(bottom: 8),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: AppColors.surface,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: AppColors.border),
                       ),

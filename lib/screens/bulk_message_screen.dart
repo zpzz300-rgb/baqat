@@ -101,7 +101,7 @@ class _BulkMessageScreenState extends State<BulkMessageScreen>
       children: [
         // Filter + select all bar
         Container(
-          color: Colors.white,
+          color: AppColors.surface,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Row(children: [
             _filterChip('🔴 ديون', 'debt'),
@@ -140,7 +140,7 @@ class _BulkMessageScreenState extends State<BulkMessageScreen>
               onChanged: (v) => _msgTemplate = v,
               decoration: InputDecoration(
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: AppColors.surface,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
                 contentPadding: const EdgeInsets.all(10),
               ),
@@ -192,7 +192,7 @@ class _BulkMessageScreenState extends State<BulkMessageScreen>
 
         // Send button
         Container(
-          color: Colors.white,
+          color: AppColors.surface,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
           child: Column(children: [
             if (_sending)
@@ -237,7 +237,7 @@ class _BulkMessageScreenState extends State<BulkMessageScreen>
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppColors.border),
           ),
@@ -304,7 +304,7 @@ class _BulkMessageScreenState extends State<BulkMessageScreen>
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(children: [
-                  const Icon(Icons.check_circle, color: AppColors.green, size: 18),
+                  Icon(Icons.check_circle, color: AppColors.green, size: 18),
                   const SizedBox(width: 8),
                   Text(
                     'سيصلك تنبيه يومياً في ${_scheduledTime!.hour.toString().padLeft(2, '0')}:${_scheduledTime!.minute.toString().padLeft(2, '0')}',
@@ -321,7 +321,7 @@ class _BulkMessageScreenState extends State<BulkMessageScreen>
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppColors.border),
           ),

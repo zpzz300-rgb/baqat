@@ -8,6 +8,7 @@ import '../services/export_service.dart';
 import '../screens/activation_screen.dart';
 import '../screens/neumorphic_demo_screen.dart';
 import '../screens/admin_panel_screen.dart';
+import '../screens/help_screen.dart';
 import 'common.dart';
 import 'pin_dialog.dart';
 
@@ -119,6 +120,10 @@ class _SettingsModalState extends State<SettingsModal> {
               ),
               const SizedBox(height: 16),
             ],
+
+            // ℹ️ حول التطبيق + 📖 دليل الاستخدام
+            _aboutCard(context),
+            const SizedBox(height: 16),
 
             // Neumorphism design preview (top — easy to find)
             GestureDetector(
@@ -295,7 +300,7 @@ class _SettingsModalState extends State<SettingsModal> {
                           style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted)),
                     ]),
                   ),
-                  const Icon(Icons.arrow_forward_ios, size: 14, color: AppColors.muted),
+                  Icon(Icons.arrow_forward_ios, size: 14, color: AppColors.muted),
                 ]),
               ),
             ),
@@ -400,7 +405,7 @@ class _SettingsModalState extends State<SettingsModal> {
                     child: OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.green2,
-                        side: const BorderSide(color: AppColors.green),
+                        side: BorderSide(color: AppColors.green),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                       icon: const Icon(Icons.backup, size: 18),
@@ -650,7 +655,7 @@ class _SettingsModalState extends State<SettingsModal> {
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                       filled: true,
-                      fillColor: Colors.white,
+                      fillColor: AppColors.surface,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -889,6 +894,68 @@ class _SettingsModalState extends State<SettingsModal> {
           ],
         ),
       ),
+    );
+  }
+
+  // ─── ℹ️ حول التطبيق ──────────────────────────────────────────
+  /// كارت فيه اسم البرنامج وزرار الدليل — دوسة على «📖 الشرح» بتفتح
+  /// شرح مفصّل لكل شاشة وكل خاصية.
+  Widget _aboutCard(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.blueMid),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Text('📡', style: TextStyle(fontSize: 26)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('باقات الاتصالات',
+                      style: GoogleFonts.cairo(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.blue2)),
+                  Text('برنامج إدارة الخطوط والعملاء والفواتير',
+                      style: GoogleFonts.cairo(
+                          fontSize: 11, color: AppColors.muted)),
+                ]),
+          ),
+        ]),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.blue2,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            icon: const Icon(Icons.menu_book_outlined, size: 19),
+            label: Text('📖 شرح البرنامج',
+                style: GoogleFonts.cairo(
+                    fontSize: 13.5, fontWeight: FontWeight.w900)),
+            onPressed: () {
+              Navigator.pop(context); // اقفل الإعدادات الأول
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const HelpScreen()),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text('شرح مفصّل لكل شاشة وكل زرار — وفيه بحث جواه',
+            style: GoogleFonts.cairo(fontSize: 10.5, color: AppColors.muted)),
+      ]),
     );
   }
 

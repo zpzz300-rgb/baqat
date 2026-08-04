@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/supabase_service.dart';
+import '../services/app_theme.dart';
 
 /// شاشة دخول/تسجيل الموظف — يدخل بكود المحل + اسمه + كود سري.
 /// التسجيل ينتظر موافقة المالك، والدخول يفتح البرنامج لو الحساب active.
@@ -110,7 +111,7 @@ class _EmployeeLoginScreenState extends State<EmployeeLoginScreen> {
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppColors.surface,
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 20, offset: Offset(0, 8))],
                 ),

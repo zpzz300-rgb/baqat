@@ -8,6 +8,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../providers/app_provider.dart';
 import '../models/models.dart';
 import '../services/app_theme.dart';
+import '../services/app_search.dart';
+import '../services/view_prefs.dart';
+import '../widgets/app_search_bar.dart';
 
 class BillingMatrixScreen extends StatefulWidget {
   const BillingMatrixScreen({super.key});
@@ -20,6 +23,38 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
   String _provFilter = 'all'; // all | vodafone | etisalat | orange | we
   bool _onlyDebt = false;     // اللي عليه فلوس بس
   bool _sortByDebt = false;   // ترتيب بالأعلى مديونية
+  final _searchCtrl = TextEditingController();
+
+  // 💾 بيفتكر الفلاتر
+  final _viewPrefs = ViewPrefs('billing_matrix');
+
+  @override
+  void initState() {
+    super.initState();
+    _viewPrefs.load().then((m) {
+      if (!mounted || m.isEmpty) return;
+      setState(() {
+        _provFilter = m['prov'] ?? 'all';
+        _onlyDebt = m['onlyDebt'] ?? false;
+        _sortByDebt = m['sortByDebt'] ?? false;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _set(VoidCallback change) {
+    setState(change);
+    _viewPrefs.save({
+      'prov': _provFilter,
+      'onlyDebt': _onlyDebt,
+      'sortByDebt': _sortByDebt,
+    });
+  }
 
   static const _provLabels = {
     'all': 'الكل',
@@ -51,12 +86,13 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
       if (!hasBill) return false;
       if (_provFilter != 'all' && g.provider != _provFilter) return false;
       if (_onlyDebt && remOf(g) <= 0) return false;
-      if (_search.isNotEmpty) {
-        final q = _search.toLowerCase();
-        if (!g.phone.contains(q) &&
-            !(g.ownerName ?? '').toLowerCase().contains(q)) {
-          return false;
-        }
+      // 🔍 محرّك البحث الموحّد
+      final terms = searchTerms(_search);
+      if (terms.isNotEmpty &&
+          searchHitsOf(terms, [
+                g.phone, g.ownerName ?? '', g.groupInvoiceName ?? '',
+              ]) == null) {
+        return false;
       }
       return true;
     }).toList();
@@ -84,7 +120,7 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
     return Column(children: [
       // ── Header ──────────────────────────────────────────────────
       Container(
-        decoration: const BoxDecoration(gradient: AppColors.headerGradient),
+        decoration: BoxDecoration(gradient: AppColors.headerGradient),
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
         child: Column(children: [
           Row(children: [
@@ -115,25 +151,11 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
           ]),
           const SizedBox(height: 10),
           // بحث
-          SizedBox(
-            height: 38,
-            child: TextField(
-              onChanged: (v) => setState(() => _search = v),
-              textDirection: TextDirection.rtl,
-              style: GoogleFonts.cairo(fontSize: 13),
-              decoration: InputDecoration(
-                hintText: '🔍 بحث بالرقم أو الاسم...',
-                hintStyle: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
-                filled: true,
-                fillColor: Colors.white,
-                isDense: true,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(20),
-                    borderSide: BorderSide.none),
-              ),
-            ),
+          AppSearchBar(
+            controller: _searchCtrl,
+            onChanged: (v) => setState(() => _search = v),
+            hint: '🔍 رقم · صاحب الخط · اسم الفاتورة',
+            padding: EdgeInsets.zero,
           ),
         ]),
       ),
@@ -159,12 +181,12 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
           children: [
             for (final e in _provLabels.entries)
               _filterChip(e.value, _provFilter == e.key,
-                  () => setState(() => _provFilter = e.key)),
+                  () => _set(() => _provFilter = e.key)),
             Container(width: 1, height: 20, margin: const EdgeInsets.symmetric(horizontal: 6), color: AppColors.border),
             _filterChip('💰 عليه فلوس', _onlyDebt,
-                () => setState(() => _onlyDebt = !_onlyDebt)),
+                () => _set(() => _onlyDebt = !_onlyDebt)),
             _filterChip('⬇️ الأعلى مديونية', _sortByDebt,
-                () => setState(() => _sortByDebt = !_sortByDebt)),
+                () => _set(() => _sortByDebt = !_sortByDebt)),
           ],
         ),
       ),
@@ -232,16 +254,16 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
         maxChildSize: 0.9,
         expand: false,
         builder: (_, scroll) => Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
           ),
           child: Column(children: [
             Container(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 gradient: AppColors.headerGradient,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
               ),
               child: Row(children: [
                 const Text('📈', style: TextStyle(fontSize: 18)),
@@ -299,7 +321,7 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
               widthFactor: ratio,
               child: Container(
                 height: 18,
-                decoration: const BoxDecoration(gradient: AppColors.headerGradient),
+                decoration: BoxDecoration(gradient: AppColors.headerGradient),
               ),
             ),
           ]),
@@ -322,17 +344,17 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
         maxChildSize: 0.95,
         expand: false,
         builder: (_, scroll) => Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
           ),
           child: Column(children: [
             // مقبض + عنوان
             Container(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 gradient: AppColors.headerGradient,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
               ),
               child: Column(children: [
                 Container(
@@ -422,7 +444,7 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
       ),

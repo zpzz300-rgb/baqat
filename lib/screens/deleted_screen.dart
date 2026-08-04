@@ -56,7 +56,7 @@ class DeletedScreen extends StatelessWidget {
 
           Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surface,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: AppColors.border),
               boxShadow: [BoxShadow(color: AppColors.blue2.withValues(alpha: 0.08), blurRadius: 20)],
@@ -154,7 +154,7 @@ class _DeletedRow extends StatelessWidget {
           ]),
           const SizedBox(width: 4),
           IconButton(
-            icon: const Icon(Icons.restore, color: AppColors.blue, size: 20),
+            icon: Icon(Icons.restore, color: AppColors.blue, size: 20),
             tooltip: 'استعادة',
             onPressed: () {
               prov.restoreMember(m.id);
@@ -207,9 +207,9 @@ class _DeletedRow extends StatelessWidget {
         builder: (ctx, setSt) => Padding(
           padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
           child: Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
             ),
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             child: SingleChildScrollView(

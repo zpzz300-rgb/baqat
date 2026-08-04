@@ -6,6 +6,8 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/app_search.dart';
+import '../widgets/app_search_bar.dart';
 
 class GroupFoldersScreen extends StatefulWidget {
   const GroupFoldersScreen({super.key});
@@ -16,6 +18,13 @@ class GroupFoldersScreen extends StatefulWidget {
 class _GroupFoldersScreenState extends State<GroupFoldersScreen> {
   final Set<String> _expanded = {};
   String _search = '';
+  final _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -25,11 +34,13 @@ class _GroupFoldersScreenState extends State<GroupFoldersScreen> {
     Set<String>? matchGroupIds;
     Set<String> forceExpand = {};
     if (searching) {
-      final q = _search.trim().toLowerCase();
+      // 🔍 محرّك البحث الموحّد
+      final terms = searchTerms(_search);
       matchGroupIds = prov.db.groups
-          .where((g) =>
-              g.phone.toLowerCase().contains(q) ||
-              (g.ownerName ?? '').toLowerCase().contains(q))
+          .where((g) => searchHitsOf(terms, [
+                g.phone, g.ownerName ?? '', g.groupInvoiceName ?? '',
+                g.notes ?? '',
+              ]) != null)
           .map((g) => g.id)
           .toSet();
       for (final g in prov.db.groups.where((g) => matchGroupIds!.contains(g.id))) {
@@ -63,27 +74,11 @@ class _GroupFoldersScreenState extends State<GroupFoldersScreen> {
       ),
       body: Column(
         children: [
-          Padding(
+          AppSearchBar(
+            controller: _searchCtrl,
+            onChanged: (v) => setState(() => _search = v),
+            hint: '🔍 رقم الخط · صاحبه · اسم الفاتورة · ملاحظات',
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-            child: TextField(
-              onChanged: (v) => setState(() => _search = v),
-              textDirection: TextDirection.rtl,
-              decoration: InputDecoration(
-                hintText: '🔍 بحث برقم الخط أو اسم صاحبه...',
-                hintStyle: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(22),
-                    borderSide: const BorderSide(color: AppColors.border)),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                suffixIcon: _search.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.close, size: 16),
-                        onPressed: () => setState(() => _search = ''))
-                    : null,
-              ),
-            ),
           ),
           Expanded(
             child: rows.isEmpty
@@ -143,7 +138,7 @@ class _GroupFoldersScreenState extends State<GroupFoldersScreen> {
     return Container(
       margin: EdgeInsets.only(right: depth * 18.0, bottom: 6),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.border),
       ),
@@ -171,7 +166,7 @@ class _GroupFoldersScreenState extends State<GroupFoldersScreen> {
                   : () => prov.reorderFoldersAt(f.parentFolderId, siblingIndex, siblingIndex + 1),
             ),
             PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, size: 18, color: AppColors.muted),
+              icon: Icon(Icons.more_vert, size: 18, color: AppColors.muted),
               onSelected: (v) => _onFolderAction(context, prov, f, v),
               itemBuilder: (_) => [
                 PopupMenuItem(value: 'addSub', child: Text('➕ فولدر فرعي', style: GoogleFonts.cairo())),
@@ -197,7 +192,7 @@ class _GroupFoldersScreenState extends State<GroupFoldersScreen> {
       ),
       child: ListTile(
         dense: true,
-        leading: const Icon(Icons.podcasts, color: AppColors.blue2),
+        leading: Icon(Icons.podcasts, color: AppColors.blue2),
         title: Text(g.phone,
             textDirection: TextDirection.ltr,
             style: GoogleFonts.robotoMono(fontWeight: FontWeight.w800, fontSize: 13)),
@@ -226,7 +221,7 @@ class _GroupFoldersScreenState extends State<GroupFoldersScreen> {
                   : () => prov.reorderGroupsInFolder(g.folderId, siblingIndex, siblingIndex + 1),
             ),
             IconButton(
-              icon: const Icon(Icons.drive_file_move_outline, size: 18, color: AppColors.muted),
+              icon: Icon(Icons.drive_file_move_outline, size: 18, color: AppColors.muted),
               tooltip: 'نقل لفولدر',
               onPressed: () => _pickFolderForGroup(context, prov, g),
             ),
@@ -404,9 +399,9 @@ class _FolderPickerSheet extends StatelessWidget {
         maxChildSize: 0.9,
         expand: false,
         builder: (_, sc) => Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(children: [
             const SizedBox(height: 10),
@@ -426,12 +421,12 @@ class _FolderPickerSheet extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 children: [
                   ListTile(
-                    leading: const Icon(Icons.layers_clear, color: AppColors.muted),
+                    leading: Icon(Icons.layers_clear, color: AppColors.muted),
                     title: Text('بدون تصنيف (جذر الدليل)',
                         style: GoogleFonts.cairo(
                             fontWeight: currentId == null ? FontWeight.w900 : FontWeight.w600)),
                     trailing: currentId == null
-                        ? const Icon(Icons.check, color: AppColors.blue2)
+                        ? Icon(Icons.check, color: AppColors.blue2)
                         : null,
                     onTap: () {
                       onPick(null);
@@ -441,12 +436,12 @@ class _FolderPickerSheet extends StatelessWidget {
                   for (final (f, depth) in rows)
                     ListTile(
                       contentPadding: EdgeInsets.only(right: 16.0 + depth * 20, left: 16),
-                      leading: const Icon(Icons.folder, color: AppColors.blue3),
+                      leading: Icon(Icons.folder, color: AppColors.blue3),
                       title: Text(f.name,
                           style: GoogleFonts.cairo(
                               fontWeight: currentId == f.id ? FontWeight.w900 : FontWeight.w600)),
                       trailing: currentId == f.id
-                          ? const Icon(Icons.check, color: AppColors.blue2)
+                          ? Icon(Icons.check, color: AppColors.blue2)
                           : null,
                       onTap: () {
                         onPick(f.id);

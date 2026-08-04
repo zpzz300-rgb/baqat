@@ -38,7 +38,7 @@ class DeletedScreen extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 10),
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surface,
             border: Border.all(color: const Color(0xFFbbdefb)),
             borderRadius: BorderRadius.circular(12),
           ),
@@ -151,7 +151,7 @@ class RemindersScreen extends StatelessWidget {
                   margin: const EdgeInsets.only(bottom: 10),
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: AppColors.border),
                     boxShadow: [BoxShadow(color: AppColors.red.withValues(alpha: 0.06), blurRadius: 12)],
@@ -263,9 +263,9 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
               hintText: '🔍 بحث برقم أو اسم...',
               hintStyle: GoogleFonts.cairo(fontSize: 13, color: AppColors.muted),
               filled: true,
-              fillColor: Colors.white,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: const BorderSide(color: AppColors.border, width: 1.5)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: const BorderSide(color: AppColors.border, width: 1.5)),
+              fillColor: AppColors.surface,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide(color: AppColors.border, width: 1.5)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide(color: AppColors.border, width: 1.5)),
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             ),
           ),
@@ -284,7 +284,7 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
                       margin: const EdgeInsets.only(bottom: 10),
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: AppColors.surface,
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(color: AppColors.border),
                       ),
@@ -304,9 +304,9 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
                           ),
                           Row(
                             children: [
-                              IconButton(icon: const Icon(Icons.edit_outlined, color: AppColors.blue, size: 20), onPressed: () => _showEditModal(context, w)),
+                              IconButton(icon: Icon(Icons.edit_outlined, color: AppColors.blue, size: 20), onPressed: () => _showEditModal(context, w)),
                               IconButton(
-                                icon: const Icon(Icons.delete_outline, color: AppColors.red, size: 20),
+                                icon: Icon(Icons.delete_outline, color: AppColors.red, size: 20),
                                 onPressed: () => prov.deleteWorkNum(w.id),
                               ),
                             ],

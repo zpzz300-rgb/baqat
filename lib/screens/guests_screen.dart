@@ -5,6 +5,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/app_search.dart';
+import '../services/view_prefs.dart';
+import '../widgets/app_search_bar.dart';
 import '../widgets/common.dart';
 import '../utils/phone_utils.dart';
 import '../utils/print_helper.dart';
@@ -19,6 +22,30 @@ class GuestsScreen extends StatefulWidget {
 class _GuestsScreenState extends State<GuestsScreen> {
   String _search = '';
   String _filter = 'all'; // all | uncollected | unpaid
+  final _searchCtrl = TextEditingController();
+
+  // 💾 بيفتكر الفلتر
+  final _viewPrefs = ViewPrefs('guests');
+
+  @override
+  void initState() {
+    super.initState();
+    _viewPrefs.load().then((m) {
+      if (!mounted || m.isEmpty) return;
+      setState(() => _filter = m['filter'] ?? 'all');
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _set(VoidCallback change) {
+    setState(change);
+    _viewPrefs.save({'filter': _filter});
+  }
 
   void _printGuests(BuildContext context, AppProvider prov, List<GuestUser> guestList, List<Member> memberGuests) {
     final rows = <List<String>>[];
@@ -63,25 +90,25 @@ class _GuestsScreenState extends State<GuestsScreen> {
     // Members marked as 'guest' type
     final memberGuests = prov.db.members.where((m) => m.type == 'guest').toList();
 
+    // 🔍 محرّك البحث الموحّد
+    final terms = searchTerms(_search);
+
     List<GuestUser> list = all.where((g) {
       if (_filter == 'uncollected' && g.isCollected) return false;
       if (_filter == 'unpaid'      && g.isPaid)       return false;
-      if (_search.isNotEmpty) {
-        final q = _search.toLowerCase();
-        return g.clientName.toLowerCase().contains(q) ||
-            g.clientPhone.contains(q) ||
-            (g.dealerName ?? '').toLowerCase().contains(q) ||
-            (g.dealerPhone ?? '').contains(q);
-      }
-      return true;
+      if (terms.isEmpty) return true;
+      return searchHitsOf(terms, [
+            g.clientName, g.clientPhone,
+            g.dealerName ?? '', g.dealerPhone ?? '',
+          ]) != null;
     }).toList();
 
     // Filter member-guests by search
-    final filteredMemberGuests = _search.isNotEmpty
-        ? memberGuests.where((m) {
-            final q = _search.toLowerCase();
-            return m.name.toLowerCase().contains(q) || m.phone.contains(q);
-          }).toList()
+    final filteredMemberGuests = terms.isNotEmpty
+        ? memberGuests
+            .where((m) =>
+                searchHitsOf(terms, [m.name, m.phone, m.package]) != null)
+            .toList()
         : memberGuests;
 
     final totalCollect = list.fold<double>(0, (s, g) => s + g.clientAmount);
@@ -94,7 +121,7 @@ class _GuestsScreenState extends State<GuestsScreen> {
         // ── Header ──────────────────────────────────────────────
         Container(
           padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
-          color: Colors.white,
+          color: AppColors.surface,
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               const Text('👥', style: TextStyle(fontSize: 22)),
@@ -103,7 +130,7 @@ class _GuestsScreenState extends State<GuestsScreen> {
                   style: GoogleFonts.cairo(fontSize: 18, fontWeight: FontWeight.w900, color: AppColors.blue2))),
               IconButton(
                 onPressed: () => _printGuests(context, prov, list, filteredMemberGuests),
-                icon: const Icon(Icons.print_outlined, color: AppColors.blue2),
+                icon: Icon(Icons.print_outlined, color: AppColors.blue2),
                 tooltip: 'طباعة',
               ),
               ElevatedButton.icon(
@@ -129,19 +156,10 @@ class _GuestsScreenState extends State<GuestsScreen> {
         const Divider(height: 1),
 
         // ── Search ───────────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-          child: TextField(
-            onChanged: (v) => setState(() => _search = v),
-            decoration: InputDecoration(
-              hintText: '🔍 بحث بالاسم أو رقم العميل أو التاجر...',
-              hintStyle: GoogleFonts.cairo(fontSize: 13, color: AppColors.muted),
-              filled: true, fillColor: Colors.white,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: const BorderSide(color: AppColors.border)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: const BorderSide(color: AppColors.border)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            ),
-          ),
+        AppSearchBar(
+          controller: _searchCtrl,
+          onChanged: (v) => setState(() => _search = v),
+          hint: '🔍 اسم العميل · رقمه · التاجر · رقمه',
         ),
 
         // ── Filters ──────────────────────────────────────────────
@@ -221,7 +239,7 @@ class _GuestsScreenState extends State<GuestsScreen> {
   Widget _filterChip(String value, String label) {
     final active = _filter == value;
     return GestureDetector(
-      onTap: () => setState(() => _filter = value),
+      onTap: () => _set(() => _filter = value),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(
@@ -317,7 +335,7 @@ class _GuestCard extends StatelessWidget {
     final prov = context.read<AppProvider>();
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border, width: 1.5),
         boxShadow: [BoxShadow(color: AppColors.blue2.withValues(alpha: 0.05), blurRadius: 8)],
@@ -380,7 +398,7 @@ class _GuestCard extends StatelessWidget {
         // ── Actions ───────────────────────────────────────────
         Container(
           padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-          decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppColors.border))),
+          decoration: BoxDecoration(border: Border(top: BorderSide(color: AppColors.border))),
           child: Row(children: [
             _btn('✏️ تعديل',          AppColors.blueLight, AppColors.blue2, onEdit),
             const SizedBox(width: 8),
@@ -388,7 +406,7 @@ class _GuestCard extends StatelessWidget {
             const Spacer(),
             GestureDetector(
               onTap: onDelete,
-              child: const Icon(Icons.delete_outline, color: AppColors.muted, size: 20),
+              child: Icon(Icons.delete_outline, color: AppColors.muted, size: 20),
             ),
           ]),
         ),
@@ -599,12 +617,12 @@ class _GuestFormState extends State<_GuestForm> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surface,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: AppColors.border),
             ),
             child: Row(children: [
-              const Icon(Icons.calendar_today, size: 16, color: AppColors.muted),
+              Icon(Icons.calendar_today, size: 16, color: AppColors.muted),
               const SizedBox(width: 8),
               Text(
                 _startDate ?? 'تاريخ البداية (اختياري)',
@@ -617,7 +635,7 @@ class _GuestFormState extends State<_GuestForm> {
               if (_startDate != null)
                 GestureDetector(
                   onTap: () => setState(() => _startDate = null),
-                  child: const Icon(Icons.close, size: 16, color: AppColors.muted),
+                  child: Icon(Icons.close, size: 16, color: AppColors.muted),
                 ),
             ]),
           ),
@@ -678,7 +696,7 @@ class _MemberGuestCard extends StatelessWidget {
       ),
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: const Color(0xFFE0E0E0), width: 1.5),
           boxShadow: [BoxShadow(color: AppColors.blue2.withValues(alpha: 0.05), blurRadius: 8)],
@@ -738,7 +756,7 @@ class _MemberGuestCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
             child: Row(children: [
-              const Icon(Icons.touch_app_outlined, size: 13, color: AppColors.muted),
+              Icon(Icons.touch_app_outlined, size: 13, color: AppColors.muted),
               const SizedBox(width: 4),
               Text('اضغط للتفاصيل والتعديل',
                   style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),

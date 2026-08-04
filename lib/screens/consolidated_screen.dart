@@ -5,6 +5,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/app_search.dart';
+import '../services/view_prefs.dart';
+import '../widgets/app_search_bar.dart';
 import '../widgets/member_card.dart';
 import '../utils/print_helper.dart';
 
@@ -26,6 +29,26 @@ class _ConsolidatedScreenState extends State<ConsolidatedScreen> {
     ('clear',    '✅ مسدّدون'),
     ('highdebt', '⚠️ دين مرتفع'),
   ];
+
+  // 💾 بيفتكر الفلتر والترتيب لما ترجع للشاشة
+  final _prefs = ViewPrefs('consolidated');
+
+  @override
+  void initState() {
+    super.initState();
+    _prefs.load().then((m) {
+      if (!mounted || m.isEmpty) return;
+      setState(() {
+        _filter = m['filter'] ?? 'all';
+        _sort = m['sort'] ?? 'name';
+      });
+    });
+  }
+
+  void _set(VoidCallback change) {
+    setState(change);
+    _prefs.save({'filter': _filter, 'sort': _sort});
+  }
 
   @override
   void dispose() { _searchCtrl.dispose(); super.dispose(); }
@@ -52,12 +75,14 @@ class _ConsolidatedScreenState extends State<ConsolidatedScreen> {
   }
 
   List<Member> _filtered(AppProvider prov) {
-    final q = _search.toLowerCase();
+    // 🔍 محرّك البحث الموحّد: بيلاقي «احمد» في «أحمد» و«٠١٠» في «010»
+    final terms = searchTerms(_search);
     var list = prov.db.members.where((m) {
-      final matchQ = q.isEmpty ||
-          m.name.toLowerCase().contains(q) ||
-          m.phone.contains(q) ||
-          m.package.toLowerCase().contains(q);
+      final matchQ = terms.isEmpty ||
+          searchHitsOf(terms, [
+                m.name, m.nickname ?? '', m.phone, m.phone2 ?? '', m.package,
+                m.natId ?? '', m.address ?? '', m.notes ?? '',
+              ]) != null;
       final matchF = switch (_filter) {
         'debt'     => m.balance < 0,
         'clear'    => m.balance >= 0,
@@ -83,26 +108,14 @@ class _ConsolidatedScreenState extends State<ConsolidatedScreen> {
     return Column(children: [
       // ── Filter + Search bar ──────────────────────────────────
       Container(
-        color: Colors.white,
+        color: AppColors.surface,
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
         child: Column(children: [
-          TextField(
+          AppSearchBar(
             controller: _searchCtrl,
             onChanged: (v) => setState(() => _search = v),
-            decoration: InputDecoration(
-              hintText: '🔍 بحث بالاسم أو الرقم أو الباقة...',
-              hintStyle: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
-              filled: true,
-              fillColor: const Color(0xFFf5f7fa),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide.none),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.muted),
-              suffixIcon: _search.isNotEmpty
-                  ? GestureDetector(
-                      onTap: () { _searchCtrl.clear(); setState(() => _search = ''); },
-                      child: const Icon(Icons.close, size: 16, color: AppColors.muted))
-                  : null,
-            ),
+            hint: '🔍 اسم · رقم · باقة · رقم قومي · عنوان · ملاحظات',
+            padding: EdgeInsets.zero,
           ),
           const SizedBox(height: 8),
           Row(children: [
@@ -110,33 +123,21 @@ class _ConsolidatedScreenState extends State<ConsolidatedScreen> {
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
-                  children: _filters.map((f) {
-                    final sel = _filter == f.$1;
-                    return GestureDetector(
-                      onTap: () => setState(() => _filter = f.$1),
-                      child: Container(
-                        margin: const EdgeInsets.only(right: 6),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                        decoration: BoxDecoration(
-                          gradient: sel ? AppColors.headerGradient : null,
-                          color: sel ? null : const Color(0xFFf0f4f8),
-                          borderRadius: BorderRadius.circular(20),
-                          border: sel ? null : Border.all(color: AppColors.border),
-                        ),
-                        child: Text(f.$2,
-                            style: GoogleFonts.cairo(
-                                fontSize: 11, fontWeight: FontWeight.w700,
-                                color: sel ? Colors.white : AppColors.text)),
-                      ),
-                    );
-                  }).toList(),
+                  children: _filters
+                      .map((f) => Padding(
+                            padding: const EdgeInsets.only(left: 6),
+                            child: AppChip(f.$2,
+                                selected: _filter == f.$1,
+                                onTap: () => _set(() => _filter = f.$1)),
+                          ))
+                      .toList(),
                 ),
               ),
             ),
             const SizedBox(width: 8),
             PopupMenuButton<String>(
               initialValue: _sort,
-              onSelected: (v) => setState(() => _sort = v),
+              onSelected: (v) => _set(() => _sort = v),
               itemBuilder: (_) => [
                 PopupMenuItem(value: 'name',  child: Text('ترتيب: الاسم',    style: GoogleFonts.cairo())),
                 PopupMenuItem(value: 'debt',  child: Text('ترتيب: المديونية', style: GoogleFonts.cairo())),
@@ -150,7 +151,7 @@ class _ConsolidatedScreenState extends State<ConsolidatedScreen> {
                   border: Border.all(color: AppColors.blueMid),
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.sort, size: 14, color: AppColors.blue2),
+                  Icon(Icons.sort, size: 14, color: AppColors.blue2),
                   const SizedBox(width: 4),
                   Text('ترتيب', style: GoogleFonts.cairo(fontSize: 11, color: AppColors.blue2, fontWeight: FontWeight.w700)),
                 ]),
@@ -159,7 +160,7 @@ class _ConsolidatedScreenState extends State<ConsolidatedScreen> {
             const SizedBox(width: 4),
             IconButton(
               onPressed: () => _printMembers(context, members, prov),
-              icon: const Icon(Icons.print_outlined, color: AppColors.blue2, size: 20),
+              icon: Icon(Icons.print_outlined, color: AppColors.blue2, size: 20),
               tooltip: 'طباعة',
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
@@ -184,7 +185,18 @@ class _ConsolidatedScreenState extends State<ConsolidatedScreen> {
       // ── Members list ─────────────────────────────────────────
       Expanded(
         child: members.isEmpty
-            ? Center(child: Text('لا توجد نتائج', style: GoogleFonts.cairo(color: AppColors.muted, fontSize: 14)))
+            ? AppEmptyResult(
+                message: 'مفيش عميل مطابق',
+                onClear: (_search.isNotEmpty || _filter != 'all')
+                    ? () {
+                        _searchCtrl.clear();
+                        _set(() {
+                          _search = '';
+                          _filter = 'all';
+                        });
+                      }
+                    : null,
+              )
             : ListView.separated(
                 padding: const EdgeInsets.all(10),
                 itemCount: members.length,
@@ -224,7 +236,7 @@ class _MemberRow extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: hasDebt ? AppColors.red.withValues(alpha: 0.3) : AppColors.border),
           boxShadow: [BoxShadow(color: AppColors.blue2.withValues(alpha: 0.05), blurRadius: 8)],
@@ -274,7 +286,7 @@ class _MemberRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 6),
-          const Icon(Icons.chevron_left, size: 16, color: AppColors.muted),
+          Icon(Icons.chevron_left, size: 16, color: AppColors.muted),
         ]),
       ),
     );

@@ -11,6 +11,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/app_search.dart';
+import '../services/view_prefs.dart';
+import '../widgets/app_search_bar.dart';
 
 class GiftsScreen extends StatefulWidget {
   const GiftsScreen({super.key});
@@ -22,6 +25,33 @@ class _GiftsScreenState extends State<GiftsScreen> {
   String _search = '';
   String _status = 'all'; // all / pending / sold
   String _typeFilter = 'all'; // all / <typeId>
+  final _searchCtrl = TextEditingController();
+
+  // 💾 بيفتكر الفلاتر
+  final _viewPrefs = ViewPrefs('gifts');
+
+  @override
+  void initState() {
+    super.initState();
+    _viewPrefs.load().then((m) {
+      if (!mounted || m.isEmpty) return;
+      setState(() {
+        _status = m['status'] ?? 'all';
+        _typeFilter = m['type'] ?? 'all';
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _set(VoidCallback change) {
+    setState(change);
+    _viewPrefs.save({'status': _status, 'type': _typeFilter});
+  }
 
   String _initials(String name) {
     final t = name.trim();
@@ -34,12 +64,14 @@ class _GiftsScreenState extends State<GiftsScreen> {
   }
 
   bool _lineMatches(AppProvider p, Group g) {
-    if (_search.isNotEmpty) {
-      final q = _search.toLowerCase();
-      if (!g.phone.contains(_search) &&
-          !(g.ownerName ?? '').toLowerCase().contains(q)) {
-        return false;
-      }
+    // 🔍 محرّك البحث الموحّد
+    final terms = searchTerms(_search);
+    if (terms.isNotEmpty &&
+        searchHitsOf(terms, [
+              g.phone, g.ownerName ?? '', g.groupInvoiceName ?? '',
+              g.notes ?? '',
+            ]) == null) {
+      return false;
     }
     final s0 = p.lineGiftSlot(g.id, 0);
     final s1 = p.lineGiftSlot(g.id, 1);
@@ -114,11 +146,11 @@ class _GiftsScreenState extends State<GiftsScreen> {
   Widget _header(AppProvider p, List<Map<String, dynamic>> catalog,
       int assigned, int sold, double profit) {
     return Container(
-      color: Colors.white,
+      color: AppColors.surface,
       child: Column(children: [
         // شريط علوي + إحصائيات
         Container(
-          decoration: const BoxDecoration(gradient: AppColors.headerGradient),
+          decoration: BoxDecoration(gradient: AppColors.headerGradient),
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
           child: Row(children: [
             const Text('🎁', style: TextStyle(fontSize: 20)),
@@ -138,8 +170,8 @@ class _GiftsScreenState extends State<GiftsScreen> {
         ),
         // المخزن
         Container(
-          decoration: const BoxDecoration(
-            color: Color(0xFFe8f4fd),
+          decoration: BoxDecoration(
+            color: const Color(0xFFe8f4fd),
             border: Border(bottom: BorderSide(color: AppColors.blueMid)),
           ),
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
@@ -225,8 +257,7 @@ class _GiftsScreenState extends State<GiftsScreen> {
                                   style: GoogleFonts.cairo(fontSize: 11)),
                             )),
                       ],
-                      onChanged: (v) =>
-                          setState(() => _typeFilter = v ?? 'all'),
+                      onChanged: (v) => _set(() => _typeFilter = v ?? 'all'),
                     ),
                   ),
                 ),
@@ -234,23 +265,11 @@ class _GiftsScreenState extends State<GiftsScreen> {
               const SizedBox(width: 8),
               Expanded(
                 flex: 3,
-                child: SizedBox(
-                  height: 36,
-                  child: TextField(
-                    onChanged: (v) => setState(() => _search = v),
-                    style: GoogleFonts.cairo(fontSize: 12),
-                    decoration: InputDecoration(
-                      hintText: '🔍 بحث بالرقم أو الاسم...',
-                      hintStyle: GoogleFonts.cairo(
-                          fontSize: 11, color: AppColors.muted),
-                      filled: true,
-                      fillColor: const Color(0xFFf5f7fa),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(9),
-                          borderSide: BorderSide.none),
-                    ),
-                  ),
+                child: AppSearchBar(
+                  controller: _searchCtrl,
+                  onChanged: (v) => setState(() => _search = v),
+                  hint: '🔍 رقم · اسم · ملاحظات',
+                  padding: EdgeInsets.zero,
                 ),
               ),
             ]),
@@ -279,7 +298,7 @@ class _GiftsScreenState extends State<GiftsScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(9),
           border: Border.all(color: AppColors.green.withValues(alpha: 0.4)),
         ),
@@ -298,7 +317,7 @@ class _GiftsScreenState extends State<GiftsScreen> {
                   fontWeight: FontWeight.w700,
                   color: AppColors.green)),
           const SizedBox(width: 3),
-          const Icon(Icons.edit, size: 11, color: AppColors.muted),
+          Icon(Icons.edit, size: 11, color: AppColors.muted),
         ]),
       ),
     );
@@ -307,7 +326,7 @@ class _GiftsScreenState extends State<GiftsScreen> {
   Widget _statusChip(String value, String label) {
     final active = _status == value;
     return GestureDetector(
-      onTap: () => setState(() => _status = value),
+      onTap: () => _set(() => _status = value),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
@@ -448,7 +467,7 @@ class _GiftsScreenState extends State<GiftsScreen> {
           border: Border.all(color: AppColors.border),
         ),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.add, size: 16, color: AppColors.muted),
+          Icon(Icons.add, size: 16, color: AppColors.muted),
           Text('اختر',
               style: GoogleFonts.cairo(fontSize: 9, color: AppColors.muted)),
         ]),
@@ -487,7 +506,7 @@ class _GiftsScreenState extends State<GiftsScreen> {
           const Divider(height: 1),
           ListTile(
             dense: true,
-            leading: const Icon(Icons.delete_outline, color: AppColors.red2),
+            leading: Icon(Icons.delete_outline, color: AppColors.red2),
             title: Text('حذف الهدية من الخانة',
                 style: GoogleFonts.cairo(
                     color: AppColors.red2, fontWeight: FontWeight.w700)),

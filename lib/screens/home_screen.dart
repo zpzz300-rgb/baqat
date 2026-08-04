@@ -32,17 +32,27 @@ import 'bulk_message_screen.dart';
 import '../widgets/notes_bubble.dart';
 import '../widgets/workspace_bar.dart';
 import '../widgets/workspace_switcher.dart';
+import '../widgets/menu_order_editor.dart';
+import '../services/menu_catalog.dart';
 import 'flagged_members_screen.dart';
 import 'bills_screen.dart';
 import 'notes_screen.dart';
 import 'company_invoices_screen.dart';
 import 'complaints_screen.dart';
 import 'unified_billing_screen.dart';
+import '../services/today_tasks.dart' show todayOverdueCount;
 import '../widgets/add_group_modal.dart';
 import '../widgets/add_member_modal.dart';
 import '../widgets/member_card.dart';
 import '../widgets/settings_modal.dart';
 import '../widgets/ai_modal.dart';
+
+/// 🔍 فتح البحث الشامل من **أي شاشة** في البرنامج.
+///
+/// الشاشة الرئيسية بتسجّل نفسها هنا وهي بتتبني، فأي حتة تانية (زي لوحة
+/// التنقّل السريع 🗂) تقدر تفتح البحث من غير ما تعرف حاجة عن الرئيسية.
+/// بيفضل `null` قبل ما الرئيسية تفتح — فاستخدم `?.call()`.
+void Function()? openGlobalSearch;
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -68,6 +78,10 @@ class _HomeScreenState extends State<HomeScreen> {
   // ─── ترتيب عرض الخطوط في الشاشة الرئيسية ────────────────────────
   // 'manual' = الترتيب اليدوي المحفوظ (بالسحب) — وهو الافتراضي.
   // أي وضع تاني بيقفل السحب عشان مايبوّظش الترتيب المحفوظ.
+  // 🔍 بحث القايمة الجانبية (بيفلتر بنود التنقّل، مش البيانات)
+  final TextEditingController _menuSearchCtrl = TextEditingController();
+  String _menuQuery = '';
+
   static const _kSortPrefKey = 'groups_sort_mode';
   String _groupSort = 'manual';
   static const _sortModes = [
@@ -84,6 +98,18 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadSortMode();
+    // 🔍 خلّي البحث الشامل متاح من أي شاشة في البرنامج
+    openGlobalSearch = () {
+      if (!mounted) return;
+      _showGlobalSearch(context.read<AppProvider>());
+    };
+  }
+
+  @override
+  void dispose() {
+    openGlobalSearch = null;
+    _menuSearchCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _loadSortMode() async {
@@ -106,31 +132,43 @@ class _HomeScreenState extends State<HomeScreen> {
   // مايحصلش تكرار ولا overflow.
   bool get _showFinancialStats => _tab == 0;
 
+  /// الاسم والإيموچي بييجوا من سجل القوايم (menu_catalog) — مصدر واحد
+  /// للتلاتة (القايمة الجانبية + لوحة 🗂 + شريط التابات).
+  static Map<String, dynamic> _nav(String key, {int? tab, String? wsKey}) {
+    final d = menuItemDef(wsKey ?? AppProvider.menuKeyAlias(key));
+    return {
+      'icon': d?.emoji ?? '📄',
+      'label': d?.title ?? key,
+      'key': key,
+      if (tab != null) 'tab': tab,
+    };
+  }
+
   // Main nav tabs (always visible)
-  final List<Map<String, dynamic>> _tabs = [
-    {'icon': '🏠', 'label': 'المجموعات', 'key': 'groups'},
-    {'icon': '🔔', 'label': 'التنبيهات', 'key': 'reminders'},
-    {'icon': '🚦', 'label': 'التصنيف', 'key': 'flagged', 'tab': 16},
-    {'icon': '🤝', 'label': 'الكفلاء', 'key': 'guarantors', 'tab': 2},
-    {'icon': '📋', 'label': 'أرقام العمل', 'key': 'worknums', 'tab': 3},
-    {'icon': '💰', 'label': 'الأرباح', 'key': 'profit', 'tab': 4},
-    {'icon': '🏠', 'label': 'المؤجرة', 'key': 'rentals', 'tab': 5},
-    {'icon': '🎁', 'label': 'الهدايا', 'key': 'gifts', 'tab': 6},
-    {'icon': '👥', 'label': 'الضيوف', 'key': 'guests', 'tab': 12},
-    {'icon': '📊', 'label': 'كل العملاء', 'key': 'consolidated', 'tab': 14},
+  late final List<Map<String, dynamic>> _tabs = [
+    _nav('groups'),
+    _nav('reminders'),
+    _nav('flagged', tab: 16),
+    _nav('guarantors', tab: 2),
+    _nav('worknums', tab: 3),
+    _nav('profit', tab: 4),
+    _nav('rentals', tab: 5),
+    _nav('gifts', tab: 6),
+    _nav('guests', tab: 12),
+    _nav('consolidated', tab: 14),
   ];
 
   // "المزيد" menu items
-  final List<Map<String, dynamic>> _moreTabs = [
-    {'icon': '🧾', 'label': 'الفواتير', 'key': 'billing', 'tab': 22},
-    {'icon': '📝', 'label': 'الملاحظات', 'key': 'notes', 'tab': 18},
-    {'icon': '📢', 'label': 'الشكاوى', 'key': 'complaints', 'tab': 21},
-    {'icon': '📦', 'label': 'الأرشيف', 'key': 'archive', 'tab': 7},
-    {'icon': '📋', 'label': 'النشاط', 'key': 'activity', 'tab': 8},
-    {'icon': '💾', 'label': 'البيانات', 'key': 'dataio', 'tab': 9},
-    {'icon': '🗑', 'label': 'المحذوفون', 'key': 'deleted', 'tab': 10},
-    {'icon': '⏳', 'label': 'قائمة الانتظار', 'key': 'waitlist', 'tab': 11},
-    {'icon': '📤', 'label': 'رسائل جماعية', 'key': 'bulk', 'tab': 15},
+  late final List<Map<String, dynamic>> _moreTabs = [
+    _nav('billing', tab: 22), // الاسم بييجي من مفتاح invoices
+    _nav('notes', tab: 18),
+    _nav('complaints', tab: 21),
+    _nav('archive', tab: 7),
+    _nav('activity', tab: 8),
+    _nav('dataio', tab: 9),
+    _nav('deleted', tab: 10),
+    _nav('waitlist', tab: 11),
+    _nav('bulk', tab: 15),
   ];
 
   // Arabic-Indic → Western digit normalization for search input
@@ -167,7 +205,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: const Color(0xFFf5f7fa),
-      drawer: _buildDrawer(prov),
+      drawer: _buildDrawer(context, prov),
       body: LayoutBuilder(
         builder: (context, constraints) {
           // ── محتوى الرئيسية (زي ما هو من غير أي تغيير) ──
@@ -287,6 +325,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: const Icon(Icons.menu, color: Colors.white, size: 20),
                 ),
               ),
+              // 📌 لوحة النهاردة — بره صف الزراير المتزحلق عشان يفضل
+              // باين دايماً. الرقم الأحمر = كام حاجة متأخرة عليك.
+              _iconBtn(
+                Icons.push_pin,
+                badge: todayOverdueCount(prov),
+                onTap: () => prov.openWorkspaceTab('today',
+                    title: menuItemDef('today')?.title ?? 'لوحة النهاردة',
+                    emoji: '📌'),
+              ),
+              const SizedBox(width: 6),
               Expanded(
                 child: GestureDetector(
                   onTap: () => setState(() => _headerExpanded = !_headerExpanded),
@@ -684,7 +732,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             margin: const EdgeInsets.only(bottom: 8),
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: AppColors.surface,
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(color: AppColors.border),
                             ),
@@ -718,20 +766,42 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _iconBtn(IconData icon,
-      {Color color = Colors.white, required VoidCallback onTap}) {
+      {Color color = Colors.white,
+      required VoidCallback onTap,
+      int badge = 0}) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        width: 34,
-        height: 34,
-        decoration: BoxDecoration(
-          color: color == Colors.white
-              ? Colors.white.withValues(alpha: 0.25)
-              : color,
-          borderRadius: BorderRadius.circular(17),
+      child: Stack(clipBehavior: Clip.none, children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: color == Colors.white
+                ? Colors.white.withValues(alpha: 0.25)
+                : color,
+            borderRadius: BorderRadius.circular(17),
+          ),
+          child: Icon(icon, color: Colors.white, size: 18),
         ),
-        child: Icon(icon, color: Colors.white, size: 18),
-      ),
+        if (badge > 0)
+          Positioned(
+            top: -2,
+            left: -2,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: AppColors.red2,
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(color: Colors.white, width: 1.4),
+              ),
+              child: Text(badge > 99 ? '99+' : '$badge',
+                  style: GoogleFonts.cairo(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.white)),
+            ),
+          ),
+      ]),
     );
   }
 
@@ -774,17 +844,24 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ─── NAV ────────────────────────────────────────────────────
   // ─── SIDE DRAWER (القائمة الجانبية) ──────────────────────────
-  Widget _buildDrawer(AppProvider prov) {
-    final allSections = [..._tabs, ..._moreTabs];
+  Widget _buildDrawer(BuildContext ctx, AppProvider prov) {
+    // كل بنود التنقّل: تابات الشاشة الرئيسية + الشاشات اللي بتفتح في تابات
+    // مساحة عمل ('ws'). الترتيب والأقسام والإخفاء كلهم من الـ Provider.
+    final navItems = <Map<String, dynamic>>[
+      ..._tabs,
+      ..._moreTabs,
+      {..._nav('filter'), 'ws': 'filter'},
+      {..._nav('assets'), 'ws': 'assets'},
+    ];
     return Drawer(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       child: Column(children: [
         // Header
         Container(
           width: double.infinity,
           padding: EdgeInsets.fromLTRB(
               18, MediaQuery.of(context).padding.top + 20, 18, 18),
-          decoration: const BoxDecoration(gradient: AppColors.headerGradient),
+          decoration: BoxDecoration(gradient: AppColors.headerGradient),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Container(
@@ -813,30 +890,52 @@ class _HomeScreenState extends State<HomeScreen> {
             _identityBadge(prov),
           ]),
         ),
+        // 🔍 بحث في القايمة — تكتب حرفين تلاقي الشاشة على طول
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+          child: TextField(
+            controller: _menuSearchCtrl,
+            onChanged: (v) => setState(() => _menuQuery = v),
+            style: GoogleFonts.cairo(fontSize: 13),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: 'دوّر على شاشة…',
+              hintStyle:
+                  GoogleFonts.cairo(fontSize: 12.5, color: AppColors.muted),
+              prefixIcon: const Icon(Icons.search, size: 19),
+              suffixIcon: _menuQuery.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.close, size: 17),
+                      onPressed: () => setState(() {
+                        _menuSearchCtrl.clear();
+                        _menuQuery = '';
+                      }),
+                    ),
+              contentPadding: const EdgeInsets.symmetric(vertical: 8),
+              filled: true,
+              fillColor: const Color(0xFFF3F6FA),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none),
+            ),
+          ),
+        ),
         // Sections list
         Expanded(
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 8),
             children: [
-              for (int i = 0; i < allSections.length; i++) ...[
-                Builder(builder: (_) {
-                  final s = allSections[i];
-                  final tabIndex = s['tab'] as int? ?? (i < 2 ? i : 0);
-                  return _drawerItem(
-                    '${s['icon']} ${s['label']}',
-                    () {
-                      Navigator.pop(context);
-                      setState(() {
-                        _tab = tabIndex;
-                        _searching = false;
-                        _searchResults = [];
-                      });
-                    },
-                    selected: _tab == tabIndex,
-                  );
-                }),
-              ],
+              if (_menuQuery.trim().isNotEmpty)
+                ..._drawerSearchResults(ctx, prov, navItems)
+              else
+                ..._drawerSectioned(ctx, prov, navItems),
               const Divider(height: 16),
+              // 🔀 ترتيب القايمة — أقسام + سحب وإفلات + إخفاء (مفيش أي حذف)
+              _drawerItem('🔀 ترتيب القايمة', () {
+                Navigator.pop(context);
+                showMenuOrderEditor(ctx);
+              }),
               // 💾 حفظ البيانات + 🖨️ طباعة — اتنقلوا هنا من الشاشة الرئيسية
               _drawerItem('💾 حفظ البيانات', () {
                 Navigator.pop(context);
@@ -846,17 +945,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.pop(context);
                 _printGroups(prov);
               }),
-              // 🗂 بيتفتحوا في تابات علوية — الشغل بيفضل محفوظ وانت بتنقّل
-              _drawerItem('📊 لوحة الأصول والإكسيبشن', () {
-                Navigator.pop(context);
-                prov.openWorkspaceTab('assets',
-                    title: 'الأصول', emoji: '📊');
-              }),
-              _drawerItem('🎛️ تصنيف العملاء', () {
-                Navigator.pop(context);
-                prov.openWorkspaceTab('filter',
-                    title: 'تصنيف العملاء', emoji: '🎛️');
-              }),
+              // ملحوظة: «لوحة الأصول» و«تصنيف العملاء» بقوا جوه الأقسام فوق
+              // (قسم 💵 الفلوس و 👥 العملاء) — فمشيلناهم من هنا عشان ما يتكرروش.
               _drawerItem('🗂 دليل الخطوط الرئيسية', () {
                 Navigator.pop(context);
                 Navigator.push(
@@ -903,7 +993,7 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: EdgeInsets.fromLTRB(
                 18, 14, 18, MediaQuery.of(context).padding.bottom + 14),
             child: Row(children: [
-              const Icon(Icons.logout, size: 18, color: AppColors.red),
+              Icon(Icons.logout, size: 18, color: AppColors.red),
               const SizedBox(width: 10),
               Text('تسجيل الخروج',
                   style: GoogleFonts.cairo(
@@ -992,12 +1082,14 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _drawerItem(String label, VoidCallback onTap, {bool selected = false}) {
+  Widget _drawerItem(String label, VoidCallback onTap,
+      {bool selected = false, VoidCallback? onLongPress, double indent = 18}) {
     return InkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Container(
         color: selected ? AppColors.blueLight : Colors.transparent,
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+        padding: EdgeInsets.fromLTRB(18, 13, indent, 13),
         child: Row(children: [
           if (selected)
             Container(
@@ -1021,6 +1113,120 @@ class _HomeScreenState extends State<HomeScreen> {
         ]),
       ),
     );
+  }
+
+  // ─── 📂 بنود القايمة الجانبية: أقسام + بحث + دوسة مطوّلة ──────────
+  /// دوسة عادية: بتفتح الشاشة مكان الحالية (أو في تاب لو `ws`).
+  /// دوسة مطوّلة: بتفتحها في **تاب جديد** من غير ما تسيب اللي انت فيه.
+  Widget _drawerNavItem(
+      BuildContext ctx, AppProvider prov, Map<String, dynamic> s,
+      {bool inSection = true}) {
+    final key = s['key'] as String;
+    final ws = s['ws'] as String?;
+    // 'groups' و 'reminders' مالهمش مفتاح 'tab' — تابهم ثابت بالمفتاح مش
+    // بمكانهم في القايمة (الترتيب بقى متغيّر).
+    final tabIndex = s['tab'] as int? ?? (key == 'reminders' ? 1 : 0);
+    // مفتاح مساحة العمل: القايمة بتسمّي الفواتير 'billing' والسجل 'invoices'
+    final wsType = ws ?? AppProvider.menuKeyAlias(key);
+    final canOpenTab = kWorkspaceScreens.containsKey(wsType);
+
+    return _drawerItem(
+      '${s['icon']} ${s['label']}',
+      () {
+        Navigator.pop(ctx);
+        if (ws != null) {
+          prov.openWorkspaceTab(ws,
+              title: s['label'] as String, emoji: s['icon'] as String);
+        } else {
+          setState(() {
+            _tab = tabIndex;
+            _searching = false;
+            _searchResults = [];
+          });
+        }
+      },
+      selected: ws == null && _tab == tabIndex,
+      indent: inSection ? 30 : 18,
+      onLongPress: !canOpenTab
+          ? null
+          : () {
+              Navigator.pop(ctx);
+              prov.openWorkspaceTab(wsType,
+                  title: s['label'] as String, emoji: s['icon'] as String);
+            },
+    );
+  }
+
+  List<Widget> _drawerSectioned(
+      BuildContext ctx, AppProvider prov, List<Map<String, dynamic>> items) {
+    final out = <Widget>[];
+    for (final sec in prov.orderedMenuSections) {
+      final inSec =
+          prov.menuItemsOfSection(items, (s) => s['key'] as String, sec.id);
+      if (inSec.isEmpty) continue; // قسم كل بنوده مخفية → ما يظهرش أصلاً
+      final collapsed = prov.isMenuSectionCollapsed(sec.id);
+      final color = Color(sec.color);
+      out.add(InkWell(
+        onTap: () => prov.toggleMenuSection(sec.id),
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(10, 4, 10, 2),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.07),
+            borderRadius: BorderRadius.circular(10),
+            border: Border(right: BorderSide(color: color, width: 3.5)),
+          ),
+          child: Row(children: [
+            Text(sec.emoji, style: const TextStyle(fontSize: 15)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(sec.title,
+                  style: GoogleFonts.cairo(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w900,
+                      color: color)),
+            ),
+            Text('${inSec.length}',
+                style: GoogleFonts.cairo(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.muted)),
+            const SizedBox(width: 4),
+            Icon(collapsed ? Icons.expand_more : Icons.expand_less,
+                size: 20, color: color),
+          ]),
+        ),
+      ));
+      if (!collapsed) {
+        out.addAll([for (final s in inSec) _drawerNavItem(ctx, prov, s)]);
+      }
+    }
+    return out;
+  }
+
+  List<Widget> _drawerSearchResults(
+      BuildContext ctx, AppProvider prov, List<Map<String, dynamic>> items) {
+    final q = normalizeArabic(_menuQuery);
+    // البحث بيلاقي المخفي كمان — الإخفاء بيشيله من العرض مش من البرنامج.
+    final hits = prov
+        .applyMenuOrder(items, (s) => s['key'] as String, dropHidden: false)
+        .where((s) => normalizeArabic(s['label'] as String).contains(q))
+        .toList();
+    if (hits.isEmpty) {
+      return [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          child: Center(
+            child: Text('مفيش شاشة بالاسم ده',
+                style:
+                    GoogleFonts.cairo(fontSize: 12.5, color: AppColors.muted)),
+          ),
+        )
+      ];
+    }
+    return [
+      for (final s in hits) _drawerNavItem(ctx, prov, s, inSection: false)
+    ];
   }
 
   // ─── BODY ────────────────────────────────────────────────────
@@ -1119,21 +1325,21 @@ class _HomeScreenState extends State<HomeScreen> {
                       hintStyle:
                           GoogleFonts.cairo(fontSize: 13, color: AppColors.muted),
                       filled: true,
-                      fillColor: Colors.white,
+                      fillColor: AppColors.surface,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
                         borderSide:
-                            const BorderSide(color: AppColors.border, width: 1.5),
+                            BorderSide(color: AppColors.border, width: 1.5),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
                         borderSide:
-                            const BorderSide(color: AppColors.border, width: 1.5),
+                            BorderSide(color: AppColors.border, width: 1.5),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
                         borderSide:
-                            const BorderSide(color: AppColors.blue, width: 1.5),
+                            BorderSide(color: AppColors.blue, width: 1.5),
                       ),
                       contentPadding:
                           const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -1149,11 +1355,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                // 🎛️ تصنيف العملاء: باقات / دفع / شهر اشتراك / نوع
+                // 🎛️ بحث متقدّم: باقات / دفع / شهر اشتراك / نوع
                 // بيتفتح في تاب علوي — فلترك بيفضل محفوظ وانت بتنقّل
                 GestureDetector(
                   onTap: () => prov.openWorkspaceTab('filter',
-                      title: 'تصنيف العملاء', emoji: '🎛️'),
+                      title: menuItemDef('filter')?.title ?? 'بحث متقدّم',
+                      emoji: menuItemDef('filter')?.emoji ?? '🎛️'),
                   child: Container(
                     height: 44, width: 44,
                     decoration: BoxDecoration(
@@ -1245,7 +1452,7 @@ class _HomeScreenState extends State<HomeScreen> {
             margin: const EdgeInsets.only(bottom: 8),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surface,
               border: Border.all(color: AppColors.border, width: 1.5),
               borderRadius: BorderRadius.circular(12),
               boxShadow: [BoxShadow(
@@ -1305,7 +1512,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
               const SizedBox(width: 4),
-              const Icon(Icons.arrow_forward_ios, size: 12, color: AppColors.muted),
+              Icon(Icons.arrow_forward_ios, size: 12, color: AppColors.muted),
             ]),
           ),
         );
@@ -1565,6 +1772,9 @@ class _HomeScreenState extends State<HomeScreen> {
       {bool fromModal = false}) async {
     if (fromModal) {
       Navigator.pop(context); // close the search bottom sheet
+      // لو كنت واقف في تاب مساحة عمل، ارجع للرئيسية الأول — وإلا النتيجة
+      // هتتفتح تحت التاب وانت مش شايفها.
+      prov.activateWorkspaceTab(0);
       await Future.delayed(const Duration(milliseconds: 350));
       if (!mounted) return;
     } else {
@@ -1638,9 +1848,9 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (ctx, setSheetState) => Container(
           constraints: BoxConstraints(
               maxHeight: MediaQuery.of(ctx).size.height * 0.85),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           padding: EdgeInsets.fromLTRB(
               20, 12, 20, 20 + MediaQuery.of(ctx).viewPadding.bottom),
@@ -1706,7 +1916,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 style: GoogleFonts.cairo(fontSize: 10, color: const Color(0xFF15803d), fontWeight: FontWeight.w700)),
                           ])
                         else
-                          const Icon(Icons.chevron_left, color: AppColors.muted, size: 20),
+                          Icon(Icons.chevron_left, color: AppColors.muted, size: 20),
                         const SizedBox(width: 6),
                         // زرار حذف اشتراك هذا الشهر للسايكل (لو اتضاف بالغلط)
                         GestureDetector(
@@ -1918,7 +2128,7 @@ class _HomeScreenState extends State<HomeScreen> {
           child: AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: Row(children: [
-              const Icon(Icons.lock_outline, color: AppColors.blue2, size: 20),
+              Icon(Icons.lock_outline, color: AppColors.blue2, size: 20),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(title,
@@ -2053,9 +2263,9 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: Colors.transparent,
               barrierColor: Colors.black54,
       builder: (_) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -2102,7 +2312,7 @@ class _HomeScreenState extends State<HomeScreen> {
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           border: Border.all(color: AppColors.border, width: 1.5),
           borderRadius: BorderRadius.circular(14),
         ),
@@ -2164,6 +2374,8 @@ class _GlobalSearchSheetState extends State<_GlobalSearchSheet> {
     {'key': 'waitlist', 'label': '⏳ الانتظار'},
     {'key': 'worknums', 'label': '📋 أرقام العمل'},
     {'key': 'guarantors', 'label': '🤝 كفلاء'},
+    {'key': 'notes', 'label': '📝 ملاحظات'},
+    {'key': 'complaints', 'label': '📢 شكاوى'},
   ];
 
   static const _typeIcon = {
@@ -2172,6 +2384,9 @@ class _GlobalSearchSheetState extends State<_GlobalSearchSheet> {
     'waitlist': '⏳',
     'worknum': '📋',
     'guarantor': '🤝',
+    'guest': '🧳',
+    'note': '📝',
+    'complaint': '📢',
   };
 
   static const _typeLabel = {
@@ -2180,6 +2395,9 @@ class _GlobalSearchSheetState extends State<_GlobalSearchSheet> {
     'waitlist': 'قائمة انتظار',
     'worknum': 'رقم عمل',
     'guarantor': 'كفيل',
+    'guest': 'ضيف',
+    'note': 'ملاحظة',
+    'complaint': 'شكوى',
   };
 
   void _search(String q) {
@@ -2193,9 +2411,9 @@ class _GlobalSearchSheetState extends State<_GlobalSearchSheet> {
     final bottomPad = MediaQuery.of(context).padding.bottom;
     return Container(
       height: MediaQuery.of(context).size.height * 0.88,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(
         children: [
@@ -2258,7 +2476,7 @@ class _GlobalSearchSheetState extends State<_GlobalSearchSheet> {
                           _ctrl.clear();
                           _search('');
                         })
-                    : const Icon(Icons.search,
+                    : Icon(Icons.search,
                         size: 20, color: AppColors.muted),
               ),
             ),
@@ -2324,7 +2542,7 @@ class _GlobalSearchSheetState extends State<_GlobalSearchSheet> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 14, vertical: 10),
                               decoration: BoxDecoration(
-                                color: Colors.white,
+                                color: AppColors.surface,
                                 border: Border.all(
                                     color: AppColors.border, width: 1.5),
                                 borderRadius: BorderRadius.circular(12),
@@ -2394,7 +2612,7 @@ class _GlobalSearchSheetState extends State<_GlobalSearchSheet> {
                                       ),
                                     ),
                                   const SizedBox(width: 6),
-                                  const Icon(Icons.arrow_forward_ios,
+                                  Icon(Icons.arrow_forward_ios,
                                       size: 14, color: AppColors.muted),
                                 ],
                               ),

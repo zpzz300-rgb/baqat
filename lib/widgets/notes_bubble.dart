@@ -15,6 +15,7 @@ import 'package:share_plus/share_plus.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/app_search.dart';
 import 'member_card.dart';
 
 /// ألوان الملاحظات: مفتاح → (خلفية، حدود، اسم)
@@ -290,9 +291,9 @@ class _NotesSheetState extends State<_NotesSheet> {
           16, 14, 16, MediaQuery.of(context).viewInsets.bottom + 16),
       constraints:
           BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.88),
-      decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -499,7 +500,7 @@ class _NotesSheetState extends State<_NotesSheet> {
               GestureDetector(
                 onTap: onClear,
                 child:
-                    const Icon(Icons.close, size: 13, color: AppColors.muted),
+                    Icon(Icons.close, size: 13, color: AppColors.muted),
               ),
             ],
           ]),
@@ -624,8 +625,8 @@ class _NotesSheetState extends State<_NotesSheet> {
           // ✏️ تعديل
           GestureDetector(
             onTap: () => _editNote(prov, n),
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 5),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 5),
               child: Icon(Icons.edit, size: 18, color: AppColors.blue2),
             ),
           ),
@@ -642,7 +643,7 @@ class _NotesSheetState extends State<_NotesSheet> {
                     onPressed: () => prov.restoreGeneralNote(n.id)),
               ));
             },
-            child: const Icon(Icons.delete_outline,
+            child: Icon(Icons.delete_outline,
                 size: 19, color: AppColors.red),
           ),
         ]),
@@ -696,8 +697,8 @@ class _NotesSheetState extends State<_NotesSheet> {
         ),
         GestureDetector(
           onTap: () => prov.restoreGeneralNote(n.id),
-          child: const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Icon(Icons.restore, size: 19, color: AppColors.green),
           ),
         ),
@@ -729,7 +730,7 @@ class _NotesSheetState extends State<_NotesSheet> {
             ),
           ),
           child:
-              const Icon(Icons.delete_forever, size: 19, color: AppColors.red),
+              Icon(Icons.delete_forever, size: 19, color: AppColors.red),
         ),
       ]),
     );
@@ -784,7 +785,7 @@ class _NotesSheetState extends State<_NotesSheet> {
                   IconButton(
                     tooltip: 'إلغاء التذكير',
                     onPressed: () => setD(() => cleared = true),
-                    icon: const Icon(Icons.alarm_off, color: AppColors.red),
+                    icon: Icon(Icons.alarm_off, color: AppColors.red),
                   ),
               ]),
               // 🔁 التكرار
@@ -867,7 +868,7 @@ class _NotesSheetState extends State<_NotesSheet> {
                     tooltip: 'فك الربط',
                     onPressed: () =>
                         setD(() { memberId = null; memberName = null; }),
-                    icon: const Icon(Icons.link_off, color: AppColors.red),
+                    icon: Icon(Icons.link_off, color: AppColors.red),
                   ),
               ]),
             ]),
@@ -920,7 +921,7 @@ class _MemberPickerState extends State<_MemberPicker> {
         .where((m) => gids.contains(m.gid))
         .where((m) =>
             _q.isEmpty ||
-            m.name.toLowerCase().contains(_q.toLowerCase()) ||
+            normalizeArabic(m.name).contains(normalizeArabic(_q)) ||
             m.phone.contains(_q))
         .toList()
       ..sort((a, b) => a.name.compareTo(b.name));
@@ -930,9 +931,9 @@ class _MemberPickerState extends State<_MemberPicker> {
           16, 14, 16, MediaQuery.of(context).viewInsets.bottom + 16),
       constraints:
           BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
-      decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Center(
             child: Container(

@@ -57,7 +57,7 @@ class _RentalsScreenState extends State<RentalsScreen> {
             child: Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.surface,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: AppColors.border),
                 boxShadow: [BoxShadow(color: AppColors.blue2.withValues(alpha: 0.08), blurRadius: 20)],
@@ -83,10 +83,10 @@ class _RentalsScreenState extends State<RentalsScreen> {
               decoration: InputDecoration(
                 hintText: '🔍 بحث باسم المستأجر أو الرقم...',
                 hintStyle: GoogleFonts.cairo(color: AppColors.muted, fontSize: 13),
-                prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.muted),
+                prefixIcon: Icon(Icons.search, size: 18, color: AppColors.muted),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
-                filled: true, fillColor: Colors.white,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppColors.border)),
+                filled: true, fillColor: AppColors.surface,
               ),
             ),
           ),
@@ -213,7 +213,7 @@ class _RentalCardState extends State<_RentalCard> {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
         boxShadow: [BoxShadow(color: AppColors.blue2.withValues(alpha: 0.08), blurRadius: 20)],
@@ -223,9 +223,9 @@ class _RentalCardState extends State<_RentalCard> {
           // Header
           Container(
             padding: const EdgeInsets.all(14),
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(colors: [Color(0xFFe8f4fd), Color(0xFFdbeeff)]),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [Color(0xFFe8f4fd), Color(0xFFdbeeff)]),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
               border: Border(bottom: BorderSide(color: AppColors.blueMid, width: 2)),
             ),
             child: Row(
@@ -321,7 +321,7 @@ class _RentalCardState extends State<_RentalCard> {
                       const SizedBox(width: 8),
                       GestureDetector(
                         onTap: () => context.read<AppProvider>().deleteRentalLogEntry(rental.id, e.key),
-                        child: const Icon(Icons.delete_outline, size: 15, color: AppColors.muted),
+                        child: Icon(Icons.delete_outline, size: 15, color: AppColors.muted),
                       ),
                     ]),
                   );
@@ -347,7 +347,7 @@ class _RentalCardState extends State<_RentalCard> {
           content: Column(mainAxisSize: MainAxisSize.min, children: [
             ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.calendar_today, color: AppColors.purple),
+              leading: Icon(Icons.calendar_today, color: AppColors.purple),
               title: Text('مؤجَّل حتى: ${picked.day}/${picked.month}/${picked.year}', style: GoogleFonts.cairo(fontSize: 13)),
               onTap: () async {
                 final d = await showDatePicker(context: dialogCtx, initialDate: picked, firstDate: DateTime(2020), lastDate: DateTime(2100));

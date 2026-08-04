@@ -43,9 +43,9 @@ class _AiModalState extends State<AiModal> {
   Widget build(BuildContext context) {
     return Container(
       height: MediaQuery.of(context).size.height * 0.85,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(
         children: [
@@ -174,7 +174,7 @@ class _AiModalState extends State<AiModal> {
           // Input
           Container(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
-            decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppColors.border))),
+            decoration: BoxDecoration(border: Border(top: BorderSide(color: AppColors.border))),
             child: Row(
               children: [
                 Expanded(

@@ -6,6 +6,8 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/app_search.dart';
+import '../widgets/app_search_bar.dart';
 
 String _monthKeyNow() {
   final n = DateTime.now();
@@ -68,7 +70,7 @@ class BillingAccountsScreen extends StatelessWidget {
                   margin: const EdgeInsets.only(bottom: 10),
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: AppColors.border),
                   ),
@@ -81,7 +83,7 @@ class BillingAccountsScreen extends StatelessWidget {
                               style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 14)),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.edit_outlined, size: 18, color: AppColors.muted),
+                          icon: Icon(Icons.edit_outlined, size: 18, color: AppColors.muted),
                           onPressed: () => Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -168,10 +170,12 @@ class _EditBillingAccountScreenState extends State<_EditBillingAccountScreen> {
   late final Set<String> _shiftA = {...?widget.existing?.shiftA};
   late final Set<String> _shiftB = {...?widget.existing?.shiftB};
   String _search = '';
+  final _searchCtrl = TextEditingController();
 
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -203,12 +207,14 @@ class _EditBillingAccountScreenState extends State<_EditBillingAccountScreen> {
     var groups = prov.db.groups
         .where((g) => g.parentGroupId == null || g.parentGroupId!.isEmpty)
         .toList();
-    if (_search.trim().isNotEmpty) {
-      final q = _search.trim().toLowerCase();
+    // 🔍 محرّك البحث الموحّد
+    final terms = searchTerms(_search);
+    if (terms.isNotEmpty) {
       groups = groups
-          .where((g) =>
-              g.phone.toLowerCase().contains(q) ||
-              (g.ownerName ?? '').toLowerCase().contains(q))
+          .where((g) => searchHitsOf(terms, [
+                g.phone, g.ownerName ?? '', g.groupInvoiceName ?? '',
+                g.accountEmail ?? '',
+              ]) != null)
           .toList();
     }
 
@@ -237,7 +243,7 @@ class _EditBillingAccountScreenState extends State<_EditBillingAccountScreen> {
               labelText: 'اسم الحساب (مثلاً: محل العتبة)',
               labelStyle: GoogleFonts.cairo(),
               filled: true,
-              fillColor: Colors.white,
+              fillColor: AppColors.surface,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
@@ -251,21 +257,11 @@ class _EditBillingAccountScreenState extends State<_EditBillingAccountScreen> {
             ),
           ]),
         ),
-        Padding(
+        AppSearchBar(
+          controller: _searchCtrl,
+          onChanged: (v) => setState(() => _search = v),
+          hint: '🔍 رقم الخط · صاحبه · الإيميل',
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-          child: TextField(
-            onChanged: (v) => setState(() => _search = v),
-            textDirection: TextDirection.rtl,
-            decoration: InputDecoration(
-              hintText: '🔍 بحث برقم الخط أو الاسم...',
-              hintStyle: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
-              filled: true,
-              fillColor: Colors.white,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              border:
-                  OutlineInputBorder(borderRadius: BorderRadius.circular(20)),
-            ),
-          ),
         ),
         Expanded(
           child: ListView.builder(
@@ -282,7 +278,7 @@ class _EditBillingAccountScreenState extends State<_EditBillingAccountScreen> {
                 margin: const EdgeInsets.only(bottom: 6),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppColors.surface,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: AppColors.border),
                 ),

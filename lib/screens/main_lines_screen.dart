@@ -6,7 +6,9 @@ import 'package:file_picker/file_picker.dart';
 import '../models/main_line.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/app_search.dart';
 import '../utils/phone_utils.dart';
+import '../widgets/app_search_bar.dart';
 import '../widgets/common.dart';
 
 class MainLinesScreen extends StatefulWidget {
@@ -17,41 +19,36 @@ class MainLinesScreen extends StatefulWidget {
 
 class _MainLinesScreenState extends State<MainLinesScreen> {
   String _search = '';
+  final _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final prov     = context.watch<AppProvider>();
     final all      = prov.db.mainLines;
-    final filtered = _search.isEmpty
+    // 🔍 محرّك البحث الموحّد — رقم/صاحب/شركة/تواريخ/ملاحظات
+    final terms    = searchTerms(_search);
+    final filtered = terms.isEmpty
         ? all
-        : all.where((l) =>
-            l.phone.contains(_search) ||
-            l.ownerName.toLowerCase().contains(_search.toLowerCase()) ||
-            l.name.contains(_search)).toList();
+        : all.where((l) => searchHitsOf(terms, [
+              l.phone, l.ownerName, l.name, l.provider,
+              l.startDate ?? '', l.endDate ?? '', l.notes ?? '',
+            ]) != null).toList();
 
     return Column(
       children: [
         _buildHeader(context, prov, all),
 
         // ── Search ──────────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-          child: TextField(
-            onChanged: (v) => setState(() => _search = v),
-            textDirection: TextDirection.rtl,
-            decoration: InputDecoration(
-              hintText: '🔍 بحث بالرقم أو الاسم أو الشركة...',
-              hintStyle: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
-              filled: true, fillColor: Colors.white,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: const BorderSide(color: AppColors.border)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: const BorderSide(color: AppColors.border)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: const BorderSide(color: AppColors.blue, width: 1.5)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              suffixIcon: _search.isNotEmpty
-                  ? IconButton(icon: const Icon(Icons.close, size: 16), onPressed: () => setState(() => _search = ''))
-                  : null,
-            ),
-          ),
+        AppSearchBar(
+          controller: _searchCtrl,
+          onChanged: (v) => setState(() => _search = v),
+          hint: '🔍 رقم · صاحب الخط · شركة · تاريخ · ملاحظات',
         ),
 
         // ── List ─────────────────────────────────────────────────
@@ -109,7 +106,7 @@ class _MainLinesScreenState extends State<MainLinesScreen> {
               onTap: () => _openForm(context, prov),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+                decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(20)),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   const Icon(Icons.add, size: 16, color: Color(0xFF0d47a1)),
                   const SizedBox(width: 4),
@@ -329,7 +326,7 @@ class _MainLineCard extends StatelessWidget {
               title: Text(e.value, style: GoogleFonts.cairo(
                   fontWeight: FontWeight.w700,
                   color: sel ? AppColors.blue2 : AppColors.text)),
-              trailing: sel ? const Icon(Icons.check, color: AppColors.blue, size: 18) : null,
+              trailing: sel ? Icon(Icons.check, color: AppColors.blue, size: 18) : null,
               onTap: () {
                 _save(ctx, _copy(billingCycle: e.key));
                 Navigator.pop(ctx);
@@ -409,7 +406,7 @@ class _MainLineCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
         boxShadow: [BoxShadow(color: line.color.withValues(alpha: 0.08), blurRadius: 16, offset: const Offset(0, 4))],
@@ -471,13 +468,13 @@ class _MainLineCard extends StatelessWidget {
                                 style: GoogleFonts.cairo(fontSize: 16, fontWeight: FontWeight.w900, color: AppColors.blue2),
                                 textDirection: TextDirection.ltr)),
                             const SizedBox(width: 3),
-                            const Icon(Icons.edit, size: 11, color: AppColors.muted),
+                            Icon(Icons.edit, size: 11, color: AppColors.muted),
                           ]),
                         ),
                       ),
                       // Delete only
                       IconButton(
-                        icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.muted),
+                        icon: Icon(Icons.delete_outline, size: 18, color: AppColors.muted),
                         onPressed: onDelete,
                         padding: EdgeInsets.zero, constraints: const BoxConstraints(),
                       ),
@@ -489,13 +486,13 @@ class _MainLineCard extends StatelessWidget {
                       onTap: () => _editText(context, '👤 اسم صاحب الخط', line.ownerName,
                           (v) { if (v.isNotEmpty) _save(context, _copy(ownerName: v)); }),
                       child: Row(children: [
-                        const Icon(Icons.person_outline, size: 13, color: AppColors.muted),
+                        Icon(Icons.person_outline, size: 13, color: AppColors.muted),
                         const SizedBox(width: 4),
                         Text(line.ownerName.isNotEmpty ? line.ownerName : 'اضغط لإضافة الاسم',
                             style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w600,
                                 color: line.ownerName.isNotEmpty ? AppColors.text : AppColors.muted)),
                         const SizedBox(width: 3),
-                        const Icon(Icons.edit, size: 10, color: AppColors.muted),
+                        Icon(Icons.edit, size: 10, color: AppColors.muted),
                       ]),
                     ),
                     const SizedBox(height: 8),
@@ -580,7 +577,7 @@ class _MainLineCard extends StatelessWidget {
                           maxLines: 2, overflow: TextOverflow.ellipsis,
                         )),
                         const SizedBox(width: 3),
-                        const Icon(Icons.edit, size: 10, color: AppColors.muted),
+                        Icon(Icons.edit, size: 10, color: AppColors.muted),
                       ]),
                     ),
                   ],
@@ -671,9 +668,9 @@ class _MainLineFormState extends State<_MainLineForm> {
     final color = MainLine.providerColors[_provider] ?? AppColors.blue;
     return Container(
       height: MediaQuery.of(context).size.height * 0.92,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(
         children: [
@@ -840,7 +837,7 @@ class _MainLineFormState extends State<_MainLineForm> {
                         border: Border.all(color: AppColors.green.withValues(alpha: 0.4)),
                       ),
                       child: Row(children: [
-                        const Icon(Icons.check_circle_outline, size: 16, color: AppColors.green2),
+                        Icon(Icons.check_circle_outline, size: 16, color: AppColors.green2),
                         const SizedBox(width: 8),
                         Text('تاريخ الانتهاء: $_endDate',
                             style: GoogleFonts.cairo(color: AppColors.green2, fontWeight: FontWeight.w700, fontSize: 13)),
@@ -862,7 +859,7 @@ class _MainLineFormState extends State<_MainLineForm> {
                         border: Border.all(color: AppColors.blueMid),
                       ),
                       child: Row(children: [
-                        const Icon(Icons.image_outlined, color: AppColors.blue2, size: 22),
+                        Icon(Icons.image_outlined, color: AppColors.blue2, size: 22),
                         const SizedBox(width: 10),
                         Expanded(child: Text(
                           _idPhotoPath != null
@@ -875,7 +872,7 @@ class _MainLineFormState extends State<_MainLineForm> {
                         if (_idPhotoPath != null)
                           GestureDetector(
                             onTap: () => setState(() => _idPhotoPath = null),
-                            child: const Icon(Icons.close, size: 16, color: AppColors.muted),
+                            child: Icon(Icons.close, size: 16, color: AppColors.muted),
                           ),
                       ]),
                     ),
@@ -918,7 +915,7 @@ class _MainLineFormState extends State<_MainLineForm> {
           border: Border.all(color: AppColors.border),
         ),
         child: Row(children: [
-          const Icon(Icons.calendar_today, size: 15, color: AppColors.muted),
+          Icon(Icons.calendar_today, size: 15, color: AppColors.muted),
           const SizedBox(width: 8),
           Expanded(child: Text(value ?? label,
               style: GoogleFonts.cairo(fontSize: 12,

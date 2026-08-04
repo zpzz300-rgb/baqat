@@ -1,4 +1,4 @@
-﻿// lib/screens/archive_screen.dart
+// lib/screens/archive_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -21,7 +21,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       padding: const EdgeInsets.all(12),
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.border),
           boxShadow: [BoxShadow(color: AppColors.blue2.withValues(alpha: 0.08), blurRadius: 20)],
@@ -87,7 +87,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
         margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           border: Border.all(color: const Color(0xFFbbdefb)),
           borderRadius: BorderRadius.circular(12),
         ),

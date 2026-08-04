@@ -5,6 +5,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../providers/app_provider.dart';
 import '../models/models.dart';
 import '../services/app_theme.dart';
+import '../services/app_search.dart';
+import '../services/view_prefs.dart';
+import '../widgets/app_search_bar.dart';
 
 class NotesScreen extends StatefulWidget {
   const NotesScreen({super.key});
@@ -26,6 +29,26 @@ class _NotesScreenState extends State<NotesScreen> {
     {'key': 'bill', 'label': 'فواتير', 'emoji': '💳'},
     {'key': 'sticky', 'label': 'ملاحظة ثابتة', 'emoji': '📌'},
   ];
+
+  // 💾 بيفتكر الفلاتر
+  final _viewPrefs = ViewPrefs('notes');
+
+  @override
+  void initState() {
+    super.initState();
+    _viewPrefs.load().then((m) {
+      if (!mounted || m.isEmpty) return;
+      setState(() {
+        _typeFilter = m['type'] ?? 'all';
+        _groupFilter = m['group'] ?? 'all';
+      });
+    });
+  }
+
+  void _set(VoidCallback change) {
+    setState(change);
+    _viewPrefs.save({'type': _typeFilter, 'group': _groupFilter});
+  }
 
   @override
   void dispose() {
@@ -84,16 +107,18 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   List<Map<String, dynamic>> _filtered(AppDB db) {
+    // 🔍 محرّك البحث الموحّد
+    final terms = searchTerms(_searchQ);
     return _allNotes(db).where((n) {
       if (_typeFilter != 'all' && n['type'] != _typeFilter) return false;
       if (_groupFilter != 'all' && n['groupId'] != _groupFilter) return false;
-      if (_searchQ.isNotEmpty) {
-        final q = _searchQ.toLowerCase();
-        if (!(n['text'] as String).toLowerCase().contains(q) &&
-            !(n['groupPhone'] as String).contains(q) &&
-            !(n['ownerName'] ?? '').toString().toLowerCase().contains(q)) {
-          return false;
-        }
+      if (terms.isNotEmpty &&
+          searchHitsOf(terms, [
+                (n['text'] ?? '').toString(),
+                (n['groupPhone'] ?? '').toString(),
+                (n['ownerName'] ?? '').toString(),
+              ]) == null) {
+        return false;
       }
       return true;
     }).toList();
@@ -108,7 +133,7 @@ class _NotesScreenState extends State<NotesScreen> {
     return Column(children: [
       // ── Header ──────────────────────────────────────────────────
       Container(
-        decoration: const BoxDecoration(gradient: AppColors.headerGradient),
+        decoration: BoxDecoration(gradient: AppColors.headerGradient),
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
         child: Column(children: [
           Row(children: [
@@ -192,39 +217,10 @@ class _NotesScreenState extends State<NotesScreen> {
         ]),
       ),
       // ── Search ──────────────────────────────────────────────────
-      Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-        child: TextField(
-          controller: _searchCtrl,
-          textDirection: TextDirection.rtl,
-          onChanged: (v) => setState(() => _searchQ = v.trim()),
-          decoration: InputDecoration(
-            hintText: '🔍 بحث في الملاحظات...',
-            hintStyle: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
-            filled: true,
-            fillColor: Colors.white,
-            border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(24),
-                borderSide: const BorderSide(color: AppColors.border)),
-            enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(24),
-                borderSide: const BorderSide(color: AppColors.border)),
-            focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(24),
-                borderSide:
-                    const BorderSide(color: AppColors.blue, width: 1.5)),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-            suffixIcon: _searchQ.isNotEmpty
-                ? IconButton(
-                    icon: const Icon(Icons.close, size: 16),
-                    onPressed: () {
-                      _searchCtrl.clear();
-                      setState(() => _searchQ = '');
-                    })
-                : null,
-          ),
-        ),
+      AppSearchBar(
+        controller: _searchCtrl,
+        onChanged: (v) => setState(() => _searchQ = v.trim()),
+        hint: '🔍 نص الملاحظة · رقم الخط · صاحبه',
       ),
       // ── Type filter chips ────────────────────────────────────────
       SizedBox(
@@ -232,27 +228,15 @@ class _NotesScreenState extends State<NotesScreen> {
         child: ListView(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          children: _typeFilters.map((f) {
-            final active = _typeFilter == f['key'];
-            return GestureDetector(
-              onTap: () => setState(() => _typeFilter = f['key'] as String),
-              child: Container(
-                margin: const EdgeInsets.only(right: 8),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                decoration: BoxDecoration(
-                  gradient: active ? AppColors.headerGradient : null,
-                  color: active ? null : const Color(0xFFf0f4f8),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text('${f['emoji']} ${f['label']}',
-                    style: GoogleFonts.cairo(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: active ? Colors.white : AppColors.text)),
-              ),
-            );
-          }).toList(),
+          children: _typeFilters
+              .map((f) => Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: AppChip('${f['emoji']} ${f['label']}',
+                        selected: _typeFilter == f['key'],
+                        onTap: () =>
+                            _set(() => _typeFilter = f['key'] as String)),
+                  ))
+              .toList(),
         ),
       ),
       // ── Group filter dropdown ────────────────────────────────────
@@ -281,7 +265,7 @@ class _NotesScreenState extends State<NotesScreen> {
                       ),
                     )),
               ],
-              onChanged: (v) => setState(() => _groupFilter = v ?? 'all'),
+              onChanged: (v) => _set(() => _groupFilter = v ?? 'all'),
             ),
           ),
         ]),
@@ -541,12 +525,12 @@ class _NotesScreenState extends State<NotesScreen> {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 12, vertical: 12),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: AppColors.purple),
                   ),
                   child: Row(children: [
-                    const Icon(Icons.calendar_today,
+                    Icon(Icons.calendar_today,
                         size: 16, color: AppColors.purple),
                     const SizedBox(width: 8),
                     Expanded(
@@ -666,7 +650,7 @@ class _NoteItem extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border, width: 1.2),
         boxShadow: [
@@ -741,7 +725,7 @@ class _NoteItem extends StatelessWidget {
                 decoration: BoxDecoration(
                     color: AppColors.redLight,
                     borderRadius: BorderRadius.circular(8)),
-                child: const Icon(Icons.close, size: 12, color: AppColors.red),
+                child: Icon(Icons.close, size: 12, color: AppColors.red),
               ),
             ),
           ],
