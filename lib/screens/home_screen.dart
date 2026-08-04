@@ -94,6 +94,25 @@ class _HomeScreenState extends State<HomeScreen> {
     {'key': 'package', 'label': '📦 الباقة'},
   ];
 
+  // ─── 🏢 فلتر الشركة السريع ────────────────────────────────────────
+  // ضغطة واحدة: «اتصالات» تورّيك خطوط اتصالات بس، وهكذا. بيتحفظ عشان
+  // لما ترجع للبرنامج تلاقي نفس الفلتر شغّال.
+  static const _kProvPrefKey = 'groups_provider_filter';
+  String? _provFilter; // null = الكل
+  static const _provOrder = ['vodafone', 'etisalat', 'orange', 'we'];
+  static const _provShort = {
+    'vodafone': 'VODA',
+    'etisalat': 'ETIS',
+    'orange': 'ORNG',
+    'we': 'WE',
+  };
+  static const _provColors = {
+    'vodafone': Color(0xFFe53935),
+    'etisalat': Color(0xFF43a047),
+    'orange': Color(0xFFfb8c00),
+    'we': Color(0xFF5e35b1),
+  };
+
   @override
   void initState() {
     super.initState();
@@ -115,16 +134,32 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadSortMode() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString(_kSortPrefKey);
-    if (!mounted || saved == null) return;
-    if (_sortModes.any((m) => m['key'] == saved)) {
-      setState(() => _groupSort = saved);
-    }
+    final savedProv = prefs.getString(_kProvPrefKey);
+    if (!mounted) return;
+    setState(() {
+      if (saved != null && _sortModes.any((m) => m['key'] == saved)) {
+        _groupSort = saved;
+      }
+      if (savedProv != null && _provOrder.contains(savedProv)) {
+        _provFilter = savedProv;
+      }
+    });
   }
 
   Future<void> _setSortMode(String key) async {
     setState(() => _groupSort = key);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kSortPrefKey, key);
+  }
+
+  Future<void> _setProvFilter(String? p) async {
+    setState(() => _provFilter = p);
+    final prefs = await SharedPreferences.getInstance();
+    if (p == null) {
+      await prefs.remove(_kProvPrefKey);
+    } else {
+      await prefs.setString(_kProvPrefKey, p);
+    }
   }
 
   // الإحصائيات المالية (الربح/الديون/الملخص) تظهر فقط في تاب المجموعات.
@@ -1381,6 +1416,11 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         // شريط ترتيب الخطوط (مبيظهرش وانت بتدوّر)
         if (!_searching) _buildSortBar(),
+        // 🏢 فلتر الشركة السريع
+        if (!_searching) ...[
+          const SizedBox(height: 6),
+          _buildProviderFilterBar(prov),
+        ],
         // الموظف: تبديل بين «شغلي» و«القائمة العامة»
         if (SupabaseService.isEmployee && !_searching) _buildEmpViewToggle(prov),
         // Content
@@ -1520,6 +1560,77 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ─── 🏢 شريط فلتر الشركة (ضغطة واحدة) ──────────────────────────
+  Widget _buildProviderFilterBar(AppProvider prov) {
+    final showAll = !SupabaseService.isEmployee || _empViewAll;
+    final src = showAll ? prov.db.groups : prov.visibleGroups;
+    final counts = <String, int>{};
+    for (final g in src) {
+      final p = g.provider;
+      if (p != null) counts[p] = (counts[p] ?? 0) + 1;
+    }
+    // شركة واحدة بس؟ الفلتر مالوش لازمة — نخفيه بدل ما ياخد مساحة.
+    final present = _provOrder.where((p) => (counts[p] ?? 0) > 0).toList();
+    if (present.length < 2) return const SizedBox.shrink();
+
+    Widget chip(String? p) {
+      final active = _provFilter == p;
+      final c = p == null ? AppColors.blue2 : _provColors[p]!;
+      final label = p == null ? 'الكل' : _provShort[p]!;
+      final n = p == null ? src.length : counts[p]!;
+      return GestureDetector(
+        onTap: () => _setProvFilter(p),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: active ? c : AppColors.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+                color: active ? c : c.withValues(alpha: 0.45), width: 1.5),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(label,
+                textDirection: TextDirection.ltr,
+                style: GoogleFonts.cairo(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.4,
+                    color: active ? Colors.white : c)),
+            const SizedBox(width: 5),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: active
+                    ? Colors.white.withValues(alpha: 0.28)
+                    : c.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text('$n',
+                  style: GoogleFonts.cairo(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w900,
+                      color: active ? Colors.white : c)),
+            ),
+          ]),
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 30,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        children: [
+          chip(null),
+          for (final p in present) ...[const SizedBox(width: 6), chip(p)],
+        ],
+      ),
+    );
+  }
+
   // ─── شريط ترتيب الخطوط ─────────────────────────────────────────
   Widget _buildSortBar() {
     return Padding(
@@ -1572,11 +1683,13 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
           ),
-          if (_groupSort != 'manual')
+          if (_groupSort != 'manual' || _provFilter != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
               child: Text(
-                  '✋ السحب متوقف — ارجع لـ«يدوي» عشان ترتّب الخطوط بإيدك',
+                  _provFilter != null && _groupSort == 'manual'
+                      ? '✋ السحب متوقف — شيل فلتر الشركة عشان ترتّب بإيدك'
+                      : '✋ السحب متوقف — ارجع لـ«يدوي» عشان ترتّب الخطوط بإيدك',
                   style: GoogleFonts.cairo(
                       fontSize: 9.5,
                       fontWeight: FontWeight.w700,
@@ -1684,7 +1797,34 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildGroupsList(AppProvider prov) {
     // الموالك يشوف الكل؛ الموظف: «شغلي» = الموكلة، «القائمة العامة» = الكل
     final showAll = !SupabaseService.isEmployee || _empViewAll;
-    final groups = _sortedGroups(prov, showAll ? prov.db.groups : prov.visibleGroups);
+    var src = showAll ? prov.db.groups : prov.visibleGroups;
+    // 🏢 فلتر الشركة
+    if (_provFilter != null) {
+      src = src.where((g) => g.provider == _provFilter).toList();
+    }
+    final groups = _sortedGroups(prov, src);
+    if (groups.isEmpty && _provFilter != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text('🏢', style: TextStyle(fontSize: 44)),
+            const SizedBox(height: 10),
+            Text('مفيش خطوط ${_provShort[_provFilter]} هنا',
+                style: GoogleFonts.cairo(
+                    color: AppColors.muted,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800)),
+            const SizedBox(height: 10),
+            TextButton(
+              onPressed: () => _setProvFilter(null),
+              child: Text('اعرض الكل',
+                  style: GoogleFonts.cairo(fontWeight: FontWeight.w900)),
+            ),
+          ],
+        ),
+      );
+    }
     if (groups.isEmpty) {
       final isEmp = SupabaseService.isEmployee;
       return Center(
@@ -1712,7 +1852,11 @@ class _HomeScreenState extends State<HomeScreen> {
     // الموظف: قائمة عادية (مفيش إعادة ترتيب على مجموعات مش بتاعته)
     // وكمان: السحب بيتقفل في أي وضع ترتيب غير «يدوي» عشان مايبوّظش
     // الترتيب المحفوظ (لأن الـ indexes ساعتها مش بتاعة الترتيب الأصلي)
-    final canReorder = !SupabaseService.isEmployee && _groupSort == 'manual';
+    // ⚠️ السحب بيشتغل بأرقام الترتيب في القايمة الكاملة — فلازم يتقفل لو
+    // في فلتر شركة شغّال، وإلا الترتيب المحفوظ هيتبوّظ.
+    final canReorder = !SupabaseService.isEmployee &&
+        _groupSort == 'manual' &&
+        _provFilter == null;
     return ReorderableListView.builder(
       scrollController: _groupsScrollCtrl,
       padding: const EdgeInsets.all(12),

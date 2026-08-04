@@ -1,4 +1,5 @@
 // lib/widgets/member_card.dart
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:provider/provider.dart';
@@ -331,21 +332,17 @@ class CompactMemberCard extends StatelessWidget {
     else if (flag == 'yellow') { flagColor = const Color(0xFFFFCA28); }
     else if (flag == 'green') { flagColor = const Color(0xFF66BB6A); }
 
-    // أنواع خاصة: أرضي (أزرق) / هوم فور جي (بنفسجي) — لون وحدود مميزة وسط المربعات
-    final isLandline = member.type == 'landline';
-    final isHome4g = member.type == 'homeforgee';
-    final isSpecial = isLandline || isHome4g;
-    final specialColor = isLandline ? const Color(0xFF1565C0) : const Color(0xFF6A1B9A);
-    final specialBg = isLandline ? const Color(0xFFEAF4FF) : const Color(0xFFF7EEFB);
+    // ⭕ خطوط الزيادة (أرضي / هوم فور جي) → دايرة فيروزية مميزة مش مربع
+    if (member.type == 'landline' || member.type == 'homeforgee') {
+      return _ExtraLineCircle(member: member, group: group, highDebt: highDebt);
+    }
 
     final borderColor = highDebt
         ? AppColors.red
         : (flag == 'red'
             ? const Color(0xFFEF5350)
-            : (isStockNumber
-                ? Colors.orange
-                : (isSpecial ? specialColor : AppColors.border)));
-    final borderWidth = (highDebt || flag == 'red' || isStockNumber || isSpecial) ? 2.0 : 1.5;
+            : (isStockNumber ? Colors.orange : AppColors.border));
+    final borderWidth = (highDebt || flag == 'red' || isStockNumber) ? 2.0 : 1.5;
 
     final displayName = isStockNumber ? 'رقم متاح' : member.name;
     final balanceTxt = member.balance == 0
@@ -360,9 +357,7 @@ class CompactMemberCard extends StatelessWidget {
       onLongPress: () => openMemberTab(context, member),
       child: Container(
         decoration: BoxDecoration(
-          color: highDebt
-              ? const Color(0xFFFFF5F5)
-              : (isSpecial ? specialBg : Colors.white),
+          color: highDebt ? const Color(0xFFFFF5F5) : Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: borderColor, width: borderWidth),
           boxShadow: [
@@ -386,17 +381,11 @@ class CompactMemberCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Status dot + line-type icon
+                    // Status dot
                     Row(children: [
                       Container(width: 8, height: 8,
                           decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle)),
                       const Spacer(),
-                      if (member.type == 'landline')
-                        const Icon(Icons.phone_in_talk,
-                            size: 12, color: Color(0xFF1565C0))
-                      else if (member.type == 'homeforgee')
-                        const Icon(Icons.router,
-                            size: 12, color: Color(0xFF6A1B9A)),
                     ]),
                     const SizedBox(height: 3),
                     // Phone number — large & prominent (primary)
@@ -445,6 +434,200 @@ class CompactMemberCard extends StatelessWidget {
       ),
     );
   }
+}
+
+// ─── ⭕ خط الزيادة (أرضي / هوم فور جي) — دايرة فيروزية ────────────
+//
+// ليه دايرة وليه اللون ده؟
+//   البرنامج كله ألوانه كحلي/أخضر/أحمر/برتقالي/بنفسجي، والعملاء العاديين
+//   مربعات بيضا. فخط الزيادة بقى **دايرة فيروزية مصمتة** — شكل ولون
+//   مش موجودين في أي حتة تانية، فبتتشاف من بصة واحدة وانت بتقلّب بسرعة.
+//   المديونية بتتعرض على **طوق برّه الدايرة** عشان ما تاكلش لون النوع.
+
+class _ExtraLineCircle extends StatelessWidget {
+  final Member member;
+  final Group group;
+  final bool highDebt;
+  const _ExtraLineCircle({
+    required this.member,
+    required this.group,
+    required this.highDebt,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isLandline = member.type == 'landline';
+    final emoji = isLandline ? '☎️' : '📶';
+    final label = isLandline ? 'أرضي' : 'هوم 4G';
+    final cA = isLandline ? kExtraTealA : kExtraCyanA;
+    final cB = isLandline ? kExtraTealB : kExtraCyanB;
+
+    // الطوق الخارجي = حالة الفلوس (مش النوع)
+    final flag = member.paymentFlag;
+    final Color ring = highDebt
+        ? AppColors.red
+        : (flag == 'red'
+            ? const Color(0xFFEF5350)
+            : (flag == 'yellow'
+                ? const Color(0xFFFFCA28)
+                : (member.hasDebt ? const Color(0xFFFF8A65) : Colors.white)));
+
+    final balanceTxt = member.balance == 0
+        ? '0'
+        : (member.balance < 0
+            ? '${(-member.balance).toStringAsFixed(0)}-'
+            : member.balance.toStringAsFixed(0));
+    final balColor = member.hasDebt
+        ? AppColors.red2
+        : (member.isClear ? kExtraTealA : AppColors.muted);
+
+    final displayName = member.name.isEmpty ? label : member.name;
+
+    return GestureDetector(
+      onTap: () => MemberCard(member: member, group: group)._openDrawer(context),
+      onLongPress: () => openMemberTab(context, member),
+      child: LayoutBuilder(
+        builder: (_, c) {
+          // الدايرة تاخد أكبر قُطر ممكن، وتسيب سطر ثابت للاسم تحتها.
+          // الارتفاع ثابت عشان تكبير الخط في الإعدادات ما يعملش overflow.
+          const nameH = 13.0;
+          final d = math.max(
+              40.0,
+              math.min(c.maxWidth, c.maxHeight - nameH - 1).floorToDouble());
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: d,
+                height: d,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // ☀️ أشعة خفيفة حوالين الدايرة — تفرّقها عن أي شكل تاني
+                    CustomPaint(
+                      size: Size(d, d),
+                      painter: _SunRaysPainter(cB.withValues(alpha: 0.55)),
+                    ),
+                    Container(
+                      width: d - 9,
+                      height: d - 9,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topRight,
+                          end: Alignment.bottomLeft,
+                          colors: [cB, cA],
+                        ),
+                        border: Border.all(color: ring, width: 2.4),
+                        boxShadow: [
+                          BoxShadow(
+                            color: cA.withValues(alpha: 0.35),
+                            blurRadius: 6,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: d * 0.12),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(emoji, style: const TextStyle(fontSize: 12)),
+                            const SizedBox(height: 1),
+                            // الرقم — خط صغير جوه الدايرة
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                member.phone.isEmpty ? '—' : member.phone,
+                                maxLines: 1,
+                                textDirection: TextDirection.ltr,
+                                style: GoogleFonts.cairo(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '$balanceTxt ج',
+                                  maxLines: 1,
+                                  style: GoogleFonts.cairo(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w900,
+                                    color: balColor,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 1),
+              SizedBox(
+                width: c.maxWidth,
+                height: nameH,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    displayName,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.cairo(
+                      fontSize: 8,
+                      fontWeight: FontWeight.w700,
+                      color: cA,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// أشعة قصيرة حوالين الدايرة — تدي إحساس «الشمس» وتخلّي الشكل مميّز
+class _SunRaysPainter extends CustomPainter {
+  final Color color;
+  const _SunRaysPainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final r = size.width / 2;
+    final p = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 2;
+    const n = 16;
+    for (var i = 0; i < n; i++) {
+      final a = i * 2 * math.pi / n;
+      final dir = Offset(math.cos(a), math.sin(a));
+      canvas.drawLine(center + dir * (r - 4.2), center + dir * (r - 0.8), p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SunRaysPainter old) => old.color != color;
 }
 
 // ─── MEMBER DRAWER ───────────────────────────────────────────────

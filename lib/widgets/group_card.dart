@@ -119,7 +119,6 @@ class _GroupCardState extends State<GroupCard> {
         .firstWhere((g) => g.id == widget.group.id, orElse: () => widget.group);
     final members = prov.db.membersOf(group.id)
       ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
-    final debt = prov.db.groupDebt(group.id);
     final debtors = members.where((m) => m.balance < 0).length;
     // Offer end-date warning — blue header when ≤ 60 days left
     final offerEnd = group.offerEndDate != null
@@ -299,9 +298,8 @@ class _GroupCardState extends State<GroupCard> {
                           AppColors.blue3, AppColors.blueMid),
                       _buildClientsBadge(regularCount, debtors, group),
                       ..._buildMemberTypeBadges(members),
-                      if (debt == 0 && members.isNotEmpty)
-                        _badge('✅ سداد تام', AppColors.greenLight,
-                            const Color(0xFF00695c), const Color(0xFF80cbc4)),
+                      // «✅ سداد تام» اتشال — بادچ العملاء لو مفيش فيه رقم
+                      // أحمر يبقى معناها سداد تام أصلاً، فمالهاش لازمة.
                       if (group.lastBillAmount > 0 || group.billDebt > 0)
                         _buildBillBadge(context, prov, group),
                       _buildNearestBillBadge(prov),
@@ -309,9 +307,8 @@ class _GroupCardState extends State<GroupCard> {
                         _buildManualDueDateBadge(group),
                       _buildProfitBadge(prov),
                       _buildComplaintsBadge(context, prov),
-                      // Offer end date badge
-                      if (group.offerEndDate != null)
-                        _buildOfferEndBadge(group),
+                      // بادچ نهاية العرض اتشال — نفس المعلومة موجودة في
+                      // الدايرة الصغيرة جنب عدّاد الإلغاء تحت، فكانت تكرار.
                       if (SupabaseService.isEmployee &&
                           !prov.canEditGroup(group.id))
                         _badge('👁 عرض فقط', const Color(0xFFF5F5F5),
@@ -346,9 +343,6 @@ class _GroupCardState extends State<GroupCard> {
 
                   // ── 📆 عدّاد الإلغاء (الأهم) + دايرة نهاية العرض ──
                   _buildDeadlineCountdowns(),
-
-                  // ── 🗓 الشريط الزمني للعرض ───────────────────────
-                  _buildOfferTimeline(),
 
                   // ── Insurance / WE coupon badges ─────────────────
                   _buildInsuranceBadge(),
@@ -633,37 +627,34 @@ class _GroupCardState extends State<GroupCard> {
     );
   }
 
-  // ── Sticky Note ───────────────────────────────────────────────
+  // ── Sticky Note — شريط صغير سطر واحد (دوس عشان تقراها كاملة/تعدّلها) ──
   Widget _buildStickyNote(BuildContext context, AppProvider prov, Group group) {
     return GestureDetector(
+      onTap: () => _editStickyNote(context, prov, group),
       onLongPress: () => _editStickyNote(context, prov, group),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
           color: const Color(0xFFFFF9C4),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(20),
           border:
               Border.all(color: const Color(0xFFF9A825).withValues(alpha: 0.6)),
         ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('📌', style: TextStyle(fontSize: 13)),
-            const SizedBox(width: 6),
+            const Text('📌', style: TextStyle(fontSize: 10)),
+            const SizedBox(width: 5),
             Expanded(
               child: Text(
                 group.stickyNote!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.cairo(
-                    fontSize: 11,
+                    fontSize: 10,
                     color: const Color(0xFF5D4037),
                     fontWeight: FontWeight.w700),
               ),
-            ),
-            GestureDetector(
-              onTap: () => _editStickyNote(context, prov, group),
-              child: const Icon(Icons.edit_note,
-                  size: 16, color: Color(0xFFF9A825)),
             ),
           ],
         ),
@@ -998,219 +989,6 @@ class _GroupCardState extends State<GroupCard> {
     ]);
   }
 
-  // ── 🗓 الشريط الزمني للعرض ──────────────────────────────────────
-  /// خط واحد بيوضّح العلاقة بين التواريخ التلاتة بنظرة واحدة (RTL — البداية
-  /// على اليمين):
-  ///   ● بداية العرض ━━━ (أخضر: لسه تقدر تلغي) ━━━ ◆ ميعاد الإلغاء
-  ///   ━━━ (أحمر: الإلغاء اتقفل) ━━━ ● نهاية العرض
-  /// وعلامة «إنت هنا» بتتحرك على الخط حسب النهاردة.
-  Widget _buildOfferTimeline() {
-    final g = widget.group;
-    DateTime? p(String? s) => s == null ? null : DateTime.tryParse(s);
-
-    final offerEnd = p(g.offerEndDate);
-    final cancel = p(g.cancelDeadlineDate);
-    if (offerEnd == null && cancel == null) return const SizedBox.shrink();
-
-    // نهاية الشريط = أبعد تاريخ عندنا (عادةً نهاية العرض)
-    var last = offerEnd ?? cancel!;
-    if (cancel != null && cancel.isAfter(last)) last = cancel;
-
-    // بداية الشريط: تاريخ بداية العرض، وإلا نحسبها من مدة العرض، وإلا سنة
-    final start = p(g.offerStartDate) ??
-        DateTime(last.year, last.month - (g.offerDuration ?? 12), last.day);
-    final totalDays = last.difference(start).inDays;
-    if (totalDays <= 0) return const SizedBox.shrink();
-
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final progress =
-        (today.difference(start).inDays / totalDays).clamp(0.0, 1.0);
-    final cancelPos = cancel == null
-        ? null
-        : (cancel.difference(start).inDays / totalDays).clamp(0.0, 1.0);
-    final started = !today.isBefore(start);
-    final finished = today.isAfter(last);
-
-    String short(DateTime d) => '${d.day}/${d.month}';
-
-    const trackH = 8.0;
-    const dotR = 6.0;
-    const pad = 12.0; // مسافة أمان على الطرفين عشان النقط ما تتقصّش
-
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('🗓 خط زمن العرض',
-              style: GoogleFonts.cairo(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.muted)),
-          const SizedBox(height: 6),
-          LayoutBuilder(builder: (_, c) {
-            final w = c.maxWidth;
-            final span = w - pad * 2;
-            // المسافة من يمين الشريط لأي نسبة (RTL: 0 = يمين)
-            double x(double pos) => pad + pos * span;
-            final cancelX = cancelPos == null ? null : x(cancelPos);
-            final nowX = x(progress);
-
-            return SizedBox(
-              height: 46,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  // ── المسار: أخضر لحد ميعاد الإلغاء، وأحمر بعده ──
-                  Positioned(
-                    top: 26,
-                    right: pad,
-                    width: span,
-                    height: trackH,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: Row(children: [
-                        // الشمال = بعد ميعاد الإلغاء (مقفول)
-                        // (الحد الأدنى 1 لأن flex = 0 بيدي عرض غير محدود)
-                        Expanded(
-                          flex: (((1 - (cancelPos ?? 1)) * 1000).round())
-                              .clamp(1, 1000),
-                          child: Container(color: const Color(0xFFEF9A9A)),
-                        ),
-                        // اليمين = لسه تقدر تلغي
-                        Expanded(
-                          flex: (((cancelPos ?? 1) * 1000).round())
-                              .clamp(1, 1000),
-                          child: Container(color: const Color(0xFFA5D6A7)),
-                        ),
-                      ]),
-                    ),
-                  ),
-                  // ── الجزء اللي عدّى (تغميق خفيف من اليمين) ──
-                  if (started)
-                    Positioned(
-                      top: 26,
-                      right: pad,
-                      width: (nowX - pad).clamp(0.0, span),
-                      height: trackH,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.22),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                    ),
-                  // ── نقطة بداية العرض (يمين) ──
-                  Positioned(
-                    top: 26 + trackH / 2 - dotR,
-                    right: pad - dotR,
-                    child: _tlDot(const Color(0xFF2E7D32)),
-                  ),
-                  // ── نقطة نهاية العرض (شمال) ──
-                  Positioned(
-                    top: 26 + trackH / 2 - dotR,
-                    right: x(1) - dotR,
-                    child: _tlDot(const Color(0xFFC62828)),
-                  ),
-                  // ── ◆ ميعاد الإلغاء ──
-                  if (cancelX != null)
-                    Positioned(
-                      top: 26 + trackH / 2 - 8,
-                      right: cancelX - 8,
-                      child: Transform.rotate(
-                        angle: 0.7854, // 45°
-                        child: Container(
-                          width: 14,
-                          height: 14,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFD32F2F),
-                            border: Border.all(color: Colors.white, width: 2),
-                          ),
-                        ),
-                      ),
-                    ),
-                  // ── علامة «إنت هنا» ──
-                  if (started && !finished) ...[
-                    Positioned(
-                      top: 20,
-                      right: nowX - 1.5,
-                      child: Container(
-                        width: 3,
-                        height: 20,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1565C0),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      top: 0,
-                      right: (nowX - 26).clamp(0.0, (w - 52).clamp(0.0, w)),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1565C0),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text('إنت هنا',
-                            style: GoogleFonts.cairo(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w900,
-                                color: Colors.white)),
-                      ),
-                    ),
-                  ],
-                  // ── التواريخ تحت الخط ──
-                  Positioned(
-                    top: 26 + trackH + 4,
-                    right: 0,
-                    child: _tlLabel('بداية ${short(start)}',
-                        const Color(0xFF2E7D32)),
-                  ),
-                  if (cancelX != null)
-                    Positioned(
-                      top: 26 + trackH + 4,
-                      right: (cancelX - 24).clamp(46.0, (w - 96).clamp(46.0, w)),
-                      child: _tlLabel('إلغاء ${short(cancel!)}',
-                          const Color(0xFFD32F2F)),
-                    ),
-                  Positioned(
-                    top: 26 + trackH + 4,
-                    right: (w - 46).clamp(0.0, w),
-                    child: _tlLabel('نهاية ${short(last)}',
-                        const Color(0xFFC62828)),
-                  ),
-                ],
-              ),
-            );
-          }),
-        ],
-      ),
-    );
-  }
-
-  Widget _tlDot(Color c) => Container(
-        width: 12,
-        height: 12,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: c,
-          border: Border.all(color: Colors.white, width: 2),
-        ),
-      );
-
-  Widget _tlLabel(String t, Color c) => Text(t,
-      style: GoogleFonts.cairo(
-          fontSize: 8.5, fontWeight: FontWeight.w800, color: c));
-
   /// دايرة صغيرة بتوضح الأيام المتبقية على نهاية العرض (الديدلاين النهائي)
   Widget _buildOfferEndCircle() {
     final days = widget.group.daysUntilOfferEnd;
@@ -1439,16 +1217,11 @@ class _GroupCardState extends State<GroupCard> {
     'orange': Color(0xFFef6c00),
     'we': Color(0xFF5e35b1),
   };
-  static const _pEmojis = {
-    'vodafone': '📱',
-    'etisalat': '📡',
-    'orange': '🟠',
-    'we': '🔵',
-  };
-  static const _pNames = {
-    'vodafone': 'فودافون',
-    'etisalat': 'اتصالات',
-    'orange': 'أورنج',
+  /// رمز قصير بالإنجليزي بدل الاسم الكامل — بياخد مساحة أقل بكتير في الهيدر
+  static const _pShort = {
+    'vodafone': 'VODA',
+    'etisalat': 'ETIS',
+    'orange': 'ORNG',
     'we': 'WE',
   };
 
@@ -1456,66 +1229,19 @@ class _GroupCardState extends State<GroupCard> {
     final p = (g ?? widget.group).provider!;
     final c = _pColors[p] ?? AppColors.blue;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: c.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
+        color: c.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
         border: Border.all(color: c.withValues(alpha: 0.5)),
       ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Text(_pEmojis[p] ?? '📡', style: const TextStyle(fontSize: 11)),
-        const SizedBox(width: 3),
-        Text(_pNames[p] ?? p,
-            style: GoogleFonts.cairo(
-                fontSize: 10, fontWeight: FontWeight.w800, color: c)),
-      ]),
-    );
-  }
-
-  // ── Offer End Badge ───────────────────────────────────────────
-  Widget _buildOfferEndBadge([Group? g]) {
-    final endStr = (g ?? widget.group).offerEndDate!;
-    final end = DateTime.tryParse(endStr);
-    if (end == null) return const SizedBox.shrink();
-    final now = DateTime.now();
-    final days =
-        end.difference(DateTime(now.year, now.month, now.day)).inDays;
-    final expired = days < 0;
-    final warning = !expired && days <= 60;
-
-    Color bgColor;
-    Color textColor;
-    String label;
-
-    if (expired) {
-      bgColor = AppColors.redLight;
-      textColor = AppColors.red2;
-      label = '🔴 عرض منتهي منذ ${-days} يوم';
-    } else if (days == 0) {
-      bgColor = const Color(0xFFFFEBEE);
-      textColor = AppColors.red2;
-      label = '🔴 آخر يوم للعرض';
-    } else if (warning) {
-      bgColor = const Color(0xFFE3F2FD);
-      textColor = const Color(0xFF1565C0);
-      label = '⏳ تبقى $days يوم للعرض';
-    } else {
-      bgColor = AppColors.greenLight;
-      textColor = AppColors.green2;
-      label = '✅ العرض: $days يوم';
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        label,
-        style: GoogleFonts.cairo(
-            fontSize: 10, fontWeight: FontWeight.w700, color: textColor),
-      ),
+      child: Text(_pShort[p] ?? p,
+          textDirection: TextDirection.ltr,
+          style: GoogleFonts.cairo(
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              color: c,
+              letterSpacing: 0.5)),
     );
   }
 
@@ -2194,7 +1920,9 @@ class _GroupCardState extends State<GroupCard> {
     );
   }
 
-  // ── Clients Badge (عدد العملاء + نقاط حمرا للمدينين + تنبيه الزيادة) ──
+  // ── Clients Badge — رقم واحد ملوّن ──────────────────────────────
+  //   أخضر = لسه في السعة  |  أحمر = عدّى الحد (ده اللي بيدفع زيادة)
+  //   العدد ده للعملاء العاديين بس — الأرضي/الهوم 4G مش داخلين فيه.
   Widget _buildClientsBadge(int count, int debtors, [Group? g]) {
     final group = g ?? widget.group;
     final max = group.maxClients;
@@ -2202,58 +1930,58 @@ class _GroupCardState extends State<GroupCard> {
         group.lineType == LineType.home4g || group.lineType == LineType.adsl;
     final excess = (max != null && !isExempt && count > max) ? count - max : 0;
     final hasExcess = excess > 0;
-    // صف النقاط: حمرا بعدد المدينين، رمادي للباقي (بحد أقصى 12 نقطة للوضوح)
-    final dotCount = count.clamp(0, 12);
+    final c = hasExcess ? AppColors.red2 : const Color(0xFF2E7D32);
+    final bg = hasExcess ? AppColors.redLight : const Color(0xFFE8F5E9);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: hasExcess ? AppColors.redLight : AppColors.blueLight,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: hasExcess ? const Color(0xFFef9a9a) : AppColors.blueMid),
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+            color: hasExcess ? const Color(0xFFEF9A9A) : const Color(0xFFA5D6A7)),
       ),
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.people, size: 12, color: hasExcess ? AppColors.red2 : AppColors.blue3),
-          const SizedBox(width: 3),
-          Text('$count عميل',
-              style: GoogleFonts.cairo(fontSize: 10, fontWeight: FontWeight.w800,
-                  color: hasExcess ? AppColors.red2 : AppColors.blue3)),
-          if (hasExcess) ...[
-            const SizedBox(width: 4),
-            Text('+$excess زيادة',
-                style: GoogleFonts.cairo(fontSize: 9, fontWeight: FontWeight.w900, color: AppColors.red2)),
-          ],
-        ]),
-        if (dotCount > 0) ...[
-          const SizedBox(height: 3),
-          Wrap(spacing: 3, runSpacing: 3, children: List.generate(dotCount, (i) {
-            final isDebtor = i < debtors;
-            return Container(
-              width: 7, height: 7,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: isDebtor ? AppColors.red : const Color(0xFFBBD3EA),
-              ),
-            );
-          })),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.people, size: 12, color: c),
+        const SizedBox(width: 3),
+        Text('$count',
+            style: GoogleFonts.cairo(
+                fontSize: 13, fontWeight: FontWeight.w900, color: c)),
+        if (hasExcess) ...[
+          const SizedBox(width: 2),
+          Text('+$excess',
+              style: GoogleFonts.cairo(
+                  fontSize: 9, fontWeight: FontWeight.w900, color: AppColors.red)),
+        ],
+        // المدينين — نقطة حمرا بالعدد بدل صف النقط الطويل
+        if (debtors > 0) ...[
+          const SizedBox(width: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+            decoration: BoxDecoration(
+                color: AppColors.red, borderRadius: BorderRadius.circular(20)),
+            child: Text('$debtors',
+                style: GoogleFonts.cairo(
+                    fontSize: 8,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white)),
+          ),
         ],
       ]),
     );
   }
 
-  // ── Member Type Badges ────────────────────────────────────────
+  // ── Member Type Badges — نفس فيروزي دايرة خط الزيادة جوّه المجموعة ──
   List<Widget> _buildMemberTypeBadges(List<Member> members) {
     final landline = members.where((m) => m.type == 'landline').length;
     final home4g = members.where((m) => m.type == 'homeforgee').length;
     final widgets = <Widget>[];
-    // أيقونة فقط بدون كلمة — الشكل بيوضّح النوع
     if (landline > 0) {
-      widgets.add(_badge(landline > 1 ? '☎️ $landline' : '☎️', const Color(0xFFE3F2FD),
-          const Color(0xFF1565C0), const Color(0xFF42A5F5)));
+      widgets.add(_badge(landline > 1 ? '☎️ $landline' : '☎️',
+          const Color(0xFFE0F2F1), kExtraTealA, const Color(0xFF4DB6AC)));
     }
     if (home4g > 0) {
-      widgets.add(_badge(home4g > 1 ? '🏠 $home4g' : '🏠', const Color(0xFFF3E5F5),
-          const Color(0xFF6A1B9A), const Color(0xFFAB47BC)));
+      widgets.add(_badge(home4g > 1 ? '📶 $home4g' : '📶',
+          const Color(0xFFE0F7FA), kExtraCyanA, const Color(0xFF4DD0E1)));
     }
     return widgets;
   }
