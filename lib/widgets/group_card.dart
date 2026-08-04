@@ -19,6 +19,36 @@ import '../services/notification_service.dart';
 part 'group_card_notepad_sheet.dart';
 part 'group_card_points_sheet.dart';
 
+// ─── 🔄 السيكل — مصدر واحد للاسم المختصر والمفتاح ─────────────────
+// «سيكل 1» بقت «س1» عشان تاخد مساحة أقل في الهيدر، ونفس الاختصار
+// بيتستخدم في فلتر السيكل اللي فوق قايمة الخطوط.
+
+/// مفتاح السيكل بتاع المجموعة (بيوحّد billingCycle مع الرقم القديم cycle)
+String cycleKeyOf(Group g) => g.billingCycle ?? 'cycle${g.cycle}';
+
+const _kCycleShort = {
+  'day1': '📅 1',
+  'day4': '📅 4',
+  'mid': '📅 15',
+  'cycle1': 'س1',
+  'cycle2': 'س2',
+};
+
+/// الاسم المختصر اللي بيظهر على البادچ وعلى شريط الفلتر
+String cycleShortOf(String key) =>
+    _kCycleShort[key] ?? (key.startsWith('cycle') ? 'س${key.substring(5)}' : key);
+
+String cycleShortLabel(Group g) => cycleShortOf(cycleKeyOf(g));
+
+/// الاسم الكامل — بيتستخدم في التلميحات والشرح
+const kCycleFullNames = {
+  'day1': 'أول الشهر',
+  'day4': 'اليوم 4',
+  'mid': 'منتصف الشهر',
+  'cycle1': 'سيكل 1',
+  'cycle2': 'سيكل 2',
+};
+
 class GroupCard extends StatefulWidget {
   final Group group;
   final bool initiallyExpanded; // بيانات الخط الكاملة تفتح افتراضياً
@@ -119,7 +149,6 @@ class _GroupCardState extends State<GroupCard> {
         .firstWhere((g) => g.id == widget.group.id, orElse: () => widget.group);
     final members = prov.db.membersOf(group.id)
       ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
-    final debtors = members.where((m) => m.balance < 0).length;
     // Offer end-date warning — blue header when ≤ 60 days left
     final offerEnd = group.offerEndDate != null
         ? DateTime.tryParse(group.offerEndDate!)
@@ -241,6 +270,12 @@ class _GroupCardState extends State<GroupCard> {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
+                      // ☎️/📶 علامة خط الزيادة — **مكان ثابت** جنب الرقم
+                      // على طول، مش في صف البادچات اللي بيتلخبط ويتنقّل.
+                      _buildExtraLineMark(landlineCount, home4gCount),
+                      // الرقم — كبير وثابت: FittedBox بيصغّره لو لزم، لكن
+                      // الخانة اللي جنبه محجوزة بعرض ثابت فمكانه مابيتحركش
+                      // من كارت لكارت.
                       Expanded(
                         child: FittedBox(
                           fit: BoxFit.scaleDown,
@@ -248,10 +283,11 @@ class _GroupCardState extends State<GroupCard> {
                           child: Text(
                             group.phone,
                             style: GoogleFonts.cairo(
-                              fontSize: 19,
+                              fontSize: 34,
                               fontWeight: FontWeight.w900,
                               color: headerTextColor,
-                              letterSpacing: 0.5,
+                              letterSpacing: 0,
+                              height: 1.1,
                             ),
                             textDirection: TextDirection.ltr,
                             maxLines: 1,
@@ -296,13 +332,16 @@ class _GroupCardState extends State<GroupCard> {
                       _buildRentalIndicator(context, prov),
                       _badge(_cycleLabel(group), AppColors.blueLight,
                           AppColors.blue3, AppColors.blueMid),
-                      _buildClientsBadge(regularCount, debtors, group),
-                      ..._buildMemberTypeBadges(members),
+                      _buildClientsBadge(regularCount, group),
+                      // ☎️/📶 اتنقلوا لمكان ثابت فوق جنب الرقم
                       // «✅ سداد تام» اتشال — بادچ العملاء لو مفيش فيه رقم
                       // أحمر يبقى معناها سداد تام أصلاً، فمالهاش لازمة.
+                      // بادچ الفاتورة = المبلغ + العدّاد في حتة واحدة.
+                      // العدّاد لوحده بيظهر بس لو مفيش مبلغ فاتورة أصلاً.
                       if (group.lastBillAmount > 0 || group.billDebt > 0)
-                        _buildBillBadge(context, prov, group),
-                      _buildNearestBillBadge(prov),
+                        _buildBillBadge(context, prov, group)
+                      else
+                        _buildNearestBillBadge(prov),
                       if (group.type == 'manual' && group.manualDueDate != null)
                         _buildManualDueDateBadge(group),
                       _buildProfitBadge(prov),
@@ -360,7 +399,8 @@ class _GroupCardState extends State<GroupCard> {
 
           // ─── MEMBERS TOGGLE + GRID ─────────────────────────────
           if (_expanded) ...[
-            _buildMembersToggleBar(members.length),
+            _buildMembersToggleBar(
+                members.length, landlineCount + home4gCount),
             if (_membersExpanded)
               members.isEmpty
                   ? Padding(
@@ -412,7 +452,12 @@ class _GroupCardState extends State<GroupCard> {
   }
 
   // ── Members Toggle Bar — قائمة منسدلة صغيرة مستقلة لأرقام العملاء ──
-  Widget _buildMembersToggleBar(int count) {
+  /// الشريط بيوضّح إن الإجمالي = عملاء عاديين + خطوط زيادة، عشان ما يبقاش
+  /// فيه لخبطة بين الرقم اللي فوق (العاديين بس) والرقم اللي هنا.
+  Widget _buildMembersToggleBar(int count, [int extra = 0]) {
+    final label = extra > 0
+        ? 'أرقام العملاء (${count - extra} + $extra زيادة)'
+        : 'أرقام العملاء ($count)';
     return GestureDetector(
       onTap: () => setState(() => _membersExpanded = !_membersExpanded),
       child: Container(
@@ -426,7 +471,7 @@ class _GroupCardState extends State<GroupCard> {
           children: [
             Icon(Icons.people_outline, size: 16, color: AppColors.blue3),
             const SizedBox(width: 6),
-            Text('أرقام العملاء ($count)',
+            Text(label,
                 style: GoogleFonts.cairo(
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
@@ -463,19 +508,22 @@ class _GroupCardState extends State<GroupCard> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
+        // ☎️/📶 نفس المكان بالظبط زي الكارت المفتوح — أقصى اليمين
+        _buildExtraLineMark(landlineCount, home4gCount, size: 28),
         // Phone number — large & prominent
         Expanded(
-          flex: 5,
+          flex: 7,
           child: FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerRight,
             child: Text(
               group.phone,
               style: GoogleFonts.cairo(
-                fontSize: 22,
+                fontSize: 30,
                 fontWeight: FontWeight.w900,
                 color: headerTextColor,
-                letterSpacing: 0.5,
+                letterSpacing: 0,
+                height: 1.1,
               ),
               textDirection: TextDirection.ltr,
               maxLines: 1,
@@ -483,17 +531,6 @@ class _GroupCardState extends State<GroupCard> {
           ),
         ),
         const SizedBox(width: 6),
-        // Line type icons
-        if (landlineCount > 0)
-          _miniChip(Icons.phone_in_talk, '$landlineCount',
-              const Color(0xFF1565C0), const Color(0xFFE3F2FD)),
-        if (home4gCount > 0) ...[
-          if (landlineCount > 0) const SizedBox(width: 4),
-          _miniChip(Icons.router, '$home4gCount',
-              const Color(0xFF6A1B9A), const Color(0xFFF3E5F5)),
-        ],
-        if (landlineCount > 0 || home4gCount > 0)
-          const SizedBox(width: 4),
         // Client count
         _miniChip(Icons.people, '$memberCount',
             AppColors.blue3, AppColors.blueLight),
@@ -1673,29 +1710,67 @@ class _GroupCardState extends State<GroupCard> {
   }
 
   // ── Bill Badge ───────────────────────────────────────────────
+  // ── 🧾 بادچ الفاتورة — بادچ واحدة بدل اتنين ────────────────────
+  //
+  // قبل كده كان فيه بادچين منفصلين بياخدوا سطر كامل:
+  //   [💳 فاتورة: 3950 ج]   [🔴 فاتورة فات موعدها بـ 71 يوم]
+  // دلوقتي بقت بادچ واحدة: «ف» + المبلغ + عدّاد ملوّن
+  //   [ف 3950 ج │ 71- يوم]   أحمر = فات الميعاد
+  //   [ف 3950 ج │ 5 يوم ]    أخضر = لسه في وقت
   Widget _buildBillBadge(BuildContext context, AppProvider prov, Group group) {
     final hasDebt = group.billDebt > 0;
+    final amount = hasDebt ? group.billDebt : group.lastBillAmount;
+
+    // العدّاد بتاع أقرب فاتورة مش مدفوعة
+    final nearest = prov.nearestUnpaidBill(group.id);
+    int? days;
+    if (nearest != null && prov.billDeadlineDate(nearest.$1) != null) {
+      days = nearest.$2;
+    }
+    final over = days != null && days < 0;
+    final urgent = days != null && days >= 0 && days <= 3;
+
+    // لون البادچ: الفلوس نفسها حمرا لو عليه مديونية
+    final amtColor =
+        hasDebt ? const Color(0xFFC62828) : const Color(0xFF6A1B9A);
+    final bg = hasDebt ? const Color(0xFFFFEBEE) : const Color(0xFFF3E5F5);
+    final bd = hasDebt ? const Color(0xFFEF9A9A) : const Color(0xFFCE93D8);
+    // لون العدّاد: أحمر فات / برتقالي قرّب / أخضر لسه بدري
+    final cntColor = over
+        ? const Color(0xFFC62828)
+        : (urgent ? const Color(0xFFE65100) : const Color(0xFF00695C));
+
     return GestureDetector(
       onTap: () => _showPayBillDialog(context, prov, group),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         decoration: BoxDecoration(
-          color: hasDebt ? const Color(0xFFFFEBEE) : const Color(0xFFF3E5F5),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-              color:
-                  hasDebt ? const Color(0xFFEF9A9A) : const Color(0xFFCE93D8)),
+          color: bg,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: bd, width: over ? 1.6 : 1),
         ),
-        child: Text(
-          hasDebt
-              ? '🔴 مديونية: ${group.billDebt.toStringAsFixed(0)} ج'
-              : '💳 فاتورة: ${group.lastBillAmount.toStringAsFixed(0)} ج',
-          style: GoogleFonts.cairo(
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
-              color:
-                  hasDebt ? const Color(0xFFC62828) : const Color(0xFF6A1B9A)),
-        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text('ف',
+              style: GoogleFonts.cairo(
+                  fontSize: 13, fontWeight: FontWeight.w900, color: amtColor)),
+          const SizedBox(width: 4),
+          Text('${amount.toStringAsFixed(0)} ج',
+              style: GoogleFonts.cairo(
+                  fontSize: 13, fontWeight: FontWeight.w900, color: amtColor)),
+          if (days != null) ...[
+            const SizedBox(width: 5),
+            Container(
+                width: 1, height: 13, color: bd.withValues(alpha: 0.8)),
+            const SizedBox(width: 5),
+            Icon(over ? Icons.error : Icons.schedule, size: 12, color: cntColor),
+            const SizedBox(width: 2),
+            Text(
+              over ? '${-days} يوم' : (days == 0 ? 'النهارده' : '$days يوم'),
+              style: GoogleFonts.cairo(
+                  fontSize: 12, fontWeight: FontWeight.w900, color: cntColor),
+            ),
+          ],
+        ]),
       ),
     );
   }
@@ -1923,84 +1998,131 @@ class _GroupCardState extends State<GroupCard> {
   // ── Clients Badge — رقم واحد ملوّن ──────────────────────────────
   //   أخضر = لسه في السعة  |  أحمر = عدّى الحد (ده اللي بيدفع زيادة)
   //   العدد ده للعملاء العاديين بس — الأرضي/الهوم 4G مش داخلين فيه.
-  Widget _buildClientsBadge(int count, int debtors, [Group? g]) {
+  Widget _buildClientsBadge(int count, [Group? g]) {
     final group = g ?? widget.group;
-    final max = group.maxClients;
     final isExempt =
         group.lineType == LineType.home4g || group.lineType == LineType.adsl;
-    final excess = (max != null && !isExempt && count > max) ? count - max : 0;
+    // السعة: الحد المكتوب في المجموعة، وإلا سعة الباقة (7 للـ 4250 و5 للأصغر)
+    final capRaw = group.maxClients ?? group.tierBaseCapacity;
+    final cap = capRaw > 0 ? capRaw : null;
+    final excess =
+        (cap != null && !isExempt && count > cap) ? count - cap : 0;
     final hasExcess = excess > 0;
-    final c = hasExcess ? AppColors.red2 : const Color(0xFF2E7D32);
-    final bg = hasExcess ? AppColors.redLight : const Color(0xFFE8F5E9);
+    // مفيش سعة متحدّدة؟ مانقدرش نقول أحمر ولا أخضر — نوضّح إنها ناقصة
+    final unknown = cap == null && !isExempt;
+
+    final c = hasExcess
+        ? AppColors.red2
+        : (unknown ? const Color(0xFFE65100) : const Color(0xFF2E7D32));
+    final bg = hasExcess
+        ? AppColors.redLight
+        : (unknown ? const Color(0xFFFFF3E0) : const Color(0xFFE8F5E9));
+    final bd = hasExcess
+        ? const Color(0xFFEF9A9A)
+        : (unknown ? const Color(0xFFFFB74D) : const Color(0xFFA5D6A7));
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 1),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-            color: hasExcess ? const Color(0xFFEF9A9A) : const Color(0xFFA5D6A7)),
+        border: Border.all(color: bd, width: hasExcess ? 2 : 1),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.people, size: 12, color: c),
-        const SizedBox(width: 3),
+        Icon(Icons.people, size: 14, color: c),
+        const SizedBox(width: 4),
+        // الرقم كبير — دي الحاجة اللي بتتقري من بعيد
         Text('$count',
             style: GoogleFonts.cairo(
-                fontSize: 13, fontWeight: FontWeight.w900, color: c)),
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+                color: c,
+                height: 1.2)),
         if (hasExcess) ...[
-          const SizedBox(width: 2),
+          const SizedBox(width: 3),
           Text('+$excess',
               style: GoogleFonts.cairo(
-                  fontSize: 9, fontWeight: FontWeight.w900, color: AppColors.red)),
-        ],
-        // المدينين — نقطة حمرا بالعدد بدل صف النقط الطويل
-        if (debtors > 0) ...[
-          const SizedBox(width: 4),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-            decoration: BoxDecoration(
-                color: AppColors.red, borderRadius: BorderRadius.circular(20)),
-            child: Text('$debtors',
-                style: GoogleFonts.cairo(
-                    fontSize: 8,
-                    fontWeight: FontWeight.w900,
-                    color: Colors.white)),
-          ),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  color: AppColors.red)),
+        ] else if (unknown) ...[
+          const SizedBox(width: 3),
+          Text('؟',
+              style: GoogleFonts.cairo(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                  color: const Color(0xFFE65100))),
         ],
       ]),
     );
   }
 
-  // ── Member Type Badges — نفس فيروزي دايرة خط الزيادة جوّه المجموعة ──
-  List<Widget> _buildMemberTypeBadges(List<Member> members) {
-    final landline = members.where((m) => m.type == 'landline').length;
-    final home4g = members.where((m) => m.type == 'homeforgee').length;
-    final widgets = <Widget>[];
-    if (landline > 0) {
-      widgets.add(_badge(landline > 1 ? '☎️ $landline' : '☎️',
-          const Color(0xFFE0F2F1), kExtraTealA, const Color(0xFF4DB6AC)));
-    }
-    if (home4g > 0) {
-      widgets.add(_badge(home4g > 1 ? '📶 $home4g' : '📶',
-          const Color(0xFFE0F7FA), kExtraCyanA, const Color(0xFF4DD0E1)));
-    }
-    return widgets;
+  // ── ☎️/📶 علامة خط الزيادة — مكان ثابت وحجم كبير ──────────────────
+  //
+  // قبل كده كانت بادچ صغيرة جوّه صف البادچات (Wrap)، فكانت بتتنقل من سطر
+  // لسطر حسب اللي قبلها وتضيع منك وانت بتقلّب. دلوقتي بقت **دايرة ثابتة
+  // أول صف الرقم** — نفس المكان في كل كارت، وضِعف الحجم.
+  Widget _buildExtraLineMark(int landline, int home4g, {double size = 34}) {
+    // ⬛ الخانة محجوزة حتى لو مفيش خط زيادة — عشان رقم المجموعة يبدأ من
+    //    **نفس النقطة بالظبط** في كل الكروت وماينطّش يمين وشمال.
+    if (landline == 0 && home4g == 0) return SizedBox(width: size + 6);
+
+    Widget mark(String emoji, int n, Color a, Color b) => Container(
+          width: size,
+          height: size,
+          margin: const EdgeInsets.only(left: 6),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: LinearGradient(
+              begin: Alignment.topRight,
+              end: Alignment.bottomLeft,
+              colors: [b, a],
+            ),
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: [
+              BoxShadow(
+                  color: a.withValues(alpha: 0.4),
+                  blurRadius: 5,
+                  offset: const Offset(0, 2)),
+            ],
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Text(emoji, style: TextStyle(fontSize: size * 0.5)),
+              // العدد يبان بس لو أكتر من واحد
+              if (n > 1)
+                Positioned(
+                  bottom: -1,
+                  left: -1,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 3.5, vertical: 0),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: a, width: 1.2),
+                    ),
+                    child: Text('$n',
+                        style: GoogleFonts.cairo(
+                            fontSize: 8.5,
+                            fontWeight: FontWeight.w900,
+                            color: a)),
+                  ),
+                ),
+            ],
+          ),
+        );
+
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      if (landline > 0)
+        mark('☎️', landline, kExtraTealA, kExtraTealB),
+      if (home4g > 0) mark('📶', home4g, kExtraCyanA, kExtraCyanB),
+    ]);
   }
 
-  // ── Cycle Label ───────────────────────────────────────────────
-  static const _cycleLabels = {
-    'day1': '📅 أول الشهر',
-    'day4': '📅 اليوم 4',
-    'mid': '📅 منتصف الشهر',
-    'cycle1': '🔄 سيكل 1',
-    'cycle2': '🔄 سيكل 2',
-  };
-  String _cycleLabel(Group group) {
-    if (group.billingCycle != null &&
-        _cycleLabels.containsKey(group.billingCycle)) {
-      return _cycleLabels[group.billingCycle]!;
-    }
-    return '🔄 سيكل ${group.cycle}';
-  }
+  // ── Cycle Label — مختصر «س1 / س2» بدل «سيكل 1» عشان ياخد مساحة أقل ──
+  String _cycleLabel(Group group) => cycleShortLabel(group);
 
   // ── Badge helper ──────────────────────────────────────────────
   Widget _badge(String label, Color bg, Color textColor, Color borderColor) {

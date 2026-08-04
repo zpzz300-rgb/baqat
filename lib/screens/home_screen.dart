@@ -1,5 +1,6 @@
 // lib/screens/home_screen.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemNavigator;
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -113,6 +114,11 @@ class _HomeScreenState extends State<HomeScreen> {
     'we': Color(0xFF5e35b1),
   };
 
+  // ─── 🔄 فلتر السيكل السريع (س1 / س2 / مواعيد الفوترة) ─────────────
+  static const _kCyclePrefKey = 'groups_cycle_filter';
+  String? _cycleFilter; // null = الكل
+  static const _cycleSortOrder = ['day1', 'day4', 'mid', 'cycle1', 'cycle2'];
+
   @override
   void initState() {
     super.initState();
@@ -135,6 +141,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString(_kSortPrefKey);
     final savedProv = prefs.getString(_kProvPrefKey);
+    final savedCycle = prefs.getString(_kCyclePrefKey);
     if (!mounted) return;
     setState(() {
       if (saved != null && _sortModes.any((m) => m['key'] == saved)) {
@@ -143,6 +150,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (savedProv != null && _provOrder.contains(savedProv)) {
         _provFilter = savedProv;
       }
+      if (savedCycle != null) _cycleFilter = savedCycle;
     });
   }
 
@@ -152,6 +160,55 @@ class _HomeScreenState extends State<HomeScreen> {
     await prefs.setString(_kSortPrefKey, key);
   }
 
+  // ─── 🔙 زرار الرجوع ───────────────────────────────────────────────
+  // القاعدة: **الرجوع بيوصّلك لشاشة المجموعات، مش برّه البرنامج.**
+  // ترتيب الخطوات: البحث ← التاب المفتوح ← تاب داخلي ← وبعدين بس الخروج
+  // (ولازم دوستين عشان ما تخرجش بالغلط).
+  DateTime? _lastBackAt;
+
+  /// بيرجّع true لو فيه خطوة رجوع اتعملت (يعني مش هنخرج)
+  bool _stepBack(AppProvider prov) {
+    if (_searching) {
+      setState(() => _searching = false);
+      return true;
+    }
+    if (prov.activeWorkspaceIndex != 0) {
+      prov.activateWorkspaceTab(0); // ارجع للرئيسية من أي تاب
+      return true;
+    }
+    if (_tab != 0) {
+      setState(() => _tab = 0); // ارجع لتاب المجموعات
+      return true;
+    }
+    return false; // إحنا على المجموعات خلاص
+  }
+
+  /// في حاجة نرجع منها؟ (عشان نظهر سهم الرجوع)
+  bool _canStepBack(AppProvider prov) =>
+      _searching || prov.activeWorkspaceIndex != 0 || _tab != 0;
+
+  void _onBack() {
+    final prov = context.read<AppProvider>();
+    if (_stepBack(prov)) return;
+    // على شاشة المجموعات: دوسة تانية خلال ثانيتين = خروج
+    final now = DateTime.now();
+    if (_lastBackAt == null ||
+        now.difference(_lastBackAt!) > const Duration(seconds: 2)) {
+      _lastBackAt = now;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text('دوس رجوع تاني عشان تخرج من البرنامج',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w800)),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: AppColors.blue2,
+        ));
+      return;
+    }
+    SystemNavigator.pop();
+  }
+
   Future<void> _setProvFilter(String? p) async {
     setState(() => _provFilter = p);
     final prefs = await SharedPreferences.getInstance();
@@ -159,6 +216,16 @@ class _HomeScreenState extends State<HomeScreen> {
       await prefs.remove(_kProvPrefKey);
     } else {
       await prefs.setString(_kProvPrefKey, p);
+    }
+  }
+
+  Future<void> _setCycleFilter(String? c) async {
+    setState(() => _cycleFilter = c);
+    final prefs = await SharedPreferences.getInstance();
+    if (c == null) {
+      await prefs.remove(_kCyclePrefKey);
+    } else {
+      await prefs.setString(_kCyclePrefKey, c);
     }
   }
 
@@ -237,7 +304,15 @@ class _HomeScreenState extends State<HomeScreen> {
     // لما الكيبورد يفتح: أخفي الهيدر الكبير عشان الشاشة تاخد كل المساحة
     // ومايحصلش overflow في أي بحث جوّه التابات.
     final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
-    return Scaffold(
+    // 🔙 زرار الرجوع بتاع الموبايل: مبيخرجش من البرنامج على طول — بيرجّعك
+    // خطوة خطوة لحد شاشة المجموعات، ومنها بس تقدر تخرج بدوستين.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _onBack();
+      },
+      child: Scaffold(
       key: _scaffoldKey,
       backgroundColor: const Color(0xFFf5f7fa),
       drawer: _buildDrawer(context, prov),
@@ -298,6 +373,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           );
         },
+      ),
       ),
     );
   }
@@ -360,6 +436,25 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: const Icon(Icons.menu, color: Colors.white, size: 20),
                 ),
               ),
+              // 🔙 سهم الرجوع — بيبان بس لما يكون فيه حاجة ترجع منها،
+              // وبيرجّعك لشاشة المجموعات زي زرار الموبايل بالظبط.
+              if (_canStepBack(prov)) ...[
+                const SizedBox(width: 6),
+                GestureDetector(
+                  onTap: _onBack,
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    // arrow_back بيتقلب لوحده في العربي فبيبقى سهم → صح
+                    child: const Icon(Icons.arrow_back,
+                        color: Colors.white, size: 22),
+                  ),
+                ),
+              ],
               // 📌 لوحة النهاردة — بره صف الزراير المتزحلق عشان يفضل
               // باين دايماً. الرقم الأحمر = كام حاجة متأخرة عليك.
               _iconBtn(
@@ -1560,26 +1655,53 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ─── 🏢 شريط فلتر الشركة (ضغطة واحدة) ──────────────────────────
+  // ─── 🏢🔄 شريط الفلاتر السريعة: الشركة + السيكل ──────────────────
+  //
+  // صف واحد بيتزحلق: شرايح الشركة، وبعد فاصل رفيع شرايح السيكل (س1/س2
+  // ومواعيد الفوترة). الاتنين بيشتغلوا مع بعض (AND) — يعني تقدر تقول
+  // «اتصالات + س2» وتشوف الخطوط دي بس.
   Widget _buildProviderFilterBar(AppProvider prov) {
     final showAll = !SupabaseService.isEmployee || _empViewAll;
     final src = showAll ? prov.db.groups : prov.visibleGroups;
-    final counts = <String, int>{};
-    for (final g in src) {
-      final p = g.provider;
-      if (p != null) counts[p] = (counts[p] ?? 0) + 1;
-    }
-    // شركة واحدة بس؟ الفلتر مالوش لازمة — نخفيه بدل ما ياخد مساحة.
-    final present = _provOrder.where((p) => (counts[p] ?? 0) > 0).toList();
-    if (present.length < 2) return const SizedBox.shrink();
 
-    Widget chip(String? p) {
-      final active = _provFilter == p;
-      final c = p == null ? AppColors.blue2 : _provColors[p]!;
-      final label = p == null ? 'الكل' : _provShort[p]!;
-      final n = p == null ? src.length : counts[p]!;
+    // عدّ الشركات (بعد تطبيق فلتر السيكل عشان الأرقام تبقى صادقة)
+    final forProv =
+        _cycleFilter == null ? src : src.where((g) => cycleKeyOf(g) == _cycleFilter);
+    final pCounts = <String, int>{};
+    for (final g in forProv) {
+      final p = g.provider;
+      if (p != null) pCounts[p] = (pCounts[p] ?? 0) + 1;
+    }
+    // عدّ السيكلات (بعد تطبيق فلتر الشركة)
+    final forCycle =
+        _provFilter == null ? src : src.where((g) => g.provider == _provFilter);
+    final cCounts = <String, int>{};
+    for (final g in forCycle) {
+      final k = cycleKeyOf(g);
+      cCounts[k] = (cCounts[k] ?? 0) + 1;
+    }
+
+    final provs = _provOrder.where((p) => (pCounts[p] ?? 0) > 0).toList();
+    // السيكلات: المعروفة بترتيبها، وأي مفتاح غريب ورا
+    final cycles = <String>[
+      ..._cycleSortOrder.where(cCounts.containsKey),
+      ...cCounts.keys.where((k) => !_cycleSortOrder.contains(k)),
+    ];
+
+    final showProv = provs.length > 1 || _provFilter != null;
+    final showCycle = cycles.length > 1 || _cycleFilter != null;
+    if (!showProv && !showCycle) return const SizedBox.shrink();
+
+    Widget chip({
+      required String label,
+      required int n,
+      required Color c,
+      required bool active,
+      required VoidCallback onTap,
+      bool ltr = false,
+    }) {
       return GestureDetector(
-        onTap: () => _setProvFilter(p),
+        onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -1592,11 +1714,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Text(label,
-                textDirection: TextDirection.ltr,
+                textDirection: ltr ? TextDirection.ltr : null,
                 style: GoogleFonts.cairo(
                     fontSize: 11,
                     fontWeight: FontWeight.w900,
-                    letterSpacing: 0.4,
+                    letterSpacing: ltr ? 0.4 : 0,
                     color: active ? Colors.white : c)),
             const SizedBox(width: 5),
             Container(
@@ -1618,14 +1740,55 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
+    const cycleColor = Color(0xFF00838F);
     return SizedBox(
       height: 30,
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         children: [
-          chip(null),
-          for (final p in present) ...[const SizedBox(width: 6), chip(p)],
+          if (showProv) ...[
+            chip(
+                label: 'الكل',
+                n: forProv.length,
+                c: AppColors.blue2,
+                active: _provFilter == null,
+                onTap: () => _setProvFilter(null)),
+            for (final p in provs) ...[
+              const SizedBox(width: 6),
+              chip(
+                  label: _provShort[p]!,
+                  n: pCounts[p]!,
+                  c: _provColors[p]!,
+                  active: _provFilter == p,
+                  ltr: true,
+                  onTap: () => _setProvFilter(p)),
+            ],
+          ],
+          if (showProv && showCycle) ...[
+            const SizedBox(width: 8),
+            Center(
+              child: Container(width: 1.5, height: 18, color: AppColors.border),
+            ),
+            const SizedBox(width: 8),
+          ],
+          if (showCycle) ...[
+            chip(
+                label: '🔄 كل',
+                n: forCycle.length,
+                c: cycleColor,
+                active: _cycleFilter == null,
+                onTap: () => _setCycleFilter(null)),
+            for (final k in cycles) ...[
+              const SizedBox(width: 6),
+              chip(
+                  label: cycleShortOf(k),
+                  n: cCounts[k]!,
+                  c: cycleColor,
+                  active: _cycleFilter == k,
+                  onTap: () => _setCycleFilter(k)),
+            ],
+          ],
         ],
       ),
     );
@@ -1683,12 +1846,14 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
           ),
-          if (_groupSort != 'manual' || _provFilter != null)
+          if (_groupSort != 'manual' ||
+              _provFilter != null ||
+              _cycleFilter != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
               child: Text(
-                  _provFilter != null && _groupSort == 'manual'
-                      ? '✋ السحب متوقف — شيل فلتر الشركة عشان ترتّب بإيدك'
+                  _groupSort == 'manual'
+                      ? '✋ السحب متوقف — شيل الفلتر عشان ترتّب بإيدك'
                       : '✋ السحب متوقف — ارجع لـ«يدوي» عشان ترتّب الخطوط بإيدك',
                   style: GoogleFonts.cairo(
                       fontSize: 9.5,
@@ -1798,27 +1963,37 @@ class _HomeScreenState extends State<HomeScreen> {
     // الموالك يشوف الكل؛ الموظف: «شغلي» = الموكلة، «القائمة العامة» = الكل
     final showAll = !SupabaseService.isEmployee || _empViewAll;
     var src = showAll ? prov.db.groups : prov.visibleGroups;
-    // 🏢 فلتر الشركة
+    // 🏢 فلتر الشركة + 🔄 فلتر السيكل (بيشتغلوا مع بعض)
     if (_provFilter != null) {
       src = src.where((g) => g.provider == _provFilter).toList();
     }
+    if (_cycleFilter != null) {
+      src = src.where((g) => cycleKeyOf(g) == _cycleFilter).toList();
+    }
     final groups = _sortedGroups(prov, src);
-    if (groups.isEmpty && _provFilter != null) {
+    if (groups.isEmpty && (_provFilter != null || _cycleFilter != null)) {
+      final bits = [
+        if (_provFilter != null) _provShort[_provFilter]!,
+        if (_cycleFilter != null) cycleShortOf(_cycleFilter!),
+      ].join(' + ');
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Text('🏢', style: TextStyle(fontSize: 44)),
+            const Text('🔍', style: TextStyle(fontSize: 44)),
             const SizedBox(height: 10),
-            Text('مفيش خطوط ${_provShort[_provFilter]} هنا',
+            Text('مفيش خطوط $bits',
                 style: GoogleFonts.cairo(
                     color: AppColors.muted,
                     fontSize: 13,
                     fontWeight: FontWeight.w800)),
             const SizedBox(height: 10),
             TextButton(
-              onPressed: () => _setProvFilter(null),
-              child: Text('اعرض الكل',
+              onPressed: () {
+                _setProvFilter(null);
+                _setCycleFilter(null);
+              },
+              child: Text('شيل الفلاتر',
                   style: GoogleFonts.cairo(fontWeight: FontWeight.w900)),
             ),
           ],
@@ -1856,7 +2031,8 @@ class _HomeScreenState extends State<HomeScreen> {
     // في فلتر شركة شغّال، وإلا الترتيب المحفوظ هيتبوّظ.
     final canReorder = !SupabaseService.isEmployee &&
         _groupSort == 'manual' &&
-        _provFilter == null;
+        _provFilter == null &&
+        _cycleFilter == null;
     return ReorderableListView.builder(
       scrollController: _groupsScrollCtrl,
       padding: const EdgeInsets.all(12),
