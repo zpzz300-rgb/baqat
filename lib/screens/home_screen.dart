@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/app_provider.dart';
 import '../models/models.dart';
 import '../services/app_theme.dart';
+import '../services/breakpoints.dart';
 import '../services/supabase_service.dart';
 import 'employees_screen.dart';
 import '../widgets/group_card.dart';
@@ -315,7 +316,9 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Scaffold(
       key: _scaffoldKey,
       backgroundColor: const Color(0xFFf5f7fa),
-      drawer: _buildDrawer(context, prov),
+      // 📐 على الكمبيوتر القايمة بتفضل مفتوحة على الجنب (تحت في الـ body)،
+      // فمش محتاجين نسخة بتتفتح وتتقفل.
+      drawer: context.hasSideRail ? null : _buildDrawer(context, prov),
       body: LayoutBuilder(
         builder: (context, constraints) {
           // ── محتوى الرئيسية (زي ما هو من غير أي تغيير) ──
@@ -363,7 +366,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ]);
 
-          return Stack(
+          final stack = Stack(
             children: [
               content,
               // 📝 فقاعة الملاحظات العائمة (تختفي مع الكيبورد عشان ماتغطيش الكتابة)
@@ -372,6 +375,14 @@ class _HomeScreenState extends State<HomeScreen> {
               if (!keyboardOpen) const WorkspaceSwitcherButton(),
             ],
           );
+
+          // 📐 كمبيوتر: القايمة الجانبية ثابتة على اليمين — مش محتاج
+          // تفتحها وتقفلها كل مرة، وفيه مساحة تكفي الاتنين.
+          if (!context.hasSideRail) return stack;
+          return Row(children: [
+            SizedBox(width: 290, child: _buildDrawer(context, prov)),
+            Expanded(child: stack),
+          ]);
         },
       ),
       ),
@@ -424,18 +435,20 @@ class _HomeScreenState extends State<HomeScreen> {
           // ── Title + Action buttons ──
           Row(
             children: [
-              GestureDetector(
-                onTap: () => _scaffoldKey.currentState?.openDrawer(),
-                child: Container(
-                  width: 36, height: 36,
-                  margin: const EdgeInsets.only(left: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(10),
+              // ☰ مبيظهرش على الكمبيوتر — القايمة ثابتة على الجنب أصلاً
+              if (!context.hasSideRail)
+                GestureDetector(
+                  onTap: () => _scaffoldKey.currentState?.openDrawer(),
+                  child: Container(
+                    width: 36, height: 36,
+                    margin: const EdgeInsets.only(left: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.menu, color: Colors.white, size: 20),
                   ),
-                  child: const Icon(Icons.menu, color: Colors.white, size: 20),
                 ),
-              ),
               // 🔙 سهم الرجوع — بيبان بس لما يكون فيه حاجة ترجع منها،
               // وبيرجّعك لشاشة المجموعات زي زرار الموبايل بالظبط.
               if (_canStepBack(prov)) ...[
@@ -974,6 +987,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ─── NAV ────────────────────────────────────────────────────
   // ─── SIDE DRAWER (القائمة الجانبية) ──────────────────────────
+  /// يقفل القايمة الجانبية — بس لو هي **بتتفتح وتتقفل**.
+  /// على الكمبيوتر القايمة ثابتة على الجنب فمفيش حاجة تتقفل، ولو عملنا
+  /// pop هنا كنا هنقفل الشاشة نفسها بدل القايمة.
+  void _closeDrawer() {
+    if (context.hasSideRail) return;
+    Navigator.of(context).pop();
+  }
+
   Widget _buildDrawer(BuildContext ctx, AppProvider prov) {
     // كل بنود التنقّل: تابات الشاشة الرئيسية + الشاشات اللي بتفتح في تابات
     // مساحة عمل ('ws'). الترتيب والأقسام والإخفاء كلهم من الـ Provider.
@@ -1063,29 +1084,29 @@ class _HomeScreenState extends State<HomeScreen> {
               const Divider(height: 16),
               // 🔀 ترتيب القايمة — أقسام + سحب وإفلات + إخفاء (مفيش أي حذف)
               _drawerItem('🔀 ترتيب القايمة', () {
-                Navigator.pop(context);
+                _closeDrawer();
                 showMenuOrderEditor(ctx);
               }),
               // 💾 حفظ البيانات + 🖨️ طباعة — اتنقلوا هنا من الشاشة الرئيسية
               _drawerItem('💾 حفظ البيانات', () {
-                Navigator.pop(context);
+                _closeDrawer();
                 _showSaveOptions();
               }),
               _drawerItem('🖨️ طباعة المجموعات', () {
-                Navigator.pop(context);
+                _closeDrawer();
                 _printGroups(prov);
               }),
               // ملحوظة: «لوحة الأصول» و«تصنيف العملاء» بقوا جوه الأقسام فوق
               // (قسم 💵 الفلوس و 👥 العملاء) — فمشيلناهم من هنا عشان ما يتكرروش.
               _drawerItem('🗂 دليل الخطوط الرئيسية', () {
-                Navigator.pop(context);
+                _closeDrawer();
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const GroupFoldersScreen()),
                 );
               }),
               _drawerItem('🔁 حسابات الفوترة', () {
-                Navigator.pop(context);
+                _closeDrawer();
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const BillingAccountsScreen()),
@@ -1094,14 +1115,14 @@ class _HomeScreenState extends State<HomeScreen> {
               // إدارة الموظفين — للمالك فقط
               if (!SupabaseService.isEmployee)
                 _drawerItem('👥 إدارة الموظفين', () {
-                  Navigator.pop(context);
+                  _closeDrawer();
                   Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const EmployeesScreen()),
                   );
                 }),
               _drawerItem('⚙️ الإعدادات', () {
-                Navigator.pop(context);
+                _closeDrawer();
                 showDialog(
                     context: context,
                     builder: (_) => SettingsModal(
@@ -1115,7 +1136,7 @@ class _HomeScreenState extends State<HomeScreen> {
         const Divider(height: 1),
         InkWell(
           onTap: () {
-            Navigator.pop(context); // اقفل الـ drawer
+            _closeDrawer(); // اقفل الـ drawer
             _confirmLogout(prov);
           },
           child: Container(
@@ -1848,13 +1869,16 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           if (_groupSort != 'manual' ||
               _provFilter != null ||
-              _cycleFilter != null)
+              _cycleFilter != null ||
+              context.groupCols > 1)
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
               child: Text(
-                  _groupSort == 'manual'
-                      ? '✋ السحب متوقف — شيل الفلتر عشان ترتّب بإيدك'
-                      : '✋ السحب متوقف — ارجع لـ«يدوي» عشان ترتّب الخطوط بإيدك',
+                  _groupSort != 'manual'
+                      ? '✋ السحب متوقف — ارجع لـ«يدوي» عشان ترتّب الخطوط بإيدك'
+                      : (context.groupCols > 1
+                          ? '✋ السحب متوقف على الشاشة العريضة — صغّر النافذة عشان ترتّب بإيدك'
+                          : '✋ السحب متوقف — شيل الفلتر عشان ترتّب بإيدك'),
                   style: GoogleFonts.cairo(
                       fontSize: 9.5,
                       fontWeight: FontWeight.w700,
@@ -2029,10 +2053,43 @@ class _HomeScreenState extends State<HomeScreen> {
     // الترتيب المحفوظ (لأن الـ indexes ساعتها مش بتاعة الترتيب الأصلي)
     // ⚠️ السحب بيشتغل بأرقام الترتيب في القايمة الكاملة — فلازم يتقفل لو
     // في فلتر شركة شغّال، وإلا الترتيب المحفوظ هيتبوّظ.
+    final cols = context.groupCols;
     final canReorder = !SupabaseService.isEmployee &&
         _groupSort == 'manual' &&
         _provFilter == null &&
-        _cycleFilter == null;
+        _cycleFilter == null &&
+        cols == 1; // السحب مالوش معنى وسط أكتر من عمود
+
+    GroupCard card(int i) => GroupCard(
+          key: _groupKeys[groups[i].id] ??= GlobalKey(),
+          group: groups[i],
+          initiallyMembersExpanded: groups[i].id == _focusExpandGid,
+        );
+
+    // 📐 شاشة عريضة → الخطوط جنب بعض في عمودين أو تلاتة.
+    // بنوزّعهم بالتبادل على الأعمدة، وكل عمود بيطول لوحده حسب اللي فيه
+    // (الكروت مش نفس الطول لأن اللي مفتوح أطول من اللي مقفول).
+    if (cols > 1) {
+      final buckets = List.generate(cols, (_) => <Widget>[]);
+      for (var i = 0; i < groups.length; i++) {
+        buckets[i % cols].add(card(i));
+      }
+      final g = context.gutter;
+      return SingleChildScrollView(
+        controller: _groupsScrollCtrl,
+        padding: EdgeInsets.all(g),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var c = 0; c < cols; c++) ...[
+              if (c > 0) SizedBox(width: g),
+              Expanded(child: Column(children: buckets[c])),
+            ],
+          ],
+        ),
+      );
+    }
+
     return ReorderableListView.builder(
       scrollController: _groupsScrollCtrl,
       padding: const EdgeInsets.all(12),
@@ -2041,14 +2098,7 @@ class _HomeScreenState extends State<HomeScreen> {
       onReorder: (oldIndex, newIndex) {
         if (canReorder) prov.reorderGroups(oldIndex, newIndex);
       },
-      itemBuilder: (_, i) {
-        final key = _groupKeys[groups[i].id] ??= GlobalKey();
-        return GroupCard(
-          key: key,
-          group: groups[i],
-          initiallyMembersExpanded: groups[i].id == _focusExpandGid,
-        );
-      },
+      itemBuilder: (_, i) => card(i),
     );
   }
 

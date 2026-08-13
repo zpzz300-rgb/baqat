@@ -10,6 +10,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'providers/app_provider.dart';
 import 'services/app_theme.dart';
+import 'services/breakpoints.dart';
 import 'services/supabase_service.dart';
 import 'services/auth_service.dart';
 import 'screens/home_screen.dart';
@@ -94,7 +95,13 @@ void main() async {
     debugPrint('⚠️ Failed to load .env file: $e');
   }
 
-  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  // 📐 الوضع الرأسي مقفول على **الموبايل بس**. التاب والكمبيوتر ليهم
+  // راحتهم في الوضعين — التصميم بقى بيتظبط لوحده حسب عرض النافذة.
+  final view = WidgetsBinding.instance.platformDispatcher.views.first;
+  final shortestSide = view.physicalSize.shortestSide / view.devicePixelRatio;
+  SystemChrome.setPreferredOrientations(shortestSide >= kBpPhoneWide
+      ? DeviceOrientation.values
+      : [DeviceOrientation.portraitUp]);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Color(0xFF0d47a1),
     statusBarIconBrightness: Brightness.light,
@@ -147,15 +154,21 @@ class TelecomApp extends StatelessWidget {
           // فإعداد «صغير/كبير» كان مابيعملش حاجة. الـ textScaler هنا
           // بيكبّر/يصغّر **كل** نص في البرنامج دفعة واحدة من غير ما نلمسهم.
           builder: (context, child) {
+            // 📐 على الشاشات العريضة جداً (ويندوز/تاب كبير) بنحدّ عرض
+            // المحتوى ونحطّه في النص — من غير كده الكارت بيتمدّ من أول
+            // الشاشة لآخرها فالرقم في ناحية والفاتورة في ناحية.
+            final shell = ContentShell(child: child ?? const SizedBox.shrink());
             final body = Column(
               children: [
                 const _OfflineBanner(),
-                Expanded(child: child ?? const SizedBox.shrink()),
+                Expanded(child: shell),
               ],
             );
-            final scale = AppTheme.textScale(prov.fontSize);
-            // «متوسط» = سيبه على إعداد الموبايل نفسه (لو حد مكبّر الخط
-            // من إعدادات الأندرويد ما نلغيهوش عليه).
+            // إعداد المستخدم × معامل الشاشة (الشاشة الأكبر خطها أكبر شوية)
+            final scale =
+                AppTheme.textScale(prov.fontSize) * context.bpTextScale;
+            // «متوسط» على الموبايل = سيبه على إعداد الجهاز نفسه (لو حد
+            // مكبّر الخط من إعدادات الأندرويد ما نلغيهوش عليه).
             if (scale == 1.0) return body;
             return MediaQuery.withClampedTextScaling(
               minScaleFactor: scale,

@@ -89,12 +89,21 @@ class AppTheme {
     // 🌙 أهم سطر: بيقلب كل ألوان AppColors للنسخة الليلية/النهارية
     // قبل ما أي شاشة تتبني — فالبرنامج كله بيتغيّر مع بعضه.
     AppColors.dark = dark;
-    if (dark) return AppTheme.dark(fontSize);
-    switch (style) {
-      case 'emerald': return AppTheme.emerald(fontSize);
-      case 'purple':  return AppTheme.purple(fontSize);
-      default:        return AppTheme.light(fontSize);
-    }
+    final theme = dark
+        ? AppTheme.dark(fontSize)
+        : switch (style) {
+            'emerald' => AppTheme.emerald(fontSize),
+            'purple' => AppTheme.purple(fontSize),
+            _ => AppTheme.light(fontSize),
+          };
+    // 📐 النوافذ اللي بتطلع من تحت: على الشاشة العريضة كانت بتتمدّ على
+    // عرض الشاشة كله فتبقى شريط طويل وحش. الحد ده بيخليها لوح في النص.
+    // نقطة واحدة بتظبّط الـ 77 نافذة كلهم من غير ما نلمس ولا واحدة فيهم.
+    return theme.copyWith(
+      bottomSheetTheme: theme.bottomSheetTheme.copyWith(
+        constraints: const BoxConstraints(maxWidth: 680),
+      ),
+    );
   }
 
   static ThemeData light(String fontSize) {

@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/breakpoints.dart';
 import 'member_card.dart';
 import 'add_member_modal.dart';
 import 'add_group_modal.dart';
@@ -418,9 +419,12 @@ class _GroupCardState extends State<GroupCard> {
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: members.length,
+                            // 📐 عدد الكروت في الصف بيزيد على الشاشات
+                            // العريضة: 3 موبايل → 4 موبايل كبير → 5 تاب
+                            // → 6 كمبيوتر.
                             gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 3,
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: context.memberCols,
                               mainAxisSpacing: 8,
                               crossAxisSpacing: 8,
                               childAspectRatio: 0.92,
