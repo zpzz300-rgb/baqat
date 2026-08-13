@@ -7,7 +7,9 @@ import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
 import '../services/supabase_service.dart';
+import '../services/app_search.dart' show searchMatches;
 import '../widgets/common.dart';
+import '../widgets/group_card.dart' show cycleKeyOf, cycleShortOf;
 
 /// لوحة تحكم المالك في الموظفين: كود المحل + موافقة/إيقاف/حذف الموظفين.
 class EmployeesScreen extends StatefulWidget {
@@ -446,6 +448,104 @@ class _AssignSheetState extends State<_AssignSheet> {
     }
   }
 
+  // ─── 🔍 بحث + ⚡ إجراء جماعي ──────────────────────────────────────
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _q = '';
+  String? _provPick; // فلتر شركة سريع
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  /// الخطوط الظاهرة دلوقتي (بعد البحث وفلتر الشركة)
+  List<Group> get _visible {
+    var out = widget.groups;
+    if (_provPick != null) {
+      out = out.where((g) => g.provider == _provPick).toList();
+    }
+    if (_q.trim().isNotEmpty) {
+      out = out
+          .where((g) => searchMatches(_q, [g.phone, g.ownerName ?? '']))
+          .toList();
+    }
+    return out;
+  }
+
+  /// يدّي كل الخطوط الظاهرة للموظف ده — دفعة واحدة بدل سويتش سويتش
+  Future<void> _assignAllVisible() async {
+    final gs = _visible.where((g) => _assign[g.id] != widget.employeeId).toList();
+    if (gs.isEmpty) return;
+    final taken = gs.where((g) => _assign[g.id] != null).length;
+    final ok = await _confirm(
+      'إسناد ${gs.length} خط لـ«${widget.employeeName}»',
+      taken > 0
+          ? 'منهم $taken خط مع موظفين تانيين — هيتنقلوا للموظف ده.\nتحب تكمّل؟'
+          : 'تحب تكمّل؟',
+    );
+    if (!ok || !mounted) return;
+    setState(() => _busy = true);
+    final n = await context
+        .read<AppProvider>()
+        .bulkAssign(gs.map((g) => g.id).toList(), widget.employeeId);
+    if (!mounted) return;
+    for (final g in gs) {
+      _assign[g.id] = widget.employeeId;
+    }
+    setState(() => _busy = false);
+    AppSnackbar.show(context, '✅ اتسند $n خط لـ«${widget.employeeName}»');
+  }
+
+  /// يشيل كل الخطوط الظاهرة من الموظف ده (بيسيبها من غير متابِع)
+  Future<void> _removeAllVisible() async {
+    final gs =
+        _visible.where((g) => _assign[g.id] == widget.employeeId).toList();
+    if (gs.isEmpty) return;
+    final ok = await _confirm(
+      'سحب ${gs.length} خط من «${widget.employeeName}»',
+      'الخطوط دي هتفضل موجودة زي ما هي — بس من غير متابِع.\nتحب تكمّل؟',
+    );
+    if (!ok || !mounted) return;
+    setState(() => _busy = true);
+    var n = 0;
+    for (final g in gs) {
+      if (await SupabaseService.removeAssignment(g.id)) {
+        _assign.remove(g.id);
+        n++;
+      }
+    }
+    if (!mounted) return;
+    context.read<AppProvider>().loadAssignmentsOverview();
+    setState(() => _busy = false);
+    AppSnackbar.show(context, '✅ اتسحب $n خط من «${widget.employeeName}»');
+  }
+
+  Future<bool> _confirm(String title, String body) async {
+    final r = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(title,
+            style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 15)),
+        content: Text(body, style: GoogleFonts.cairo(fontSize: 13)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('إلغاء', style: GoogleFonts.cairo())),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.blue2),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('تمام',
+                style: GoogleFonts.cairo(
+                    fontWeight: FontWeight.w800, color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    return r == true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final mineCount =
@@ -486,21 +586,114 @@ class _AssignSheetState extends State<_AssignSheet> {
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
                         color: AppColors.blue2)),
+                const SizedBox(height: 10),
+                // 🔍 بحث
+                TextField(
+                  controller: _searchCtrl,
+                  onChanged: (v) => setState(() => _q = v),
+                  style: GoogleFonts.cairo(fontSize: 13),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    filled: true,
+                    fillColor: AppColors.surface,
+                    hintText: 'دوّر برقم الخط أو اسم صاحبه...',
+                    hintStyle:
+                        GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
+                    prefixIcon: const Icon(Icons.search, size: 18),
+                    suffixIcon: _q.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.close, size: 16),
+                            onPressed: () => setState(() {
+                              _searchCtrl.clear();
+                              _q = '';
+                            }),
+                          ),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // 🏢 فلتر شركة سريع — بيضيّق «الظاهر» قبل الإجراء الجماعي
+                SizedBox(
+                  height: 30,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (final e in const {
+                        null: 'الكل',
+                        'vodafone': 'VODA',
+                        'etisalat': 'ETIS',
+                        'orange': 'ORNG',
+                        'we': 'WE',
+                      }.entries)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 6),
+                          child: ChoiceChip(
+                            selected: _provPick == e.key,
+                            selectedColor: AppColors.blue2,
+                            onSelected: (_) =>
+                                setState(() => _provPick = e.key),
+                            label: Text(e.value,
+                                style: GoogleFonts.cairo(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w900,
+                                    color: _provPick == e.key
+                                        ? Colors.white
+                                        : AppColors.text)),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // ⚡ إجراء جماعي على كل الظاهر — بدل سويتش سويتش
+                Row(children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _busy ? null : _assignAllVisible,
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.blue2,
+                          padding: const EdgeInsets.symmetric(vertical: 10)),
+                      icon: const Icon(Icons.done_all,
+                          size: 17, color: Colors.white),
+                      label: Text('ادّيله الكل (${_visible.length})',
+                          style: GoogleFonts.cairo(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _removeAllVisible,
+                    style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 10, horizontal: 12)),
+                    icon: const Icon(Icons.remove_done, size: 17),
+                    label: Text('اسحب الكل',
+                        style: GoogleFonts.cairo(
+                            fontSize: 12, fontWeight: FontWeight.w900)),
+                  ),
+                ]),
               ]),
             ),
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
-                  : widget.groups.isEmpty
+                  : _visible.isEmpty
                       ? Center(
-                          child: Text('لا توجد مجموعات.',
+                          child: Text(
+                              widget.groups.isEmpty
+                                  ? 'لا توجد مجموعات.'
+                                  : 'مفيش خطوط بالبحث ده',
                               style: GoogleFonts.cairo(color: AppColors.muted)))
                       : ListView.builder(
                           controller: scrollCtrl,
                           padding: const EdgeInsets.fromLTRB(14, 0, 14, 20),
-                          itemCount: widget.groups.length,
+                          itemCount: _visible.length,
                           itemBuilder: (_, i) {
-                            final g = widget.groups[i];
+                            final g = _visible[i];
                             final assignee = _assign[g.id];
                             final mine = assignee == widget.employeeId;
                             final otherName = (assignee != null && !mine)
@@ -568,6 +761,55 @@ class _DistributeSheetState extends State<_DistributeSheet> {
   String? _targetEmployee;
   bool _busy = false;
 
+  // 🔍 بحث داخل قايمة الاختيار اليدوي
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _q = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  // ─── تحديد جماعي ────────────────────────────────────────────────
+  // كل الدوال دي بتشتغل على **اللي ظاهر قدامك بس** (بعد البحث)، مش على
+  // كل الخطوط — عشان لو دوّرت على «اتصالات» وضغطت «حدّد الكل» ما تلاقيش
+  // نفسك حدّدت خطوط شركات تانية من ورا ضهرك.
+  void _select(List<Group> gs) =>
+      setState(() => _selectedGroups.addAll(gs.map((g) => g.id)));
+
+  void _deselect(List<Group> gs) =>
+      setState(() => _selectedGroups.removeAll(gs.map((g) => g.id)));
+
+  void _invert(List<Group> gs) => setState(() {
+        for (final g in gs) {
+          if (!_selectedGroups.remove(g.id)) _selectedGroups.add(g.id);
+        }
+      });
+
+  /// شريحة «حدّد حسب النوع» — دوسة واحدة تحدّد أو تشيل مجموعة كاملة
+  Widget _pickChip(String label, List<Group> gs) {
+    if (gs.isEmpty) return const SizedBox.shrink();
+    final all = gs.every((g) => _selectedGroups.contains(g.id));
+    return FilterChip(
+      selected: all,
+      showCheckmark: false,
+      selectedColor: const Color(0xFF6a1b9a),
+      onSelected: (_) => all ? _deselect(gs) : _select(gs),
+      label: Text('$label (${gs.length})',
+          style: GoogleFonts.cairo(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w800,
+              color: all ? Colors.white : AppColors.text)),
+    );
+  }
+
+  /// السيكلات الموجودة فعلاً في الخطوط دي (بترتيب ثابت)
+  List<String> _cyclesOf(List<Group> gs) {
+    final keys = <String>{for (final g in gs) cycleKeyOf(g)}.toList()..sort();
+    return keys;
+  }
+
   static const _provNames = {
     'vodafone': 'فودافون',
     'etisalat': 'اتصالات',
@@ -622,6 +864,15 @@ class _DistributeSheetState extends State<_DistributeSheet> {
   Widget build(BuildContext context) {
     final prov = context.watch<AppProvider>();
     final groups = prov.db.groups;
+    // اللي ظاهر في قايمة الاختيار اليدوي بعد البحث — البحث بيستخدم نفس
+    // محرّك البحث بتاع البرنامج (بيلاقي «احمد» لما تكتب «أحمد» و«٠١٠» بـ «010»)
+    final visible = _q.trim().isEmpty
+        ? groups
+        : groups
+            .where((g) => searchMatches(_q, [g.phone, g.ownerName ?? '']))
+            .toList();
+    final allVisibleSelected = visible.isNotEmpty &&
+        visible.every((g) => _selectedGroups.contains(g.id));
     String empName(String id) => widget.employees.firstWhere(
         (e) => e['id'] == id,
         orElse: () => {'name': '—'})['name']!;
@@ -714,10 +965,103 @@ class _DistributeSheetState extends State<_DistributeSheet> {
                             ),
                         ]),
                         const Divider(height: 28),
-                        // #6 جماعي Checkbox
+                        // #6 اختيار يدوي — مع تحديد جماعي وتحديد بالنوع
                         _sectionTitle(
-                            '☑️ اختيار يدوي (${_selectedGroups.length} مختارة)'),
-                        ...groups.map((g) {
+                            '☑️ اختيار يدوي (${_selectedGroups.length} من ${visible.length} مختارة)'),
+                        // 🔍 بحث بالرقم أو الاسم
+                        TextField(
+                          controller: _searchCtrl,
+                          onChanged: (v) => setState(() => _q = v),
+                          style: GoogleFonts.cairo(fontSize: 13),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            hintText: 'دوّر برقم الخط أو اسم صاحبه...',
+                            hintStyle: GoogleFonts.cairo(
+                                fontSize: 12, color: AppColors.muted),
+                            prefixIcon: const Icon(Icons.search, size: 18),
+                            suffixIcon: _q.isEmpty
+                                ? null
+                                : IconButton(
+                                    icon: const Icon(Icons.close, size: 16),
+                                    onPressed: () => setState(() {
+                                      _searchCtrl.clear();
+                                      _q = '';
+                                    }),
+                                  ),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        // ✅ تحديد جماعي — بيشتغل على اللي ظاهر قدامك بس
+                        Row(children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: allVisibleSelected
+                                  ? () => _deselect(visible)
+                                  : () => _select(visible),
+                              icon: Icon(
+                                  allVisibleSelected
+                                      ? Icons.remove_done
+                                      : Icons.done_all,
+                                  size: 17),
+                              label: Text(
+                                  allVisibleSelected
+                                      ? 'شيل التحديد'
+                                      : 'حدّد الكل (${visible.length})',
+                                  style: GoogleFonts.cairo(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w900)),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            onPressed: () => _invert(visible),
+                            icon: const Icon(Icons.swap_horiz, size: 17),
+                            label: Text('اعكس',
+                                style: GoogleFonts.cairo(
+                                    fontSize: 12, fontWeight: FontWeight.w900)),
+                          ),
+                        ]),
+                        const SizedBox(height: 10),
+                        // 🎯 تحديد بالنوع — دوسة واحدة تحدد كل خطوط الشركة
+                        // أو السيكل أو اللي لسه مش موكلة لحد.
+                        Text('حدّد حسب النوع:',
+                            style: GoogleFonts.cairo(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.muted)),
+                        const SizedBox(height: 6),
+                        Wrap(spacing: 6, runSpacing: 6, children: [
+                          for (final p in _provNames.entries)
+                            _pickChip(
+                                p.value,
+                                visible
+                                    .where((g) => g.provider == p.key)
+                                    .toList()),
+                          for (final k in _cyclesOf(visible))
+                            _pickChip(
+                                cycleShortOf(k),
+                                visible
+                                    .where((g) => cycleKeyOf(g) == k)
+                                    .toList()),
+                          _pickChip(
+                              '👤 غير موكلة',
+                              visible
+                                  .where((g) => prov.assigneeOf(g.id) == null)
+                                  .toList()),
+                        ]),
+                        const SizedBox(height: 8),
+                        if (visible.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 18),
+                            child: Center(
+                              child: Text('مفيش خطوط بالبحث ده',
+                                  style: GoogleFonts.cairo(
+                                      fontSize: 12, color: AppColors.muted)),
+                            ),
+                          ),
+                        ...visible.map((g) {
                           final assignee = prov.assigneeOf(g.id);
                           return CheckboxListTile(
                             dense: true,

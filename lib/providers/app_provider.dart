@@ -462,6 +462,8 @@ class AppProvider extends ChangeNotifier {
   bool _flushingAudit = false;
   String _pin = '123456';
   String _fontSize = 'medium'; // small, medium, large
+  /// 📐 وضع مضغوط: يصغّر كل المسافات والخطوط أكتر عشان الشاشة تشيل أكتر
+  bool _compactMode = false;
   bool _darkMode = false;
   String _themeStyle = 'classic'; // classic, emerald, purple
   bool _autoBackup = false;
@@ -527,6 +529,7 @@ class AppProvider extends ChangeNotifier {
   bool   get loading        => _loading;
   String get pin            => _pin;
   String get fontSize       => _fontSize;
+  bool   get compactMode    => _compactMode;
   bool   get darkMode       => _darkMode;
   String get themeStyle     => _themeStyle;
   bool   get autoBackup     => _autoBackup;
@@ -692,6 +695,7 @@ class AppProvider extends ChangeNotifier {
     }
     _pin            = prefs.getString('tcm_pin')      ?? '123456';
     _fontSize       = prefs.getString('tcm_fontsize') ?? 'medium';
+    _compactMode    = prefs.getBool('tcm_compact')    ?? false;
     _darkMode       = prefs.getBool('tcm_dark')       ?? false;
     _themeStyle     = prefs.getString('tcm_theme')    ?? 'classic';
     _autoBackup     = prefs.getBool('tcm_autobackup') ?? false;
@@ -1075,6 +1079,7 @@ class AppProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('tcm_pin', _pin);
     await prefs.setString('tcm_fontsize', _fontSize);
+    await prefs.setBool('tcm_compact', _compactMode);
     await prefs.setBool('tcm_dark', _darkMode);
     await prefs.setString('tcm_theme', _themeStyle);
     await prefs.setBool('tcm_autobackup', _autoBackup);
@@ -1176,6 +1181,7 @@ class AppProvider extends ChangeNotifier {
 
   // ─── SETTINGS ────────────────────────────────────────────────
   void setFontSize(String s) { _fontSize = s; saveSettings(); }
+  void setCompactMode(bool v) { _compactMode = v; saveSettings(); notifyListeners(); }
   void setDarkMode(bool v)   { _darkMode = v; saveSettings(); }
   void setThemeStyle(String v) { _themeStyle = v; saveSettings(); }
   void setAutoBackup(bool v) { _autoBackup = v; saveSettings(); }

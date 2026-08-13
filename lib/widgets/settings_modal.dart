@@ -204,6 +204,30 @@ class _SettingsModalState extends State<SettingsModal> {
             ]),
             const SizedBox(height: 16),
 
+            // 🗜 الوضع المضغوط — يصغّر كل حاجة عشان الشاشة تشيل أكتر
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: prov.compactMode,
+                activeThumbColor: AppColors.blue2,
+                onChanged: prov.setCompactMode,
+                title: Text('🗜 الوضع المضغوط',
+                    style: GoogleFonts.cairo(
+                        fontWeight: FontWeight.w800, fontSize: 13)),
+                subtitle: Text(
+                    'يصغّر الخط والمسافات عشان الشاشة تشيل خطوط وعملاء أكتر',
+                    style: GoogleFonts.cairo(
+                        fontSize: 11, color: AppColors.muted)),
+              ),
+            ),
+            const SizedBox(height: 16),
+
             // Member view density
             Text('👥 شكل عرض العملاء', style: GoogleFonts.cairo(fontWeight: FontWeight.w700, color: AppColors.blue2)),
             const SizedBox(height: 8),

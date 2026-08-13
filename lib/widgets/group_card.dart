@@ -76,6 +76,10 @@ class _GroupCardState extends State<GroupCard> {
     if (!oldWidget.initiallyExpanded && widget.initiallyExpanded && !_expanded) {
       setState(() => _expanded = true);
     }
+    // «اقفل الكل» — الطلب اتقلب من مفتوح لمقفول فنقفلها
+    if (oldWidget.initiallyExpanded && !widget.initiallyExpanded && _expanded) {
+      setState(() => _expanded = false);
+    }
     if (!oldWidget.initiallyMembersExpanded &&
         widget.initiallyMembersExpanded &&
         !_membersExpanded) {
@@ -199,7 +203,7 @@ class _GroupCardState extends State<GroupCard> {
 
     final accent = _providerAccent(group.provider);
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
+      margin: EdgeInsets.only(bottom: context.d(14)),
       decoration: BoxDecoration(
         color: isSpecialLine ? const Color(0xFFFFFDE7) : Colors.white,
         borderRadius: BorderRadius.circular(20),
@@ -221,6 +225,9 @@ class _GroupCardState extends State<GroupCard> {
           // ─── GROUP HEADER ─────────────────────────────────────
           GestureDetector(
             onTap: () => setState(() => _expanded = !_expanded),
+            // 🖱 كليك يمين (كمبيوتر) → قايمة الأوامر مكان الماوس
+            onSecondaryTapDown: (d) =>
+                _showContextMenu(context, prov, d.globalPosition),
             // 🗂 ضغطة مطوّلة → يفتح الخط في تاب علوي بمساحة العمل
             onLongPress: () {
               HapticFeedback.mediumImpact();
@@ -234,9 +241,13 @@ class _GroupCardState extends State<GroupCard> {
                   );
             },
             child: Container(
+              // 📐 الحشو بيقل على الشاشات العريضة عشان الكارت ياخد مساحة
+              // أقل وتشوف عدد أكبر من الخطوط في نفس الشاشة.
               padding: _expanded
-                  ? const EdgeInsets.fromLTRB(14, 12, 10, 10)
-                  : const EdgeInsets.fromLTRB(14, 8, 6, 8),
+                  ? EdgeInsets.fromLTRB(
+                      context.d(14), context.d(12), context.d(10), context.d(10))
+                  : EdgeInsets.fromLTRB(
+                      context.d(14), context.d(8), context.d(6), context.d(8)),
               decoration: BoxDecoration(
                 gradient: headerGrad,
                 borderRadius: BorderRadius.only(
@@ -298,16 +309,9 @@ class _GroupCardState extends State<GroupCard> {
                       PopupMenuButton<String>(
                         icon: Icon(Icons.more_vert,
                             color: AppColors.muted, size: 20),
+                        tooltip: 'أوامر الخط  (أو كليك يمين)',
                         onSelected: (v) => _onAction(v, context, prov),
-                        itemBuilder: (_) => [
-                          _menuItem('edit', '✏️ تعديل'),
-                          _menuItem('addMember', '👤 إضافة عميل'),
-                          _menuItem('notepad', '📓 المفكرة'),
-                          _menuItem('stickyNote', '📌 ملاحظة ثابتة'),
-                          _menuItem('complaints', '📝 الشكاوى'),
-                          _menuItem('rental', '🏠 الإيجار'),
-                          _menuItem('delete', '🗑 حذف', isRed: true),
-                        ],
+                        itemBuilder: (_) => _actionItems(),
                       ),
                       Icon(
                         _expanded
@@ -2145,6 +2149,35 @@ class _GroupCardState extends State<GroupCard> {
         overflow: TextOverflow.ellipsis,
       ),
     );
+  }
+
+  /// بنود قايمة الأوامر — مصدر واحد للزرار ⋮ ولكليك اليمين
+  List<PopupMenuItem<String>> _actionItems() => [
+        _menuItem('edit', '✏️ تعديل'),
+        _menuItem('addMember', '👤 إضافة عميل'),
+        _menuItem('notepad', '📓 المفكرة'),
+        _menuItem('stickyNote', '📌 ملاحظة ثابتة'),
+        _menuItem('complaints', '📝 الشكاوى'),
+        _menuItem('rental', '🏠 الإيجار'),
+        _menuItem('delete', '🗑 حذف', isRed: true),
+      ];
+
+  /// 🖱 كليك يمين على الكارت = نفس قايمة الأوامر، بتفتح مكان الماوس.
+  /// على الكمبيوتر ده أسرع بكتير من إنك تدوّر على زرار الـ ⋮ وتدوس عليه.
+  Future<void> _showContextMenu(
+      BuildContext ctx, AppProvider prov, Offset globalPos) async {
+    final overlay =
+        Overlay.of(ctx).context.findRenderObject() as RenderBox?;
+    if (overlay == null) return;
+    final picked = await showMenu<String>(
+      context: ctx,
+      position: RelativeRect.fromRect(
+        globalPos & Size.zero,
+        Offset.zero & overlay.size,
+      ),
+      items: _actionItems(),
+    );
+    if (picked != null && ctx.mounted) _onAction(picked, ctx, prov);
   }
 
   PopupMenuItem<String> _menuItem(String value, String label,

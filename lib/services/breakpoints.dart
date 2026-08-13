@@ -11,6 +11,11 @@
 
 import 'package:flutter/material.dart';
 
+/// 🗜 الوضع المضغوط — بيتظبط من الإعدادات وبيصغّر كل حاجة أكتر 12%.
+/// متغيّر عام (زي `AppColors.dark`) عشان أي widget يوصله من غير ما نمرّره
+/// من شاشة لشاشة، وبيتحدّث من `main.dart` مع كل بناء.
+bool kCompactMode = false;
+
 /// مقاس الشاشة الحالي
 enum Bp {
   /// موبايل عادي — أقل من 600
@@ -27,13 +32,19 @@ enum Bp {
 }
 
 /// حدود المقاسات (عرض النافذة بالـ dp)
-const double kBpPhoneWide = 600;
-const double kBpTablet = 900;
-const double kBpDesktop = 1300;
+///
+/// ⚠️ الأرقام دي متظبطة على **أجهزة المالك الفعلية** مش على أرقام نظرية:
+///   • هواوي T8   = 533dp بالطول  · 853dp بالعرض
+///   • Tab A9+    = 800dp بالطول  · 1280dp بالعرض
+/// الحدود القديمة (600/900) كانت بتحط الجهازين في الخانة الغلط: التاب
+/// A9+ كان بياخد شكل الموبايل بالطول، والهواوي كان مقفول عن اللف خالص.
+const double kBpPhoneWide = 480;
+const double kBpTablet = 760;
+const double kBpDesktop = 1250;
 
 /// أقصى عرض للمحتوى — بعد كده مفيش فايدة من التمدد، النص بيبقى
 /// صعب تقراه لأن عينك بتمشي مسافة طويلة من آخر السطر لأول اللي بعده.
-const double kContentMaxWidth = 1500;
+const double kContentMaxWidth = 1800;
 
 Bp bpOf(double width) {
   if (width >= kBpDesktop) return Bp.desktop;
@@ -67,9 +78,24 @@ extension BpContext on BuildContext {
   int get memberCols => switch (bp) {
         Bp.phone => 3,
         Bp.phoneWide => 4,
-        Bp.tablet => 5,
-        Bp.desktop => 6,
+        Bp.tablet => 6,
+        Bp.desktop => 8,
       };
+
+  /// 📐 أقصى ارتفاع للهيدر الثابت (نسبة من الشاشة).
+  ///
+  /// كان 0.55 على كل الأجهزة — يعني نص الشاشة هيدر حتى على الكمبيوتر،
+  /// والبيانات اللي بتتحرك تحت مضغوطة في النص التاني. على الشاشة
+  /// العريضة الهيدر مش محتاج المساحة دي أصلاً.
+  double get headerMaxRatio => switch (bp) {
+        Bp.phone => 0.55,
+        Bp.phoneWide => 0.42,
+        Bp.tablet => 0.32,
+        Bp.desktop => 0.26,
+      };
+
+  /// الهيدر الكبير يفتح افتراضياً؟ على الشاشة العريضة لأ — البيانات أهم.
+  bool get headerOpenByDefault => bp == Bp.phone || bp == Bp.phoneWide;
 
   /// عدد أعمدة أي قايمة كروت عادية (الشاشات التانية)
   int get listCols => switch (bp) {
@@ -93,14 +119,31 @@ extension BpContext on BuildContext {
         Bp.desktop => 24,
       };
 
-  /// معامل تكبير الخط حسب الشاشة — بيتضرب في إعداد المستخدم.
-  /// الشاشة الكبيرة بتتشاف من مسافة أبعد، فالخط لازم يكبر معاها شوية.
-  double get bpTextScale => switch (bp) {
+  /// معامل حجم الخط حسب الشاشة — بيتضرب في إعداد المستخدم.
+  ///
+  /// الشاشة الكبيرة الهدف منها **بيانات أكتر** مش خط أكبر. الخط بيصغر
+  /// شوية عشان الشاشة تشيل عدد أكبر من الخطوط والعملاء في نفس المساحة.
+  double get bpTextScale =>
+      switch (bp) {
         Bp.phone => 1.0,
-        Bp.phoneWide => 1.02,
-        Bp.tablet => 1.06,
-        Bp.desktop => 1.08,
-      };
+        Bp.phoneWide => 0.98,
+        Bp.tablet => 0.94,
+        Bp.desktop => 0.90,
+      } *
+      (kCompactMode ? 0.92 : 1.0);
+
+  /// معامل تصغير المسافات والحشو — كثافة أعلى = بيانات أكتر في الشاشة
+  double get density =>
+      switch (bp) {
+        Bp.phone => 1.0,
+        Bp.phoneWide => 0.94,
+        Bp.tablet => 0.86,
+        Bp.desktop => 0.80,
+      } *
+      (kCompactMode ? 0.85 : 1.0);
+
+  /// يصغّر أي مقاس (حشو/مسافة) حسب كثافة الشاشة
+  double d(double v) => v * density;
 }
 
 /// 📄 قالب الصفحة — بيحد أقصى عرض للمحتوى ويحطّه في النص.

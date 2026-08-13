@@ -1,6 +1,8 @@
 // lib/screens/home_screen.dart
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show SystemNavigator;
+import 'package:flutter/gestures.dart' show PointerScrollEvent;
+import 'package:flutter/services.dart'
+    show SystemNavigator, LogicalKeyboardKey, HardwareKeyboard;
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -70,7 +72,34 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _searching = false;
   List<Map<String, dynamic>> _searchResults = [];
   bool _headerExpanded = true;
+  bool _headerDefaultApplied = false;
+  /// «افتح الكل / اقفل الكل» — بيتحكم في كل كروت الخطوط مرة واحدة
+  bool _allExpanded = true;
   bool _empViewAll = false; // الموظف: false=شغلي، true=القائمة العامة
+
+  /// 📜 الهيدر الكبير بيتقفل لوحده أول ما تنزل في قايمة الخطوط، وبيرجع
+  /// يتفتح لما ترجع لفوق خالص — عشان وانت بتقلّب تاخد الشاشة كلها.
+  void _onGroupsScroll() {
+    if (!_groupsScrollCtrl.hasClients) return;
+    final atTop = _groupsScrollCtrl.offset <= 4;
+    if (!atTop && _headerExpanded) {
+      setState(() => _headerExpanded = false);
+    } else if (atTop && !_headerExpanded && context.headerOpenByDefault) {
+      setState(() => _headerExpanded = true);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 📐 على الشاشة العريضة الهيدر الكبير بيبدأ **مقفول** — البيانات أهم.
+    // مرة واحدة بس عند أول بناء، عشان لو المستخدم فتحه بإيده ما نقفلوش
+    // عليه تاني كل ما الشاشة تتغيّر.
+    if (!_headerDefaultApplied) {
+      _headerDefaultApplied = true;
+      _headerExpanded = context.headerOpenByDefault;
+    }
+  }
 
   // التمرير لمجموعة معيّنة بعد البحث (يفتح/يبيّن مجموعة العميل)
   final _groupsScrollCtrl = ScrollController();
@@ -124,6 +153,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadSortMode();
+    _groupsScrollCtrl.addListener(_onGroupsScroll);
     // 🔍 خلّي البحث الشامل متاح من أي شاشة في البرنامج
     openGlobalSearch = () {
       if (!mounted) return;
@@ -134,6 +164,9 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     openGlobalSearch = null;
+    _groupsScrollCtrl
+      ..removeListener(_onGroupsScroll)
+      ..dispose();
     _menuSearchCtrl.dispose();
     super.dispose();
   }
@@ -307,7 +340,23 @@ class _HomeScreenState extends State<HomeScreen> {
     final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
     // 🔙 زرار الرجوع بتاع الموبايل: مبيخرجش من البرنامج على طول — بيرجّعك
     // خطوة خطوة لحد شاشة المجموعات، ومنها بس تقدر تخرج بدوستين.
-    return PopScope(
+    return CallbackShortcuts(
+      bindings: _shortcuts(prov),
+      child: Focus(
+      autofocus: true,
+      // 🖱 Ctrl + عجلة الماوس = كبّر/صغّر الخط (زي المتصفحات)
+      child: Listener(
+      onPointerSignal: (e) {
+        if (e is! PointerScrollEvent) return;
+        if (!HardwareKeyboard.instance.isControlPressed) return;
+        const steps = ['small', 'medium', 'large'];
+        final i = steps.indexOf(prov.fontSize);
+        if (i < 0) return;
+        // عجلة لفوق (سالب) = كبّر
+        final next = (i + (e.scrollDelta.dy < 0 ? 1 : -1)).clamp(0, 2);
+        if (next != i) prov.setFontSize(steps[next]);
+      },
+      child: PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
@@ -326,8 +375,11 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               if (!keyboardOpen)
                 ConstrainedBox(
-                  constraints:
-                      BoxConstraints(maxHeight: constraints.maxHeight * 0.55),
+                  // 📐 نسبة الهيدر بتقل كل ما الشاشة تكبر — على الكمبيوتر
+                  // 26% بدل 55%، فالباقي كله بيانات.
+                  constraints: BoxConstraints(
+                      maxHeight:
+                          constraints.maxHeight * context.headerMaxRatio),
                   child: SingleChildScrollView(child: _buildHeader(prov)),
                 )
               else
@@ -386,6 +438,9 @@ class _HomeScreenState extends State<HomeScreen> {
         },
       ),
       ),
+      ),
+      ),
+      ),
     );
   }
 
@@ -437,34 +492,41 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               // ☰ مبيظهرش على الكمبيوتر — القايمة ثابتة على الجنب أصلاً
               if (!context.hasSideRail)
-                GestureDetector(
-                  onTap: () => _scaffoldKey.currentState?.openDrawer(),
-                  child: Container(
-                    width: 36, height: 36,
-                    margin: const EdgeInsets.only(left: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.18),
-                      borderRadius: BorderRadius.circular(10),
+                Tooltip(
+                  message: 'القايمة',
+                  child: GestureDetector(
+                    onTap: () => _scaffoldKey.currentState?.openDrawer(),
+                    child: Container(
+                      width: 36, height: 36,
+                      margin: const EdgeInsets.only(left: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child:
+                          const Icon(Icons.menu, color: Colors.white, size: 20),
                     ),
-                    child: const Icon(Icons.menu, color: Colors.white, size: 20),
                   ),
                 ),
               // 🔙 سهم الرجوع — بيبان بس لما يكون فيه حاجة ترجع منها،
               // وبيرجّعك لشاشة المجموعات زي زرار الموبايل بالظبط.
               if (_canStepBack(prov)) ...[
                 const SizedBox(width: 6),
-                GestureDetector(
-                  onTap: _onBack,
-                  child: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.18),
-                      borderRadius: BorderRadius.circular(10),
+                Tooltip(
+                  message: 'رجوع  (Esc)',
+                  child: GestureDetector(
+                    onTap: _onBack,
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      // arrow_back بيتقلب لوحده في العربي فبيبقى سهم → صح
+                      child: const Icon(Icons.arrow_back,
+                          color: Colors.white, size: 22),
                     ),
-                    // arrow_back بيتقلب لوحده في العربي فبيبقى سهم → صح
-                    child: const Icon(Icons.arrow_back,
-                        color: Colors.white, size: 22),
                   ),
                 ),
               ],
@@ -472,6 +534,7 @@ class _HomeScreenState extends State<HomeScreen> {
               // باين دايماً. الرقم الأحمر = كام حاجة متأخرة عليك.
               _iconBtn(
                 Icons.push_pin,
+                tip: 'لوحة النهاردة',
                 badge: todayOverdueCount(prov),
                 onTap: () => prov.openWorkspaceTab('today',
                     title: menuItemDef('today')?.title ?? 'لوحة النهاردة',
@@ -546,11 +609,18 @@ class _HomeScreenState extends State<HomeScreen> {
                         },
                       ),
                       const SizedBox(width: 5),
-                      _iconBtn(Icons.search, onTap: () => _showGlobalSearch(prov)),
+                      _iconBtn(Icons.search,
+                          tip: 'بحث  (Ctrl+F)',
+                          onTap: () => _showGlobalSearch(prov)),
                       const SizedBox(width: 5),
-                      _iconBtn(Icons.chat, color: AppColors.waGreen, onTap: () => _sendWAAll(prov)),
+                      _iconBtn(Icons.chat,
+                          tip: 'واتساب للكل',
+                          color: AppColors.waGreen,
+                          onTap: () => _sendWAAll(prov)),
                       const SizedBox(width: 5),
-                      _iconBtn(Icons.auto_awesome, color: AppColors.purple,
+                      _iconBtn(Icons.auto_awesome,
+                          tip: 'المساعد الذكي',
+                          color: AppColors.purple,
                           onTap: () => showModalBottomSheet(
                             useRootNavigator: true,
                             context: context,
@@ -911,8 +981,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _iconBtn(IconData icon,
       {Color color = Colors.white,
       required VoidCallback onTap,
-      int badge = 0}) {
-    return GestureDetector(
+      int badge = 0,
+      String? tip}) {
+    final btn = GestureDetector(
       onTap: onTap,
       child: Stack(clipBehavior: Clip.none, children: [
         Container(
@@ -946,6 +1017,8 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
       ]),
     );
+    // 💡 على الكمبيوتر: عدّي بالماوس على أي أيقونة تعرف بتعمل إيه
+    return tip == null ? btn : Tooltip(message: tip, child: btn);
   }
 
   Widget _headerBtn(
@@ -987,6 +1060,51 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ─── NAV ────────────────────────────────────────────────────
   // ─── SIDE DRAWER (القائمة الجانبية) ──────────────────────────
+  // ─── ⌨️ اختصارات الكيبورد (للكمبيوتر) ───────────────────────────
+  //
+  // على الويندوز إيدك على الكيبورد أصلاً — فبدل ما تسيبها وتمسك الماوس
+  // عشان تدوس على زرار، الاختصارات دي بتوفّر الحركة دي كل مرة.
+  // ملاحظة: بتشتغل حتى وانت بتكتب في خانة بحث، لأن الـ Ctrl مش بيتلخبط
+  // مع الكتابة العادية.
+  Map<ShortcutActivator, VoidCallback> _shortcuts(AppProvider prov) {
+    void sheet(Widget child) {
+      if (!guardEdit(context)) return;
+      showModalBottomSheet(
+        useRootNavigator: true,
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        barrierColor: Colors.black54,
+        builder: (_) => child,
+      );
+    }
+
+    return {
+      // 🔍 بحث
+      const SingleActivator(LogicalKeyboardKey.keyF, control: true): () =>
+          _showGlobalSearch(prov),
+      // ➕ إضافة
+      const SingleActivator(LogicalKeyboardKey.keyN, control: true): () =>
+          sheet(const AddMemberModal()),
+      const SingleActivator(LogicalKeyboardKey.keyG, control: true): () =>
+          sheet(const AddGroupModal()),
+      // 🔙 رجوع خطوة (نفس زرار الرجوع بالظبط)
+      const SingleActivator(LogicalKeyboardKey.escape): _onBack,
+      // ❌ اقفل التاب الحالي
+      const SingleActivator(LogicalKeyboardKey.keyW, control: true): () {
+        final i = prov.activeWorkspaceIndex;
+        if (i > 0) prov.closeWorkspaceTab(i - 1);
+      },
+      // 🗂 Ctrl+1..9 = انقل لتاب رقم كذا (1 = الرئيسية)
+      for (var i = 0; i < 9; i++)
+        SingleActivator(
+            LogicalKeyboardKey(LogicalKeyboardKey.digit1.keyId + i),
+            control: true): () {
+          if (i <= prov.workspaceTabs.length) prov.activateWorkspaceTab(i);
+        },
+    };
+  }
+
   /// يقفل القايمة الجانبية — بس لو هي **بتتفتح وتتقفل**.
   /// على الكمبيوتر القايمة ثابتة على الجنب فمفيش حاجة تتقفل، ولو عملنا
   /// pop هنا كنا هنقفل الشاشة نفسها بدل القايمة.
@@ -1532,10 +1650,24 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         // شريط ترتيب الخطوط (مبيظهرش وانت بتدوّر)
         if (!_searching) _buildSortBar(),
-        // 🏢 فلتر الشركة السريع
+        // 🏢 فلتر الشركة السريع + زرار افتح/اقفل الكل
         if (!_searching) ...[
           const SizedBox(height: 6),
-          _buildProviderFilterBar(prov),
+          Row(children: [
+            Expanded(child: _buildProviderFilterBar(prov)),
+            Tooltip(
+              message: _allExpanded ? 'اقفل كل الخطوط' : 'افتح كل الخطوط',
+              child: IconButton(
+                visualDensity: VisualDensity.compact,
+                onPressed: () => setState(() => _allExpanded = !_allExpanded),
+                icon: Icon(
+                    _allExpanded ? Icons.unfold_less : Icons.unfold_more,
+                    size: 20,
+                    color: AppColors.blue2),
+              ),
+            ),
+            const SizedBox(width: 6),
+          ]),
         ],
         // الموظف: تبديل بين «شغلي» و«القائمة العامة»
         if (SupabaseService.isEmployee && !_searching) _buildEmpViewToggle(prov),
@@ -2063,6 +2195,7 @@ class _HomeScreenState extends State<HomeScreen> {
     GroupCard card(int i) => GroupCard(
           key: _groupKeys[groups[i].id] ??= GlobalKey(),
           group: groups[i],
+          initiallyExpanded: _allExpanded,
           initiallyMembersExpanded: groups[i].id == _focusExpandGid,
         );
 
@@ -2070,20 +2203,29 @@ class _HomeScreenState extends State<HomeScreen> {
     // بنوزّعهم بالتبادل على الأعمدة، وكل عمود بيطول لوحده حسب اللي فيه
     // (الكروت مش نفس الطول لأن اللي مفتوح أطول من اللي مقفول).
     if (cols > 1) {
-      final buckets = List.generate(cols, (_) => <Widget>[]);
+      // بنوزّع الخطوط بالتبادل على الأعمدة، وكل عمود بيتبني **عند الحاجة**
+      // (ListView.builder مش Column) — يعني الكروت اللي برّه الشاشة مش
+      // بتتبني أصلاً، فالتمرير بيفضل خفيف مهما زاد عدد الخطوط.
+      final buckets = List.generate(cols, (_) => <int>[]);
       for (var i = 0; i < groups.length; i++) {
-        buckets[i % cols].add(card(i));
+        buckets[i % cols].add(i);
       }
       final g = context.gutter;
-      return SingleChildScrollView(
-        controller: _groupsScrollCtrl,
-        padding: EdgeInsets.all(g),
+      return Padding(
+        padding: EdgeInsets.symmetric(horizontal: g),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             for (var c = 0; c < cols; c++) ...[
               if (c > 0) SizedBox(width: g),
-              Expanded(child: Column(children: buckets[c])),
+              Expanded(
+                child: ListView.builder(
+                  controller: c == 0 ? _groupsScrollCtrl : null,
+                  padding: EdgeInsets.symmetric(vertical: g),
+                  itemCount: buckets[c].length,
+                  itemBuilder: (_, k) => card(buckets[c][k]),
+                ),
+              ),
             ],
           ],
         ),
