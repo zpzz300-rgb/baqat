@@ -61,6 +61,9 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // قواعد إضافية لضاغط الكود (R8) — من غيرها بتقع تنبيهات
+            // مواعيد الفواتير بـ "Missing type parameter". التفاصيل في الملف.
+            proguardFiles("proguard-rules.pro")
         }
     }
 }

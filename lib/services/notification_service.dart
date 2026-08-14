@@ -45,6 +45,20 @@ class NotificationService {
   static const int _billDueBase = 7000; // 7000–7099
 
   // ── Shared helper ─────────────────────────────────────────────
+  /// إلغاء إشعار واحد — **بيبلع أي خطأ**.
+  ///
+  /// مكتبة الإشعارات بتقرا اللي محفوظ عندها من الجهاز، ولو الملف ده اتخربش
+  /// أو النظام رفض، بترمي `PlatformException` وتوقّع كل اللي بعدها.
+  /// اللي حصل فعلاً: تنبيهات مواعيد الفواتير كانت بتوقع كلها بسبب إشعار
+  /// واحد فاشل. الإلغاء مش عملية حرجة — لو فشل، نكمّل عادي.
+  static Future<void> _cancel(int id) async {
+    try {
+      await _plugin.cancel(id);
+    } catch (_) {
+      // مقصودة: فشل الإلغاء ما يوقّفش جدولة الباقي
+    }
+  }
+
   // Phase 4: Importance.max + Priority.high + exactAllowWhileIdle + vibration/sound
   static Future<void> _scheduleOnce({
     required int id,
@@ -56,7 +70,7 @@ class NotificationService {
     DateTimeComponents? repeat,
     bool critical = true,
   }) async {
-    await _plugin.cancel(id);
+    await _cancel(id);
     if (when.isBefore(tz.TZDateTime.now(tz.local))) return;
     final androidDetails = AndroidNotificationDetails(
       channelId,
@@ -153,7 +167,7 @@ class NotificationService {
 
   static Future<void> cancelDebtReminder() async {
     await init();
-    await _plugin.cancel(_debtId);
+    await _cancel(_debtId);
   }
 
   // ── 2. Voucher / Bill date ─────────────────────────────────────
@@ -167,7 +181,7 @@ class NotificationService {
 
   static Future<void> cancelVoucherAlert(int id) async {
     await init();
-    await _plugin.cancel(id);
+    await _cancel(id);
   }
 
   // ── 3. Line expiry alerts ─────────────────────────────────────
@@ -176,7 +190,7 @@ class NotificationService {
   }) async {
     await init();
     for (var i = 0; i < 100; i++) {
-      await _plugin.cancel(_expiryBase + i);
+      await _cancel(_expiryBase + i);
     }
     final now = DateTime.now();
     int count = 0;
@@ -204,7 +218,7 @@ class NotificationService {
   }) async {
     await init();
     for (var i = 0; i < 100; i++) {
-      await _plugin.cancel(_offerBase + i);
+      await _cancel(_offerBase + i);
     }
     final now = DateTime.now();
     int count = 0;
@@ -292,7 +306,7 @@ class NotificationService {
 
   static Future<void> cancelDeferralReminder(String memberId) async {
     await init();
-    await _plugin.cancel(_deferralId(memberId));
+    await _cancel(_deferralId(memberId));
   }
 
   // ── 7b. Bill-due reminders (مواعيد دفع فواتير الشركات) ──────────
@@ -303,7 +317,7 @@ class NotificationService {
   }) async {
     await init();
     for (var i = 0; i < 100; i++) {
-      await _plugin.cancel(_billDueBase + i);
+      await _cancel(_billDueBase + i);
     }
     final now = DateTime.now();
     int count = 0;
@@ -332,7 +346,7 @@ class NotificationService {
   static Future<void> cancelBillDueAlerts() async {
     await init();
     for (var i = 0; i < 100; i++) {
-      await _plugin.cancel(_billDueBase + i);
+      await _cancel(_billDueBase + i);
     }
   }
 
@@ -381,7 +395,7 @@ class NotificationService {
 
   static Future<void> cancelGeneralNoteReminder(String noteId) async {
     await init();
-    await _plugin.cancel(_generalNoteIdOf(noteId));
+    await _cancel(_generalNoteIdOf(noteId));
   }
 
   // ── Instant notification ──────────────────────────────────────
@@ -409,13 +423,20 @@ class NotificationService {
   // ── Cancel all scheduled ──────────────────────────────────────
   static Future<void> cancelAll() async {
     await init();
-    await _plugin.cancelAll();
+    try {
+      await _plugin.cancelAll();
+    } catch (_) {}
   }
 
   // ── Count pending notifications ───────────────────────────────
   static Future<List<PendingNotificationRequest>> listPending() async {
     await init();
-    return _plugin.pendingNotificationRequests();
+    try {
+      return await _plugin.pendingNotificationRequests();
+    } catch (_) {
+      // نفس مشكلة القراءة اللي في _cancel — نرجّع لستة فاضية بدل ما نوقّع الشاشة
+      return const <PendingNotificationRequest>[];
+    }
   }
 
   // ── Calculate next voucher date ───────────────────────────────

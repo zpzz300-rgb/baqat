@@ -1338,30 +1338,94 @@ class AppProvider extends ChangeNotifier {
   }
 
   // ─── AUTO BACKUP ─────────────────────────────────────────────
+  /// مجلد النسخ الاحتياطي — نفس الاسم على كل الأجهزة عشان تلاقيه بسهولة.
+  Future<Directory> _backupDir() async {
+    if (Platform.isAndroid) {
+      final dl = Directory('/storage/emulated/0/Download/TelecomBackups');
+      if (await dl.exists()) return dl;
+      try {
+        return await dl.create(recursive: true);
+      } catch (_) {
+        // مفيش إذن على التخزين الخارجي — نرجع لمجلد البرنامج
+      }
+    }
+    final docs = await getApplicationDocumentsDirectory();
+    final d = Directory('${docs.path}/TelecomBackups');
+    if (!await d.exists()) await d.create(recursive: true);
+    return d;
+  }
+
+  /// 💾 ياخد نسخة من كل البيانات في ملف JSON.
+  ///
+  /// 🛡 **بيكتب في ملف مؤقت الأول، وما يحلّش محل النسخة القديمة غير لما
+  /// يتأكد إن اللي اتكتب سليم.** قبل كده كان بيكتب فوق ملف النهاردة على
+  /// طول — يعني لو الكتابة اتقطعت في النص (بطارية خلصت / البرنامج اتقفل)
+  /// تبقى خسرت النسخة الجديدة **والقديمة** مع بعض.
+  ///
+  /// وكمان: لو نسخة النهاردة موجودة وفيها بيانات **أكتر** من اللي في إيدنا
+  /// دلوقتي، ما بنكتبش فوقها — بنحفظ الجديدة جنبها بالساعة والدقيقة.
+  /// السبب: لو حصل خطأ وفضّى البيانات، النسخ الاحتياطي التلقائي كان
+  /// هيسجّل الفاضي فوق الكويس. مفيش ملف بيتمسح أبداً.
   Future<String?> performBackup() async {
     // الموظف ممنوع ياخد نسخة من البيانات
     if (SupabaseService.isEmployee) return null;
+    File? tmp;
     try {
-      final now    = DateTime.now();
-      final stamp  = '${now.year}-${now.month.toString().padLeft(2,'0')}-${now.day.toString().padLeft(2,'0')}';
-      Directory dir;
-      if (Platform.isAndroid) {
-        // Try Downloads folder first, fallback to app documents
-        final dl = Directory('/storage/emulated/0/Download/TelecomBackups');
-        if (!await dl.exists()) await dl.create(recursive: true);
-        dir = dl;
-      } else {
-        dir = await getApplicationDocumentsDirectory();
+      final now = DateTime.now();
+      String two(int n) => n.toString().padLeft(2, '0');
+      final stamp = '${now.year}-${two(now.month)}-${two(now.day)}';
+      final dir = await _backupDir();
+      final payload = jsonEncode(db.toJson());
+
+      // 1️⃣ اكتب في ملف مؤقت — لو حصل قطع، القديم لسه سليم
+      tmp = File('${dir.path}/.telecom_backup_$stamp.part');
+      await tmp.writeAsString(payload, flush: true);
+
+      // 2️⃣ اقرا اللي اتكتب وتأكد إنه يتفكّ وعدد السجلات مظبوط
+      final check = jsonDecode(await tmp.readAsString()) as Map<String, dynamic>;
+      final gCount = (check['groups'] as List?)?.length ?? -1;
+      final mCount = (check['members'] as List?)?.length ?? -1;
+      if (gCount != db.groups.length || mCount != db.members.length) {
+        await tmp.delete(); // ملف مؤقت ناقص، مش بيانات
+        return null;
       }
-      final file = File('${dir.path}/telecom_backup_$stamp.json');
-      await file.writeAsString(jsonEncode(db.toJson()));
+
+      // 3️⃣ لو نسخة النهاردة أكبر، ما نكتبش فوقها — نحفظ جنبها
+      var target = File('${dir.path}/telecom_backup_$stamp.json');
+      if (await target.exists() &&
+          await _backupIsRicherThan(target, gCount + mCount)) {
+        target = File('${dir.path}/telecom_backup_${stamp}_'
+            '${two(now.hour)}${two(now.minute)}.json');
+      }
+
+      // 4️⃣ الاستبدال ده عملية واحدة — مفيش لحظة الملف فيها نص ملف
+      await tmp.rename(target.path);
+      tmp = null;
+
       _lastBackup = stamp;
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('tcm_lastbackup', stamp);
       notifyListeners();
-      return file.path;
+      return target.path;
     } catch (_) {
+      // نظّف الملف المؤقت بس — عمرنا ما بنلمس نسخة سليمة
+      try {
+        if (tmp != null && await tmp.exists()) await tmp.delete();
+      } catch (_) {}
       return null;
+    }
+  }
+
+  /// النسخة الموجودة فيها سجلات أكتر من اللي هنكتبه؟
+  /// لو مقدرناش نقراها، بنعتبرها أغنى — الأمان الأول.
+  Future<bool> _backupIsRicherThan(File old, int newCount) async {
+    try {
+      final j = jsonDecode(await old.readAsString()) as Map<String, dynamic>;
+      final c = ((j['groups'] as List?)?.length ?? 0) +
+          ((j['members'] as List?)?.length ?? 0);
+      return c > newCount;
+    } catch (_) {
+      return true;
     }
   }
 
