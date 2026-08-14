@@ -37,6 +37,7 @@ Member _member({
     );
 
 void main() {
+  _indexTests();
   // ══════════════════════════════════════════════════════════════
   group('🧾 الفاتورة — المتبقي والحالة', () {
     CompanyBill bill({double actual = 0, double paid = 0}) => CompanyBill(
@@ -332,6 +333,67 @@ void main() {
               date: '01/08/2026'),
         ]);
       expect(db.totalBillsOwed, 600);
+    });
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// ⚡ فهرس العملاء (كاش السرعة) — لازم يتمسح مع أي تعديل
+//
+// `membersOf` بقت بتستخدم فهرس محفوظ عشان السرعة. الخطر إن الفهرس
+// يفضل قديم بعد ما تضيف أو تحذف عميل، فتشوف بيانات غلط. التستات دي
+// بتتأكد إن ده مايحصلش.
+void _indexTests() {
+  group('⚡ فهرس العملاء', () {
+    test('بيرجّع عملاء المجموعة الصح', () {
+      final db = AppDB()
+        ..members.addAll([
+          _member(gid: 'g1', name: 'أ'),
+          _member(gid: 'g2', name: 'ب'),
+          _member(gid: 'g1', name: 'ج'),
+        ]);
+      expect(db.membersOf('g1').length, 2);
+      expect(db.membersOf('g2').length, 1);
+      expect(db.membersOf('g3'), isEmpty);
+    });
+
+    test('إضافة عميل بعد قراءة الفهرس لازم تبان بعد المسح', () {
+      final db = AppDB()..members.add(_member(gid: 'g1'));
+      expect(db.membersOf('g1').length, 1); // بنى الفهرس
+      db.members.add(_member(gid: 'g1', price: 50));
+      db.invalidateMembersIndex();
+      expect(db.membersOf('g1').length, 2);
+    });
+
+    test('حذف عميل لازم يبان بعد المسح', () {
+      final db = AppDB()
+        ..members.addAll([_member(gid: 'g1'), _member(gid: 'g1', price: 7)]);
+      expect(db.membersOf('g1').length, 2);
+      db.members.removeWhere((m) => m.price == 7);
+      db.invalidateMembersIndex();
+      expect(db.membersOf('g1').length, 1);
+    });
+
+    test('نقل عميل لمجموعة تانية لازم يبان بعد المسح', () {
+      final db = AppDB()..members.add(_member(gid: 'g1'));
+      expect(db.membersOf('g1').length, 1);
+      db.members[0].gid = 'g2';
+      db.invalidateMembersIndex();
+      expect(db.membersOf('g1'), isEmpty);
+      expect(db.membersOf('g2').length, 1);
+    });
+
+    test('⚠️ ترتيب اللستة الراجعة ما يبوّظش الفهرس', () {
+      final db = AppDB()
+        ..members.addAll([
+          _member(gid: 'g1', name: 'ب', price: 2),
+          _member(gid: 'g1', name: 'أ', price: 1),
+        ]);
+      // في أماكن في البرنامج بتعمل membersOf(id)..sort(...) — لو رجّعنا
+      // نفس اللستة المحفوظة كان الترتيب ده هيعدّل على الفهرس نفسه.
+      db.membersOf('g1').sort((a, b) => a.name.compareTo(b.name));
+      final after = db.membersOf('g1');
+      expect(after[0].price, 2, reason: 'الفهرس اتغيّر من برّه');
     });
   });
 }

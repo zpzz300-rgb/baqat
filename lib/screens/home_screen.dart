@@ -14,6 +14,7 @@ import '../services/breakpoints.dart';
 import '../services/supabase_service.dart';
 import 'employees_screen.dart';
 import '../widgets/group_card.dart';
+import '../widgets/groups_table.dart';
 import '../widgets/common.dart';
 import '../utils/print_helper.dart';
 import 'profit_screen.dart';
@@ -75,6 +76,16 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _headerDefaultApplied = false;
   /// «افتح الكل / اقفل الكل» — بيتحكم في كل كروت الخطوط مرة واحدة
   bool _allExpanded = true;
+
+  /// 📊 وضع الجدول: سطر لكل خط بدل كارت — الشاشة بتشيل ٤ أضعاف
+  static const _kTablePrefKey = 'groups_table_view';
+  bool _tableView = false;
+
+  Future<void> _setTableView(bool v) async {
+    setState(() => _tableView = v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kTablePrefKey, v);
+  }
   bool _empViewAll = false; // الموظف: false=شغلي، true=القائمة العامة
 
   /// 📜 الهيدر الكبير بيتقفل لوحده أول ما تنزل في قايمة الخطوط، وبيرجع
@@ -185,6 +196,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _provFilter = savedProv;
       }
       if (savedCycle != null) _cycleFilter = savedCycle;
+      _tableView = prefs.getBool(_kTablePrefKey) ?? false;
     });
   }
 
@@ -420,7 +432,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
           final stack = Stack(
             children: [
-              content,
+              // ⚠️ Positioned.fill مهم: من غيره الـ Stack بتدي المحتوى مقاس
+              // «فضفاض»، فالعمود بينكمش على أصغر عرض ممكن والباقي يفضل
+              // فاضي (أسود). ده اللي كان بيحصل على التاب بالعرض أول ما
+              // تفتح تاب — الـ IndexedStack مالهاش عرض طبيعي تتمدد ليه.
+              Positioned.fill(child: content),
               // 📝 فقاعة الملاحظات العائمة (تختفي مع الكيبورد عشان ماتغطيش الكتابة)
               if (!keyboardOpen) const NotesBubble(),
               // 🗂 زرار التنقّل السفلي — لوحة تنقّل سريعة بين التابات
@@ -431,10 +447,13 @@ class _HomeScreenState extends State<HomeScreen> {
           // 📐 كمبيوتر: القايمة الجانبية ثابتة على اليمين — مش محتاج
           // تفتحها وتقفلها كل مرة، وفيه مساحة تكفي الاتنين.
           if (!context.hasSideRail) return stack;
-          return Row(children: [
-            SizedBox(width: 290, child: _buildDrawer(context, prov)),
-            Expanded(child: stack),
-          ]);
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(width: 290, child: _buildDrawer(context, prov)),
+              Expanded(child: stack),
+            ],
+          );
         },
       ),
       ),
@@ -1122,9 +1141,11 @@ class _HomeScreenState extends State<HomeScreen> {
       {..._nav('filter'), 'ws': 'filter'},
       {..._nav('assets'), 'ws': 'assets'},
     ];
-    return Drawer(
-      backgroundColor: AppColors.surface,
-      child: Column(children: [
+    // ⚠️ `Drawer` مصمّم يعيش في `Scaffold.drawer` بس — بيفرض مقاسات خاصة
+    // بيه. لما حطّيته جوّه `Row` (القايمة الثابتة على الكمبيوتر) كسر ترتيب
+    // الشاشة كلها والنتيجة كانت **شاشة سودا** أول ما تفتح أي تاب بالعرض.
+    // عشان كده على الشاشة العريضة بنستخدم `Material` عادي بنفس المحتوى.
+    final body = Column(children: [
         // Header
         Container(
           width: double.infinity,
@@ -1270,8 +1291,16 @@ class _HomeScreenState extends State<HomeScreen> {
             ]),
           ),
         ),
-      ]),
-    );
+      ]);
+
+    // على الشاشة العريضة: لوح ثابت جنب المحتوى (مش Drawer).
+    if (ctx.hasSideRail) {
+      return Material(
+        color: AppColors.surface,
+        child: SafeArea(right: false, child: body),
+      );
+    }
+    return Drawer(backgroundColor: AppColors.surface, child: body);
   }
 
   /// شارة هوية المستخدم الحالي داخل هيدر الـ drawer.
@@ -1655,17 +1684,30 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 6),
           Row(children: [
             Expanded(child: _buildProviderFilterBar(prov)),
+            // 📊 تبديل بين الكروت والجدول
             Tooltip(
-              message: _allExpanded ? 'اقفل كل الخطوط' : 'افتح كل الخطوط',
+              message: _tableView ? 'رجّع الكروت' : 'وضع الجدول (يشيل أكتر)',
               child: IconButton(
                 visualDensity: VisualDensity.compact,
-                onPressed: () => setState(() => _allExpanded = !_allExpanded),
+                onPressed: () => _setTableView(!_tableView),
                 icon: Icon(
-                    _allExpanded ? Icons.unfold_less : Icons.unfold_more,
+                    _tableView ? Icons.view_agenda : Icons.table_rows,
                     size: 20,
-                    color: AppColors.blue2),
+                    color: _tableView ? AppColors.purple : AppColors.blue2),
               ),
             ),
+            if (!_tableView)
+              Tooltip(
+                message: _allExpanded ? 'اقفل كل الخطوط' : 'افتح كل الخطوط',
+                child: IconButton(
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => setState(() => _allExpanded = !_allExpanded),
+                  icon: Icon(
+                      _allExpanded ? Icons.unfold_less : Icons.unfold_more,
+                      size: 20,
+                      color: AppColors.blue2),
+                ),
+              ),
             const SizedBox(width: 6),
           ]),
         ],
@@ -2185,6 +2227,19 @@ class _HomeScreenState extends State<HomeScreen> {
     // الترتيب المحفوظ (لأن الـ indexes ساعتها مش بتاعة الترتيب الأصلي)
     // ⚠️ السحب بيشتغل بأرقام الترتيب في القايمة الكاملة — فلازم يتقفل لو
     // في فلتر شركة شغّال، وإلا الترتيب المحفوظ هيتبوّظ.
+    // 📊 وضع الجدول — سطر لكل خط، والدوسة بتفتحه في تاب
+    if (_tableView) {
+      return GroupsTable(
+        groups: groups,
+        onOpen: (g) => prov.openWorkspaceTab(
+          'group',
+          args: {'gid': g.id},
+          title: g.ownerName?.isNotEmpty == true ? g.ownerName! : g.phone,
+          emoji: '📶',
+        ),
+      );
+    }
+
     final cols = context.groupCols;
     final canReorder = !SupabaseService.isEmployee &&
         _groupSort == 'manual' &&

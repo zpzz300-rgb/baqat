@@ -1573,8 +1573,29 @@ class AppDB {
     };
   }
 
-  List<Member> membersOf(String gid) =>
-      members.where((m) => m.gid == gid).toList();
+  // ⚡ فهرس العملاء حسب المجموعة.
+  //
+  // `membersOf` كانت بتلف على **كل** العملاء في كل نداء، وبتتنادى ٣١ مرة
+  // في البرنامج — وفي رسمة واحدة للشاشة بتتنادى مرات كتير لكل خط (الديون
+  // والربح والعدد). يعني عملاء × خطوط في كل رسمة.
+  //
+  // الفهرس بيتمسح مع كل `notifyListeners` (شوف AppProvider) — يعني أي
+  // تعديل بيوصل للشاشة بيمسحه، فمستحيل يفضل قديم وانت شايف بيانات جديدة.
+  Map<String, List<Member>>? _byGid;
+  void invalidateMembersIndex() => _byGid = null;
+
+  List<Member> membersOf(String gid) {
+    final idx = _byGid ??= () {
+      final m = <String, List<Member>>{};
+      for (final x in members) {
+        (m[x.gid] ??= <Member>[]).add(x);
+      }
+      return m;
+    }();
+    // نسخة جديدة كل مرة: في أماكن بتعمل `membersOf(id)..sort(...)` والترتيب
+    // ده كان هيبوّظ الفهرس المشترك لو رجّعنا نفس اللستة.
+    return List<Member>.of(idx[gid] ?? const <Member>[]);
+  }
   double groupDebt(String gid) =>
       membersOf(gid).fold(0, (s, m) => s + (m.balance < 0 ? -m.balance : 0));
   double groupBalance(String gid) =>

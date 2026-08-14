@@ -990,6 +990,91 @@ class ExportService {
         ),
       );
 
+  // ── 📊 تصدير «اللي ظاهر قدامك» من جدول الخطوط ──────────────────
+  //
+  // فرقها عن `exportExcel`: دي بتصدّر **بالظبط** اللي شايفه دلوقتي —
+  // بعد فلتر الشركة والسيكل والترتيب اللي انت مختاره. يعني تقدر تقول
+  // «اتصالات + سيكل ٢» وتطلعهم في ملف لوحدهم.
+  static Future<void> exportGroupsTable(
+      BuildContext context, AppProvider prov, List<Group> groups) async {
+    if (groups.isEmpty) {
+      _snack(context, 'مفيش خطوط ظاهرة تتصدّر');
+      return;
+    }
+    final db = prov.db;
+    final excel = Excel.createExcel();
+    excel.delete('Sheet1');
+    final sheet = excel['الخطوط'];
+
+    sheet.appendRow(<CellValue>[
+      TextCellValue('الرقم'),
+      TextCellValue('صاحب الخط'),
+      TextCellValue('الشركة'),
+      TextCellValue('السيكل'),
+      TextCellValue('عدد العملاء'),
+      TextCellValue('الفاتورة'),
+      TextCellValue('المديونية'),
+      TextCellValue('الربح'),
+      TextCellValue('المتابع'),
+    ]);
+
+    const provNames = {
+      'vodafone': 'فودافون',
+      'etisalat': 'اتصالات',
+      'orange': 'أورانج',
+      'we': 'WE',
+    };
+
+    var totalBill = 0.0, totalDebt = 0.0, totalProfit = 0.0;
+    var totalClients = 0;
+    for (final g in groups) {
+      final bill = g.billDebt > 0 ? g.billDebt : g.lastBillAmount;
+      final debt = db.groupDebt(g.id);
+      final profit = db.groupProfit(g.id);
+      final clients = db.membersOf(g.id).length;
+      totalBill += bill;
+      totalDebt += debt;
+      totalProfit += profit;
+      totalClients += clients;
+      sheet.appendRow(<CellValue>[
+        TextCellValue(g.phone),
+        TextCellValue(g.ownerName ?? '-'),
+        TextCellValue(provNames[g.provider] ?? '-'),
+        TextCellValue(g.billingCycle ?? 'سيكل ${g.cycle}'),
+        IntCellValue(clients),
+        DoubleCellValue(bill),
+        DoubleCellValue(debt),
+        DoubleCellValue(profit),
+        TextCellValue(prov.assigneeOf(g.id) ?? '-'),
+      ]);
+    }
+
+    // صف المجاميع — نفس اللي ظاهر تحت الجدول في البرنامج
+    sheet.appendRow(<CellValue>[]);
+    sheet.appendRow(<CellValue>[
+      TextCellValue('الإجمالي (${groups.length} خط)'),
+      TextCellValue(''),
+      TextCellValue(''),
+      TextCellValue(''),
+      IntCellValue(totalClients),
+      DoubleCellValue(totalBill),
+      DoubleCellValue(totalDebt),
+      DoubleCellValue(totalProfit),
+      TextCellValue(''),
+    ]);
+
+    final bytes = excel.save();
+    if (bytes == null) {
+      _snack(context, 'فشل إنشاء الملف');
+      return;
+    }
+    final dir = await getApplicationDocumentsDirectory();
+    final ts = intl.DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
+    final file = File('${dir.path}/telecom_groups_$ts.xlsx');
+    await file.writeAsBytes(bytes);
+    await OpenFile.open(file.path);
+  }
+
   static void _snack(BuildContext context, String msg) {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)

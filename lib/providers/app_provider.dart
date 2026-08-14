@@ -335,6 +335,15 @@ class AppProvider extends ChangeNotifier {
   AppDB db = AppDB();
   bool _loading = true;
 
+  /// ⚡ أي تحديث بيوصل للشاشة بيمسح فهرس العملاء الأول.
+  /// كده الفهرس عمره ما يكون قديم: لو حاجة اتغيّرت من غير notifyListeners
+  /// فهي أصلاً مش ظاهرة على الشاشة.
+  @override
+  void notifyListeners() {
+    db.invalidateMembersIndex();
+    super.notifyListeners();
+  }
+
   // ── حالة الاتصال (قراءة-فقط أوفلاين) + Realtime ──────────────────
   bool _isOnline = true;
   RealtimeChannel? _dataChannel;
@@ -801,6 +810,9 @@ class AppProvider extends ChangeNotifier {
 
   // ─── SAVE ────────────────────────────────────────────────────
   Future<void> save() async {
+    // ⚡ أول حاجة: امسح فهرس العملاء. `save` بتتنادى بعد كل تعديل، فده
+    // بيضمن إن أي قراءة بعد التعديل تشوف الجديد حتى لو حصلت قبل الـ notify.
+    db.invalidateMembersIndex();
     // 🎭 الديمو: التعديلات في الذاكرة فقط — ممنوع الكتابة على القرص أو السحابة.
     if (kDemo) {
       notifyListeners();
