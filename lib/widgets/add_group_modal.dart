@@ -1718,6 +1718,9 @@ class _AddGroupModalState extends State<AddGroupModal> {
           : (double.tryParse(_fixedBillCtrl.text.trim()) ??
               widget.existing?.fixedBillAmount ??
               0),
+      // أساس الربح بيتظبط من شاشة التعديل / كارت الفاتورة — هنا بنحافظ
+      // عليه بس عشان ما يضيعش لما تعدّل الخط من هنا.
+      profitBillAmount: widget.existing?.profitBillAmount,
       billDebt: billDebt,
       groupNotes: widget.existing?.groupNotes ?? [],
       lastNotesMonth: widget.existing?.lastNotesMonth,

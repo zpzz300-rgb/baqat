@@ -121,7 +121,20 @@ class Group {
 
   // ── بيانات مالية للمجموعة ─────────────────────────────────────
   String? groupInvoiceName; // اسم الفاتورة الرئيسي
+  /// 💰 السعر الخام — اللي الشركة بتاخده فعلاً في الفاتورة.
+  /// للخطوط «شهر وشهر» ده رقم الفاتورة الكبيرة (٤٢٥٠ مثلاً) اللي بتنزل
+  /// كل شهرين، مش تكلفة الشهر الواحد. للفلوس والمديونية بس.
   double fixedBillAmount; // المبلغ الثابت الشهري للفاتورة
+  /// 📊 أساس الربح — تكلفة **الشهر الواحد** اللي الربح بيتحسب عليها.
+  ///
+  /// ليه منفصل: فاتورة «شهر وشهر» بتنزل ٤٢٥٠ عشان هي بتغطي شهرين، فلو
+  /// حسبنا الربح عليها الشهر ده يبان خسران والشهر اللي بعده يبان مكسبان
+  /// وهو مش كده. الرقم ده انت اللي بتكتبه بإيدك (مش قسمة تلقائية على ٢،
+  /// لأن القسمة مش قاعدة ثابتة في كل الخطوط).
+  ///
+  /// null = ما اتكتبش لسه → بنرجع لـ [fixedBillAmount] زي ما كان بالظبط،
+  /// فمفيش رقم قديم بيتغيّر لوحده. شوف [profitBasis].
+  double? profitBillAmount;
   // نظام الفوترة لمراجعة الفواتير فقط (لا علاقة له بحساب الأرباح):
   //   'fixed'     = ثابت: تنزل فاتورة كل شهر
   //   'bimonthly' = شهر وشهر: تنزل فاتورة شهر، والشهر اللي بعده ببلاش
@@ -221,6 +234,7 @@ class Group {
     List<Map<String, dynamic>>? pointsRedemptions,
     this.groupInvoiceName,
     this.fixedBillAmount = 0,
+    this.profitBillAmount,
     this.billingSystem = 'fixed',
     this.voucherValue = 0,
     this.voucherPeriod = '6m',
@@ -299,6 +313,7 @@ class Group {
             List<Map<String, dynamic>>.from(j['pointsRedemptions'] ?? []),
         groupInvoiceName: j['groupInvoiceName'],
         fixedBillAmount: (j['fixedBillAmount'] ?? 0).toDouble(),
+        profitBillAmount: (j['profitBillAmount'] as num?)?.toDouble(),
         billingSystem: j['billingSystem'] ?? 'fixed',
         voucherValue: (j['voucherValue'] ?? 0).toDouble(),
         voucherPeriod: j['voucherPeriod'] ?? '6m',
@@ -372,6 +387,7 @@ class Group {
         'pointsRedemptions': pointsRedemptions,
         'groupInvoiceName': groupInvoiceName,
         'fixedBillAmount': fixedBillAmount,
+        'profitBillAmount': profitBillAmount,
         'billingSystem': billingSystem,
         'voucherValue': voucherValue,
         'voucherPeriod': voucherPeriod,
@@ -524,6 +540,32 @@ class Group {
         .where((b) => b['month'] == month)
         .fold<double>(0, (s, b) => s + ((b['cost'] as num?)?.toDouble() ?? 0));
   }
+
+  /// هل الخط نظامه «شهر وشهر»؟ (فاتورة شهر، والشهر اللي بعده ببلاش)
+  bool get isBimonthly => billingSystem == 'bimonthly';
+
+  /// 📊 التكلفة اللي الربح بيتحسب عليها — **تكلفة الشهر الواحد**.
+  ///
+  /// لو [profitBillAmount] متكتوب بنستخدمه. لو لأ بنرجع لـ
+  /// [fixedBillAmount] زي السلوك القديم بالظبط، فمفيش رقم ربح قديم
+  /// بيتغيّر لوحده لحد ما تدخل تكتب الأساس بنفسك.
+  double get profitBasis => profitBillAmount ?? fixedBillAmount;
+
+  /// تكلفة الخط في شاشات الربح والتقارير: أساس الربح، ولو مش متكتوب
+  /// خالص بنقع على آخر فاتورة فعلية بدل ما نعرض صفر.
+  double get profitCost =>
+      profitBasis > 0 ? profitBasis : (actualBillAmount ?? 0);
+
+  /// اقتراح أساس الربح لخط «شهر وشهر» = الفاتورة الكبيرة ÷ ٢.
+  /// **اقتراح بس** — بيتعرض في زرار في شاشة التعديل ومابيتطبّقش لوحده،
+  /// لأن القسمة على ٢ مش قاعدة صحيحة في كل الخطوط.
+  double get suggestedProfitBasis =>
+      isBimonthly ? fixedBillAmount / 2 : fixedBillAmount;
+
+  /// هل الخط ده لسه محتاج تحدّدله أساس ربح؟ (شهر وشهر وما اتكتبش)
+  /// بنستخدمها عشان نبيّن تنبيه: الربح دلوقتي بيتحسب على الفاتورة الكبيرة.
+  bool get needsProfitBasis =>
+      isBimonthly && profitBillAmount == null && fixedBillAmount > 0;
 }
 
 class Member {
@@ -1321,6 +1363,17 @@ class BillingAccount {
   bool shiftAIsCurrent;
   int orderIndex;
 
+  /// 📌 تثبيت الدور بإيدك — بيغلب الاستنتاج التلقائي.
+  ///
+  /// انت بتقول مرة واحدة «شهر ٨ الدور على الشق الأول» والبرنامج يكمّل
+  /// بالتبادل قدّام وورا لوحده، فمش هتقعد تكتبه كل شهر. الاستنتاج من
+  /// تاريخ الفواتير بيغلط لما شهر يعدّي من غير ما تسجّل فيه، وساعتها
+  /// الدور بيتقلب غلط وميعادش يظبط لوحده — التثبيت هو اللي بيصلّحه.
+  ///
+  /// null = مفيش تثبيت، اشتغل بالاستنتاج زي الأول بالظبط.
+  String? turnPinMonth; // '2026-08'
+  bool turnPinIsShiftA; // الدور على الشق الأول في الشهر المثبّت
+
   BillingAccount({
     required this.id,
     required this.name,
@@ -1328,6 +1381,8 @@ class BillingAccount {
     List<String>? shiftB,
     this.shiftAIsCurrent = true,
     this.orderIndex = 0,
+    this.turnPinMonth,
+    this.turnPinIsShiftA = true,
   })  : shiftA = shiftA ?? [],
         shiftB = shiftB ?? [];
 
@@ -1338,6 +1393,8 @@ class BillingAccount {
         shiftB: List<String>.from(j['shiftB'] ?? []),
         shiftAIsCurrent: j['shiftAIsCurrent'] ?? true,
         orderIndex: (j['orderIndex'] ?? 0) as int,
+        turnPinMonth: j['turnPinMonth'] as String?,
+        turnPinIsShiftA: j['turnPinIsShiftA'] ?? true,
       );
 
   Map<String, dynamic> toJson() => {
@@ -1347,6 +1404,8 @@ class BillingAccount {
         'shiftB': shiftB,
         'shiftAIsCurrent': shiftAIsCurrent,
         'orderIndex': orderIndex,
+        'turnPinMonth': turnPinMonth,
+        'turnPinIsShiftA': turnPinIsShiftA,
       };
 }
 
@@ -1522,6 +1581,81 @@ class AppDB {
         'updatedAt': updatedAt,
       };
 
+  // ─── 📅 تأريخ الفاتورة: يوم النزول ≠ الفترة المغطّاة ──────────
+  //
+  // دول حاجتين مختلفين والبرنامج كان بيخلطهم في خانة واحدة:
+  //   • فاتورة ١/٥ = نزلت يوم ١ شهر ٥، وبتغطي شهر ٤ **كله**.
+  //   • فاتورة ١٥/٥ = نزلت يوم ١٥، وبتغطي من ١٥/٤ لـ ١٥/٥ — دي سيكل ٢.
+  //
+  // السيكل هو اللي بيحدد أنهي حالة، عشان كده الدالتين دول بيسألوا الخط.
+
+  /// هل الخط سيكله في نص الشهر (يوم ١٥ = سيكل ٢)؟
+  bool groupIsMidCycle(Group g) =>
+      g.billingCycle == 'mid' ||
+      g.billingCycle == 'cycle2' ||
+      (g.billingCycle == null && g.cycle == '2');
+
+  /// وسم النزول زي ما بتقوله بلسانك: «فاتورة 1/5».
+  /// بيتاخد من `date` (تاريخ النزول الفعلي) مش من `month`.
+  String billIssueLabel(CompanyBill b) {
+    final p = b.date.split('/');
+    if (p.length < 2) return 'فاتورة ${b.month}';
+    return 'فاتورة ${p[0]}/${p[1]}';
+  }
+
+  /// الفترة اللي الفاتورة بتغطيها — الفاتورة دايماً بتغطي اللي **فات**.
+  /// بيرجّع نص فاضي لو الشهر مش مقروء.
+  String billCoveredPeriod(CompanyBill b) {
+    final mp = b.month.split('-');
+    if (mp.length < 2) return '';
+    final y = int.tryParse(mp[0]);
+    final m = int.tryParse(mp[1]);
+    if (y == null || m == null) return '';
+    final prev = DateTime(y, m - 1); // بيلف السنة لوحده لو الشهر ١
+    final g = groups.firstWhere((x) => x.id == b.groupId,
+        orElse: () => Group(id: '', phone: ''));
+    if (groupIsMidCycle(g)) {
+      // يوم النزول الحقيقي أدق من الافتراضي، فلو مكتوب نستخدمه
+      final day = int.tryParse(b.date.split('/').first) ?? 15;
+      return 'بتغطي من $day/${prev.month} لـ $day/$m';
+    }
+    return 'بتغطي شهر ${prev.month} كله';
+  }
+
+  // ─── حماية الشهور ────────────────────────────────────────────
+  //
+  // أرقام المجموعة (actualBillAmount / lastBillAmount) معناها «آخر فاتورة
+  // نزلت». عشان كده تعديل فاتورة شهر قديم ما يصحّش يكتب عليها، وإلا البرنامج
+  // يفتكر إن مبلغ شهر ٥ هو فاتورة النهاردة وتلاقي أرقام الشهر الحالي اتغيّرت.
+  //
+  // المديونية (billDebt) مستثناة عن قصد: لو صحّحت فاتورة قديمة من ١٠٠٠ لـ
+  // ١٢٠٠ فانت فعلاً بقيت مدين بـ ٢٠٠ زيادة، والفرق ده لازم يتحسب مهما كان شهرها.
+
+  /// أحدث شهر متسجّل فيه فاتورة للخط [gid]، مع تجاهل الفاتورة [exceptId].
+  /// بيرجّع null لو مفيش فواتير. صيغة الشهر «2026-08» مضبوطة بصفر بادئ،
+  /// فالمقارنة النصية بتدّي ترتيب زمني صحيح من غير ما نحلّل تواريخ.
+  String? latestBillMonth(String gid, {String? exceptId}) {
+    String? top;
+    for (final b in companyBills) {
+      if (b.groupId != gid) continue;
+      if (exceptId != null && b.id == exceptId) continue;
+      if (top == null || b.month.compareTo(top) > 0) top = b.month;
+    }
+    return top;
+  }
+
+  /// هل [bill] هي أحدث فاتورة لخطها؟ يعني تعديلها المفروض يتعكس على
+  /// أرقام المجموعة. لو فاتورة شهر قديم → false ونسيب المجموعة زي ما هي.
+  bool isLatestBill(CompanyBill bill) =>
+      monthIsLatestFor(bill.groupId, bill.month, exceptId: bill.id);
+
+  /// نفس الفكرة بالشهر بس — للاستخدام **قبل** ما الفاتورة تتضاف للّستة،
+  /// وإلا الفاتورة الجديدة بتقارن نفسها بنفسها وتطلع دايماً «الأحدث».
+  bool monthIsLatestFor(String gid, String month, {String? exceptId}) {
+    final top = latestBillMonth(gid, exceptId: exceptId);
+    return top == null || month.compareTo(top) >= 0;
+  }
+
   // ─── Stats ───────────────────────────────────────────────────
   double get totalDebt =>
       members.fold(0, (s, m) => s + (m.balance < 0 ? -m.balance : 0));
@@ -1629,15 +1763,15 @@ class AppDB {
     return groupExtraLines(gid) * fee;
   }
 
-  /// ربح مجموعة — يعتمد حصراً على fixedBillAmount (المبلغ الثابت المتفق عليه).
+  /// ربح مجموعة — يعتمد حصراً على [Group.profitBasis] (تكلفة الشهر الواحد).
   /// actualBillAmount هو للعرض والتذكير فقط ولا يدخل في حساب الربح أبداً.
   /// Phase 3: نخصم تكلفة الباقات الإضافية المؤقتة للشهر الحالي
   double groupProfit(String gid) {
     final g = groups.firstWhere((x) => x.id == gid,
         orElse: () => Group(id: '', phone: ''));
     final income = membersOf(gid).fold<double>(0, (s, m) => s + m.price);
-    // fixedBillAmount هو التكلفة الوحيدة المعتمدة في الربح
-    final cost = g.fixedBillAmount;
+    // أساس الربح = تكلفة الشهر الواحد، مش رقم الفاتورة الكبيرة
+    final cost = g.profitBasis;
     if (cost <= 0 && g.type != 'manual') return 0; // لا تكلفة محددة → لا ربح محسوب
     // سعر العميل الإضافي يُحسب حسب إعدادات الخط (الحد الأقصى + السعر)،
     // مش حسب نوع 3800/1800 — groupExtraLineFee بيرجّع صفر لو مفيش إعدادات.
@@ -1682,7 +1816,9 @@ class AppDB {
     final g = groups.firstWhere((x) => x.id == gid,
         orElse: () => Group(id: '', phone: ''));
     final income = membersOf(gid).fold<double>(0, (s, m) => s + m.price);
-    final fixedBill = g.fixedBillAmount;
+    // لازم يبقى نفس اللي groupProfit بيستخدمه بالظبط، وإلا التفصيل
+    // مايطابقش البادج. profitBasis = تكلفة الشهر الواحد.
+    final fixedBill = g.profitBasis;
     final extraFee = groupExtraLineFee(gid);
     final now = DateTime.now();
     final month = '${now.year}-${now.month.toString().padLeft(2, '0')}';
@@ -1696,6 +1832,10 @@ class AppDB {
     return {
       'income': income,
       'fixedBill': fixedBill,
+      // 💰 السعر الخام اللي الشركة بتاخده — للعرض جنب أساس الربح عشان
+      // تشوف الفرق بعينك في الخطوط «شهر وشهر». مش داخل في المعادلة.
+      'rawBill': g.fixedBillAmount,
+      'isBimonthly': g.isBimonthly ? 1 : 0,
       'extraFee': extraFee,
       'extraBundle': extraBundle,
       'points': g.monthlyPointsValue,

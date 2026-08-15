@@ -178,61 +178,36 @@ class _AuditCardState extends State<_AuditCard> {
                                               AppColors.muted)),
                               ]),
                         ),
+                        // 📅 يوم النزول (١/٥) مش شهر التسجيل — ده اللي
+                        // بتتكلم بيه، والفترة المغطّاة تحته في سطر لوحدها.
                         _badge(
-                          '📅 ${b.month}',
+                          '📅 ${db.billIssueLabel(b)}',
                           AppColors.blueLight,
                           AppColors.blue2,
                         ),
                       ]),
-                      // ── Linked sub-lines (this bill covers them too) ──
                       Builder(builder: (_) {
-                        final children = db.groups
-                            .where((x) => x.parentGroupId == g.id)
-                            .toList();
-                        if (children.isEmpty) return const SizedBox.shrink();
-                        return Container(
-                          margin: const EdgeInsets.only(top: 6),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF3E5F5),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                                color: const Color(0xFFCE93D8)),
+                        final covered = db.billCoveredPeriod(b);
+                        if (covered.isEmpty) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Text(
+                            '⏱ $covered'
+                            '${db.groupIsMidCycle(g) ? '  •  سيكل ٢' : ''}',
+                            style: GoogleFonts.cairo(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.muted),
                           ),
-                          child: Row(children: [
-                            const Icon(Icons.link,
-                                size: 13,
-                                color: Color(0xFF6A1B9A)),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                'ضُمّ معاه ${children.length} خط: '
-                                '${children.map((c) => c.phone).join(' • ')}',
-                                style: GoogleFonts.cairo(
-                                    fontSize: 10,
-                                    color:
-                                        const Color(0xFF6A1B9A),
-                                    fontWeight:
-                                        FontWeight.w700),
-                              ),
-                            ),
-                            GestureDetector(
-                              onTap: () =>
-                                  _showUnlinkDialog(context, children),
-                              child: const Padding(
-                                padding:
-                                    EdgeInsets.only(right: 4),
-                                child: Icon(
-                                    Icons.settings_outlined,
-                                    size: 14,
-                                    color:
-                                        Color(0xFF6A1B9A)),
-                              ),
-                            ),
-                          ]),
                         );
                       }),
+                      // ── Linked sub-lines (this bill covers them too) ──
+                      LinkedLinesStrip(
+                        db: db,
+                        group: g,
+                        onManage: () => _showUnlinkDialog(
+                            context, LinkedLinesStrip.childrenOf(db, g.id)),
+                      ),
                       const SizedBox(height: 6),
                       // Amounts row
                       Row(children: [
@@ -328,6 +303,18 @@ class _AuditCardState extends State<_AuditCard> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
                 child: _billingSystemToggle(),
+              ),
+            // ── السعر الخام + أساس الربح (بندين منفصلين) ──────────
+            if (_expanded)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                child: _pricingBox(),
+              ),
+            // ── الدور: فاتت على مين والجاية على مين ───────────────
+            if (_expanded)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                child: _turnBox(),
               ),
             // ── سجل تعديلات المبلغ (لو اتصحح قبل كده) ────────────
             if (_expanded && b.editHistory.isNotEmpty)
@@ -575,7 +562,357 @@ class _AuditCardState extends State<_AuditCard> {
           opt('🔂 شهر وشهر', isBi,
               () => widget.prov.setGroupBillingSystem(g.id, 'bimonthly')),
         ]),
+        // ── السيكل: هو اللي بيحدد الفاتورة بتغطي إيه ──────────
+        // سيكل ١ بتنزل يوم ١ وبتغطي الشهر اللي فات كله.
+        // سيكل ٢ بتنزل يوم ١٥ وبتغطي من ١٥ للـ ١٥.
+        const SizedBox(height: 8),
+        Text('📆 سيكل الخط:',
+            style: GoogleFonts.cairo(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: AppColors.muted)),
+        const SizedBox(height: 5),
+        Row(children: [
+          opt('١ — تنزل يوم ١', !db.groupIsMidCycle(g),
+              () => widget.prov.setGroupBillingCycle(g.id, 'cycle1')),
+          const SizedBox(width: 6),
+          opt('٢ — تنزل يوم ١٥', db.groupIsMidCycle(g),
+              () => widget.prov.setGroupBillingCycle(g.id, 'cycle2')),
+        ]),
       ]),
+    );
+  }
+
+  // ── 🔁 الدور: الفاتورة اللي فاتت كانت على مين والجاية على مين ──
+  //
+  // الحساب الواحد ممكن يكون فيه شقّين بيتبادلوا الفاتورة. البرنامج بيستنتج
+  // الدور من تاريخ الفواتير، بس الاستنتاج بيغلط لو شهر عدّى من غير تسجيل.
+  // عشان كده فيه تثبيت يدوي بيغلبه: تقول مرة «شهر ٨ على الشق الأول»
+  // والباقي بالتبادل قدّام وورا لوحده.
+  Widget _turnBox() {
+    final acc = widget.prov.accountOfGroup(b.groupId);
+    if (acc == null) return const SizedBox.shrink();
+
+    final prevM = _prevMonthOf(b.month);
+    final nextM = _nextMonthOf(b.month);
+    final pinned = acc.turnPinMonth != null;
+
+    Widget line(String label, String month, Color color) {
+      final phones = widget.prov.turnLabelFor(b.groupId, month);
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(children: [
+          SizedBox(
+            width: 78,
+            child: Text(label,
+                style: GoogleFonts.cairo(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.muted)),
+          ),
+          Expanded(
+            child: Text(phones.isEmpty ? '—' : phones,
+                style: GoogleFonts.cairo(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: color)),
+          ),
+        ]),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF3E0),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFFFCC80)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+            child: Text('🔁 الدور في حساب «${acc.name}»',
+                style: GoogleFonts.cairo(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    color: const Color(0xFFE65100))),
+          ),
+          Text(pinned ? '📌 مثبّت' : '🤖 تلقائي',
+              style: GoogleFonts.cairo(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.muted)),
+        ]),
+        const SizedBox(height: 4),
+        line('اللي فاتت:', prevM, AppColors.muted),
+        line('دي:', b.month, const Color(0xFFE65100)),
+        line('الجاية:', nextM, const Color(0xFF1565C0)),
+        const SizedBox(height: 6),
+        Row(children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: () => _showPinTurnDialog(context, acc),
+              child: Text('📌 ثبّت الدور بإيدي',
+                  style: GoogleFonts.cairo(
+                      fontSize: 10, fontWeight: FontWeight.w800)),
+            ),
+          ),
+          if (pinned) ...[
+            const SizedBox(width: 6),
+            OutlinedButton(
+              onPressed: () => widget.prov.clearAccountTurnPin(acc.id),
+              child: Text('🤖 رجّعه تلقائي',
+                  style: GoogleFonts.cairo(
+                      fontSize: 10, fontWeight: FontWeight.w800)),
+            ),
+          ],
+        ]),
+      ]),
+    );
+  }
+
+  void _showPinTurnDialog(BuildContext context, BillingAccount acc) {
+    String names(List<String> ids) => ids
+        .map((id) => db.groups
+            .firstWhere((g) => g.id == id, orElse: () => Group(id: '', phone: ''))
+            .phone)
+        .where((p) => p.isNotEmpty)
+        .join(' • ');
+
+    void pin(bool isShiftA) {
+      widget.prov.pinAccountTurn(acc.id, b.month, isShiftA);
+      Navigator.pop(context);
+    }
+
+    showDialog(
+      context: context,
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('📌 مين الدور عليه في ${_monthLabel(b.month)}؟',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 14)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'اختار مرة واحدة والبرنامج هيكمّل بالتبادل لوحده قدّام وورا — '
+                'مش هتقعد تكتبه كل شهر.',
+                style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: () => pin(true),
+                child: Text('الشق الأول: ${names(acc.shiftA)}',
+                    style: GoogleFonts.cairo(
+                        fontSize: 11, fontWeight: FontWeight.w800)),
+              ),
+              const SizedBox(height: 8),
+              ElevatedButton(
+                onPressed: () => pin(false),
+                child: Text('الشق التاني: ${names(acc.shiftB)}',
+                    style: GoogleFonts.cairo(
+                        fontSize: 11, fontWeight: FontWeight.w800)),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('إلغاء', style: GoogleFonts.cairo())),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── 💰 التسعير: السعر الخام vs أساس الربح ─────────────────────
+  //
+  // ليه بندين مش بند واحد: فاتورة «شهر وشهر» بتنزل ٤٢٥٠ عشان هي بتغطي
+  // شهرين. لو حسبنا الربح على الرقم ده، الشهر اللي فيه فاتورة يبان خسران
+  // والشهر اللي بعده يبان مكسبان — وهو مش كده. فالخام للفلوس والمديونية،
+  // وأساس الربح لتكلفة الشهر الواحد.
+  Widget _pricingBox() {
+    final idx = db.groups.indexWhere((x) => x.id == b.groupId);
+    if (idx < 0) return const SizedBox.shrink();
+    final g = db.groups[idx];
+
+    Widget row(String icon, String label, String value, String hint,
+        VoidCallback onTap, Color color) {
+      return InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 6),
+          child: Row(children: [
+            Text(icon, style: const TextStyle(fontSize: 13)),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: GoogleFonts.cairo(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.muted)),
+                  Text(hint,
+                      style: GoogleFonts.cairo(
+                          fontSize: 9, color: AppColors.muted)),
+                ],
+              ),
+            ),
+            Text(value,
+                style: GoogleFonts.cairo(
+                    fontSize: 13, fontWeight: FontWeight.w900, color: color)),
+            const SizedBox(width: 4),
+            Icon(Icons.edit, size: 12, color: AppColors.muted),
+          ]),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F8E9),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFC5E1A5)),
+      ),
+      child: Column(children: [
+        row(
+          '💰',
+          'سعر فاتورة الشركة الخام',
+          g.fixedBillAmount > 0 ? '${g.fixedBillAmount.toStringAsFixed(0)} ج' : '— اضغط',
+          g.isBimonthly ? 'اللي بينزل كل شهرين' : 'اللي بينزل كل شهر',
+          () => _editPricingDialog(context, g, raw: true),
+          const Color(0xFF2E7D32),
+        ),
+        const Divider(height: 8),
+        row(
+          '📊',
+          'أساس الربح (الشهر الواحد)',
+          g.profitBillAmount != null
+              ? '${g.profitBillAmount!.toStringAsFixed(0)} ج'
+              : 'زي الخام',
+          'الربح بيتحسب على الرقم ده بس',
+          () => _editPricingDialog(context, g, raw: false),
+          const Color(0xFF1565C0),
+        ),
+        // تنبيه: خط شهر وشهر والربح لسه بيتحسب على الفاتورة الكبيرة
+        if (g.needsProfitBasis)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Row(children: [
+              const Icon(Icons.info_outline,
+                  size: 12, color: Color(0xFFe65100)),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                    'الخط شهر وشهر والربح لسه بيتحسب على ${g.fixedBillAmount.toStringAsFixed(0)} ج — '
+                    'اكتب أساس الربح عشان الأرقام تظبط.',
+                    style: GoogleFonts.cairo(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFFe65100))),
+              ),
+            ]),
+          ),
+      ]),
+    );
+  }
+
+  /// تعديل السعر الخام أو أساس الربح. [raw] = true للخام.
+  void _editPricingDialog(BuildContext context, Group g, {required bool raw}) {
+    final ctrl = TextEditingController(
+      text: raw
+          ? (g.fixedBillAmount > 0 ? g.fixedBillAmount.toStringAsFixed(0) : '')
+          : (g.profitBillAmount?.toStringAsFixed(0) ?? ''),
+    );
+    showDialog(
+      context: context,
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(raw ? '💰 سعر فاتورة الشركة الخام' : '📊 أساس الربح',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 15)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                raw
+                    ? 'الرقم اللي الشركة بتاخده فعلاً. ملوش دعوة بالربح خالص.'
+                    : 'تكلفة الشهر الواحد اللي الربح بيتحسب عليها. سيبها فاضية '
+                        'عشان ترجع تتحسب على السعر الخام.',
+                style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                textDirection: TextDirection.ltr,
+                decoration: InputDecoration(
+                  labelText: 'المبلغ (ج)',
+                  labelStyle: GoogleFonts.cairo(fontSize: 13),
+                  border:
+                      OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+              // اقتراح ÷ ٢ للخطوط اللي شهر وشهر — اقتراح بس، مابيتطبّقش لوحده
+              // لأن القسمة على ٢ مش قاعدة صحيحة في كل الخطوط.
+              if (!raw && g.isBimonthly && g.fixedBillAmount > 0) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () => ctrl.text =
+                      g.suggestedProfitBasis.toStringAsFixed(0),
+                  icon: const Icon(Icons.calculate, size: 16),
+                  label: Text(
+                      'اقتراح: ${g.fixedBillAmount.toStringAsFixed(0)} ÷ ٢ = '
+                      '${g.suggestedProfitBasis.toStringAsFixed(0)} ج',
+                      style: GoogleFonts.cairo(
+                          fontSize: 11, fontWeight: FontWeight.w800)),
+                ),
+              ],
+              const SizedBox(height: 8),
+              Text(
+                raw
+                    ? '⚠️ التغيير بيسري على الفواتير الجاية. الفواتير المتسجّلة '
+                        'محتفظة بأرقامها ومش هتتغيّر.'
+                    : '⚠️ بيأثر على شاشة الأرباح بس — مايمسّش المديونية ولا '
+                        'مبالغ الفواتير.',
+                style: GoogleFonts.cairo(
+                    fontSize: 10, color: const Color(0xFFe65100)),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('إلغاء', style: GoogleFonts.cairo())),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.green),
+              onPressed: () {
+                final txt = ctrl.text.trim();
+                final v = double.tryParse(txt);
+                if (raw) {
+                  if (v != null && v >= 0) widget.prov.setGroupFixedBill(g.id, v);
+                } else {
+                  // فاضية = ارجع للسعر الخام
+                  widget.prov.setGroupProfitBill(g.id, txt.isEmpty ? null : v);
+                }
+                Navigator.pop(context);
+              },
+              child: Text('حفظ',
+                  style: GoogleFonts.cairo(
+                      color: Colors.white, fontWeight: FontWeight.w800)),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

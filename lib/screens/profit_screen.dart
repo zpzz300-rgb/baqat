@@ -282,7 +282,7 @@ class _GroupsTabState extends State<_GroupsTab> {
 
   bool _matchStatus(Group g) {
     final db = widget.db;
-    final bill = g.fixedBillAmount > 0 ? g.fixedBillAmount : (g.actualBillAmount ?? 0);
+    final bill = g.profitCost;
     final profit = db.groupProfit(g.id);
     switch (_status) {
       case 'winning': return bill > 0 && profit > 0;
@@ -622,7 +622,7 @@ class _GroupProfitCardState extends State<_GroupProfitCard> {
     final db = widget.db;
     final members = db.membersOf(g.id);
     final income = members.fold<double>(0, (s, m) => s + m.price);
-    final bill = g.fixedBillAmount > 0 ? g.fixedBillAmount : (g.actualBillAmount ?? 0);
+    final bill = g.profitCost;
     final profit = db.groupProfit(g.id);
     final debt = db.groupDebt(g.id);
     final giftP = g.giftProfit;
@@ -848,7 +848,7 @@ class _TypesTab extends StatelessWidget {
       providers.putIfAbsent(p, () => _ProvStats());
       final members = db.membersOf(g.id);
       providers[p]!.income += members.fold(0, (s, m) => s + m.price);
-      providers[p]!.bill += g.fixedBillAmount > 0 ? g.fixedBillAmount : (g.actualBillAmount ?? 0);
+      providers[p]!.bill += g.profitCost;
       providers[p]!.debt += db.groupDebt(g.id);
       providers[p]!.groups++;
     }
@@ -1444,7 +1444,7 @@ class _AnalysisTab extends StatelessWidget {
     for (final g in db.groups) {
       final p = g.provider ?? 'غير محدد';
       final income = db.membersOf(g.id).fold<double>(0, (s, m) => s + m.price);
-      final bill = g.fixedBillAmount > 0 ? g.fixedBillAmount : (g.actualBillAmount ?? 0);
+      final bill = g.profitCost;
       final cur = byProv[p] ?? (income: 0.0, bill: 0.0);
       byProv[p] = (income: cur.income + income, bill: cur.bill + bill);
     }
@@ -1466,7 +1466,7 @@ class _AnalysisTab extends StatelessWidget {
   List<Widget> _lossLines(AppDB db) {
     final losers = <(Group, double)>[];
     for (final g in db.groups) {
-      final bill = g.fixedBillAmount > 0 ? g.fixedBillAmount : (g.actualBillAmount ?? 0);
+      final bill = g.profitCost;
       if (bill <= 0) continue;
       final profit = db.groupProfit(g.id);
       if (profit < 0) losers.add((g, profit));

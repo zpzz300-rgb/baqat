@@ -26,6 +26,7 @@ class _EditGroupModalState extends State<EditGroupModal> {
   late TextEditingController _notesCtrl;
   late TextEditingController _invoiceNameCtrl;
   late TextEditingController _fixedAmountCtrl;
+  late TextEditingController _profitBillCtrl;
   late TextEditingController _voucherValueCtrl;
   late TextEditingController _manualBillCtrl;
   // Phase 2: Master Line
@@ -62,6 +63,9 @@ class _EditGroupModalState extends State<EditGroupModal> {
     _fixedAmountCtrl = TextEditingController(
         text:
             g.fixedBillAmount > 0 ? g.fixedBillAmount.toStringAsFixed(0) : '');
+    // فاضية = الربح بيتحسب على السعر الخام (السلوك القديم بالظبط)
+    _profitBillCtrl = TextEditingController(
+        text: g.profitBillAmount?.toStringAsFixed(0) ?? '');
     _voucherValueCtrl = TextEditingController(
         text: g.voucherValue > 0 ? g.voucherValue.toStringAsFixed(0) : '');
     _manualBillCtrl = TextEditingController(
@@ -111,6 +115,7 @@ class _EditGroupModalState extends State<EditGroupModal> {
     _notesCtrl.dispose();
     _invoiceNameCtrl.dispose();
     _fixedAmountCtrl.dispose();
+    _profitBillCtrl.dispose();
     _voucherValueCtrl.dispose();
     _manualBillCtrl.dispose();
     _totalMinutesCtrl.dispose();
@@ -219,13 +224,47 @@ class _EditGroupModalState extends State<EditGroupModal> {
                 Row(children: [
                   Expanded(
                     child: AppFormField(
-                      label: 'المبلغ الثابت (ج)',
+                      label: '💰 سعر فاتورة الشركة الخام (ج)',
                       controller: _fixedAmountCtrl,
                       keyboardType: TextInputType.number,
+                      hint: 'اللي الشركة بتاخده فعلاً',
                       onChanged: (_) => setState(() {}),
                     ),
                   ),
                 ]),
+                const SizedBox(height: 10),
+                // 📊 أساس الربح — منفصل عن الخام.
+                // فاتورة «شهر وشهر» بتنزل كبيرة عشان بتغطي شهرين، فلو
+                // حسبنا الربح عليها الشهر ده يبان خسران واللي بعده مكسبان.
+                Row(children: [
+                  Expanded(
+                    child: AppFormField(
+                      label: '📊 أساس الربح — الشهر الواحد (ج)',
+                      controller: _profitBillCtrl,
+                      keyboardType: TextInputType.number,
+                      hint: 'سيبها فاضية = زي الخام',
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  if (widget.group.isBimonthly && fixed > 0) ...[
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      onPressed: () => setState(() =>
+                          _profitBillCtrl.text = (fixed / 2).toStringAsFixed(0)),
+                      child: Text('÷ ٢',
+                          style: GoogleFonts.cairo(
+                              fontSize: 13, fontWeight: FontWeight.w900)),
+                    ),
+                  ],
+                ]),
+                if (widget.group.isBimonthly && _profitBillCtrl.text.trim().isEmpty && fixed > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                        'ℹ️ الخط شهر وشهر والربح لسه بيتحسب على ${fixed.toStringAsFixed(0)} ج كاملة.',
+                        style: GoogleFonts.cairo(
+                            fontSize: 10, color: const Color(0xFFe65100))),
+                  ),
                 const SizedBox(height: 10),
                 Text('🎫 القسيمة الذكية',
                     style: GoogleFonts.cairo(
@@ -888,9 +927,13 @@ class _EditGroupModalState extends State<EditGroupModal> {
     final prov = context.read<AppProvider>();
     final g = widget.group;
     final isManual = _type == 'manual';
+    // الخطوط اليدوية بتاخد رقمها من _manualBillCtrl، والعادية من خانة
+    // «سعر فاتورة الشركة الخام». قبل كده العادية كانت بترجّع القيمة القديمة
+    // مهما كتبت، فالتعديل من هنا كان بيضيع.
+    // لو الخانة فاضية بنسيب القديم زي ما هو — ما بنصفّرش حاجة.
     final manualBill = isManual
         ? (double.tryParse(_manualBillCtrl.text.trim()) ?? g.fixedBillAmount)
-        : g.fixedBillAmount;
+        : (double.tryParse(_fixedAmountCtrl.text.trim()) ?? g.fixedBillAmount);
 
     // For manual groups: if bill amount changed, update billDebt by the difference
     double newBillDebt = g.billDebt;
@@ -935,6 +978,8 @@ class _EditGroupModalState extends State<EditGroupModal> {
               ? _invoiceNameCtrl.text.trim()
               : null),
       fixedBillAmount: manualBill,
+      // أساس الربح منفصل عن الخام — لازم يتمرّر هنا وإلا بيضيع مع كل تعديل
+      profitBillAmount: double.tryParse(_profitBillCtrl.text.trim()),
       voucherValue:
           isManual ? 0 : (double.tryParse(_voucherValueCtrl.text) ?? 0),
       voucherPeriod: _voucherPeriod,

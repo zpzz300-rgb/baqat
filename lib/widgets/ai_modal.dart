@@ -236,7 +236,7 @@ class _AiModalState extends State<AiModal> {
   }
 
   double _bill(Group g) =>
-      g.fixedBillAmount > 0 ? g.fixedBillAmount : (g.actualBillAmount ?? 0);
+      g.profitCost;
   String _gName(Group g) =>
       g.ownerName?.isNotEmpty == true ? g.ownerName! : g.phone;
 

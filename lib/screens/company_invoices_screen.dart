@@ -11,6 +11,7 @@ import '../services/app_search.dart';
 import '../services/view_prefs.dart';
 import '../services/export_service.dart';
 import '../widgets/app_search_bar.dart';
+import '../widgets/linked_lines_strip.dart';
 
 part 'company_invoices_audit_card.dart';
 part 'company_invoices_expected_card.dart';
@@ -27,6 +28,12 @@ String _monthKey(DateTime d) =>
 String _prevMonthOf(String month) {
   final p = month.split('-');
   final d = DateTime(int.parse(p[0]), int.parse(p[1]) - 1);
+  return _monthKey(d);
+}
+
+String _nextMonthOf(String month) {
+  final p = month.split('-');
+  final d = DateTime(int.parse(p[0]), int.parse(p[1]) + 1);
   return _monthKey(d);
 }
 

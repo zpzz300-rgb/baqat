@@ -38,6 +38,9 @@ Member _member({
 
 void main() {
   _indexTests();
+  _monthGuardTests();
+  _profitBasisTests();
+  _datingTests();
   // ══════════════════════════════════════════════════════════════
   group('🧾 الفاتورة — المتبقي والحالة', () {
     CompanyBill bill({double actual = 0, double paid = 0}) => CompanyBill(
@@ -343,6 +346,201 @@ void main() {
 // `membersOf` بقت بتستخدم فهرس محفوظ عشان السرعة. الخطر إن الفهرس
 // يفضل قديم بعد ما تضيف أو تحذف عميل، فتشوف بيانات غلط. التستات دي
 // بتتأكد إن ده مايحصلش.
+// ══════════════════════════════════════════════════════════════
+// 📅 يوم النزول ≠ الفترة المغطّاة
+//
+// فاتورة ١/٥ نزلت يوم ١ شهر ٥ وبتغطي شهر ٤ كله.
+// فاتورة ١٥/٥ نزلت يوم ١٥ وبتغطي من ١٥/٤ لـ ١٥/٥ — دي سيكل ٢.
+void _datingTests() {
+  AppDB dbWith(String cycle, String date, {String month = '2026-05'}) => AppDB()
+    ..groups.add(Group(id: 'g1', phone: '01000000000', billingCycle: cycle))
+    ..companyBills.add(CompanyBill(
+      id: 'b1',
+      groupId: 'g1',
+      month: month,
+      fixedAmount: 1000,
+      actualAmount: 1000,
+      date: date,
+    ));
+
+  group('📅 تأريخ الفاتورة', () {
+    test('سيكل ١: فاتورة ١/٥ بتغطي شهر ٤ كله', () {
+      final db = dbWith('cycle1', '1/5/2026');
+      expect(db.billIssueLabel(db.companyBills[0]), 'فاتورة 1/5');
+      expect(db.billCoveredPeriod(db.companyBills[0]), 'بتغطي شهر 4 كله');
+    });
+
+    test('سيكل ٢: فاتورة ١٥/٥ بتغطي من ١٥/٤ لـ ١٥/٥', () {
+      final db = dbWith('cycle2', '15/5/2026');
+      expect(db.billCoveredPeriod(db.companyBills[0]), 'بتغطي من 15/4 لـ 15/5');
+    });
+
+    test('⚠️ فاتورة يناير بتغطي ديسمبر اللي فات مش شهر صفر', () {
+      final db = dbWith('cycle1', '1/1/2026', month: '2026-01');
+      expect(db.billCoveredPeriod(db.companyBills[0]), 'بتغطي شهر 12 كله');
+    });
+
+    test('تاريخ مش مكتوب صح مايكسرش حاجة', () {
+      final db = dbWith('cycle1', '');
+      expect(db.billIssueLabel(db.companyBills[0]), 'فاتورة 2026-05');
+      expect(db.billCoveredPeriod(db.companyBills[0]), 'بتغطي شهر 4 كله');
+    });
+
+    test('السيكل القديم (cycle=2) يتقرا سيكل ٢ لو billingCycle فاضي', () {
+      final db = AppDB()
+        ..groups.add(Group(id: 'g1', phone: '01000000000', cycle: '2'));
+      expect(db.groupIsMidCycle(db.groups[0]), isTrue);
+    });
+
+    test('billingCycle الصريح بيغلب cycle القديم', () {
+      final db = AppDB()
+        ..groups.add(Group(
+            id: 'g1', phone: '01000000000', cycle: '2', billingCycle: 'cycle1'));
+      expect(db.groupIsMidCycle(db.groups[0]), isFalse);
+    });
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// 📊 أساس الربح مفصول عن السعر الخام
+//
+// فاتورة «شهر وشهر» بتنزل ٤٢٥٠ عشان بتغطي شهرين. لو حسبنا الربح عليها
+// الشهر ده يبان خسران والشهر اللي بعده يبان مكسبان — وهو مش كده.
+// عشان كده فيه رقمين: الخام (فلوس) وأساس الربح (تكلفة الشهر الواحد).
+void _profitBasisTests() {
+  Group g({double raw = 4250, double? profit, String system = 'bimonthly'}) =>
+      Group(
+        id: 'g1',
+        phone: '01000000000',
+        fixedBillAmount: raw,
+        profitBillAmount: profit,
+        billingSystem: system,
+      );
+
+  group('📊 أساس الربح', () {
+    test('⚠️ ما اتكتبش → السلوك القديم بالظبط (الربح على الخام)', () {
+      // ده أهم واحد: مفيش رقم ربح قديم بيتغيّر لوحده بعد الإضافة دي.
+      expect(g().profitBasis, 4250);
+    });
+
+    test('اتكتب → الربح بيتحسب عليه هو', () {
+      expect(g(profit: 2125).profitBasis, 2125);
+    });
+
+    test('السعر الخام مابيتغيّرش لما نكتب أساس الربح', () {
+      final line = g(profit: 2125);
+      expect(line.fixedBillAmount, 4250, reason: 'الخام للفلوس والمديونية');
+    });
+
+    test('الربح بيتحسب على أساس الربح مش على الفاتورة الكبيرة', () {
+      final db = AppDB()
+        ..groups.add(g(profit: 2125))
+        ..members.addAll([
+          _member(gid: 'g1', price: 1500),
+          _member(gid: 'g1', price: 1500),
+        ]);
+      expect(db.groupProfit('g1'), 3000 - 2125);
+    });
+
+    test('تفصيل الربح لازم يطابق البادج', () {
+      final db = AppDB()
+        ..groups.add(g(profit: 2125))
+        ..members.add(_member(gid: 'g1', price: 3000));
+      final br = db.groupProfitBreakdown('g1', []);
+      expect(br['fixedBill'], 2125, reason: 'التفصيل بيعرض أساس الربح');
+      expect(br['rawBill'], 4250, reason: 'والخام جنبه للمقارنة');
+      expect(br['net'], db.groupNetProfit('g1', []));
+    });
+
+    test('اقتراح ÷ ٢ لخط شهر وشهر بس', () {
+      expect(g().suggestedProfitBasis, 2125);
+      expect(g(system: 'fixed').suggestedProfitBasis, 4250,
+          reason: 'الخط الثابت بينزل كل شهر — مفيش قسمة');
+    });
+
+    test('⚠️ الاقتراح مابيتطبّقش لوحده', () {
+      // القسمة على ٢ مش قاعدة صحيحة في كل الخطوط، فلازم المستخدم يكتبها.
+      expect(g().profitBasis, 4250, reason: 'لسه على الخام لحد ما يكتب');
+      expect(g().needsProfitBasis, isTrue, reason: 'بس بننبّهه');
+    });
+
+    test('الخط الثابت مايتنبّهش على أساس الربح', () {
+      expect(g(system: 'fixed').needsProfitBasis, isFalse);
+    });
+
+    test('profitCost بيقع على الفاتورة الفعلية لو مفيش أساس ولا خام', () {
+      final line = Group(id: 'g1', phone: '01000000000', actualBillAmount: 900);
+      expect(line.profitCost, 900);
+    });
+
+    test('⚠️ أساس الربح بينجو من الحفظ والقراءة', () {
+      final j = g(profit: 2125).toJson();
+      expect(Group.fromJson(j).profitBillAmount, 2125);
+    });
+
+    test('خط قديم متسجّل من غير الخانة دي بيقراها null', () {
+      final j = g(profit: 2125).toJson()..remove('profitBillAmount');
+      final line = Group.fromJson(j);
+      expect(line.profitBillAmount, isNull);
+      expect(line.profitBasis, 4250, reason: 'بيرجع للخام');
+    });
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// 📅 حماية الشهور
+//
+// أرقام المجموعة معناها «آخر فاتورة نزلت». قبل الإصلاح ده، تعديل فاتورة
+// شهر ٥ وانت في شهر ٨ كان بيكتب مبلغ شهر ٥ على المجموعة، فتلاقي أرقام
+// الشهر الحالي اتغيّرت من غير سبب. التستات دي بتقفل الباب ده.
+void _monthGuardTests() {
+  CompanyBill b(String id, String month, {String gid = 'g1'}) => CompanyBill(
+        id: id,
+        groupId: gid,
+        month: month,
+        fixedAmount: 1000,
+        actualAmount: 1000,
+        date: '01/08/2026',
+      );
+
+  group('📅 حماية الشهور', () {
+    test('أول فاتورة للخط تعتبر الأحدث', () {
+      final db = AppDB();
+      expect(db.monthIsLatestFor('g1', '2026-08'), isTrue);
+      expect(db.latestBillMonth('g1'), isNull);
+    });
+
+    test('فاتورة شهر قديم مش الأحدث', () {
+      final db = AppDB()..companyBills.addAll([b('b1', '2026-05'), b('b2', '2026-08')]);
+      expect(db.isLatestBill(db.companyBills[0]), isFalse, reason: 'شهر ٥ ورا شهر ٨');
+      expect(db.isLatestBill(db.companyBills[1]), isTrue);
+    });
+
+    test('⚠️ الفاتورة ما تقارنش نفسها بنفسها', () {
+      // من غير exceptId كانت كل فاتورة تطلع «الأحدث» لأنها موجودة في اللستة.
+      final db = AppDB()..companyBills.addAll([b('b1', '2026-05'), b('b2', '2026-08')]);
+      expect(db.latestBillMonth('g1', exceptId: 'b2'), '2026-05');
+    });
+
+    test('فاتورة الخط ما تتأثرش بفواتير خط تاني', () {
+      final db = AppDB()
+        ..companyBills.addAll([b('b1', '2026-05'), b('b2', '2026-12', gid: 'g2')]);
+      expect(db.isLatestBill(db.companyBills[0]), isTrue, reason: 'g2 مالهاش دعوة بـ g1');
+    });
+
+    test('فاتورة تانية لنفس الشهر تفضل الأحدث', () {
+      // بيحصل لما تسجّل فاتورة تصحيحية في نفس الشهر — المفروض تتحدّث عادي.
+      final db = AppDB()..companyBills.add(b('b1', '2026-08'));
+      expect(db.monthIsLatestFor('g1', '2026-08'), isTrue);
+    });
+
+    test('ترتيب السنين بيتقارن صح مش أبجدي غلط', () {
+      final db = AppDB()..companyBills.add(b('b1', '2026-01'));
+      expect(db.monthIsLatestFor('g1', '2025-12'), isFalse, reason: '١٢/٢٠٢٥ قبل ١/٢٠٢٦');
+    });
+  });
+}
+
 void _indexTests() {
   group('⚡ فهرس العملاء', () {
     test('بيرجّع عملاء المجموعة الصح', () {

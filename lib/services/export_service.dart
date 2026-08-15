@@ -217,7 +217,7 @@ class ExportService {
     for (final g in db.groups) {
       final members = db.membersOf(g.id);
       final income = members.fold<double>(0, (s, m) => s + m.price);
-      final bill = g.fixedBillAmount > 0 ? g.fixedBillAmount : (g.actualBillAmount ?? 0);
+      final bill = g.profitCost;
       s2.appendRow(<CellValue>[
         TextCellValue(g.phone),
         TextCellValue(g.ownerName ?? '-'),

@@ -1763,6 +1763,16 @@ class AppProvider extends ChangeNotifier {
   /// آخر فاتورة فعلية اتسجلت للحساب (زي نظام «شهر وشهر» للخط الواحد بالظبط،
   /// بس بيطبّقها على مجموعة خطوط سوا).
   List<String> dueShiftGroupIds(BillingAccount acc, String targetMonth) {
+    // 📌 التثبيت اليدوي بيغلب كل حاجة: انت قلت شهر كذا الدور على مين،
+    // والباقي بالتبادل قدّام وورا. المسافة الزوجية = نفس الشق.
+    final pin = acc.turnPinMonth;
+    if (pin != null && pin.isNotEmpty) {
+      final gap = _monthsBetween(pin, targetMonth);
+      if (gap != null) {
+        final isA = gap.isEven ? acc.turnPinIsShiftA : !acc.turnPinIsShiftA;
+        return isA ? acc.shiftA : acc.shiftB;
+      }
+    }
     final prevM = _prevMonthOf(targetMonth);
     final aBilledPrev = db.companyBills.any((b) =>
         acc.shiftA.contains(b.groupId) && b.month == prevM && b.actualAmount > 0);
@@ -1786,6 +1796,60 @@ class AppProvider extends ChangeNotifier {
     final p = month.split('-');
     final d = DateTime(int.parse(p[0]), int.parse(p[1]) - 1);
     return '${d.year}-${d.month.toString().padLeft(2, '0')}';
+  }
+
+  /// عدد الشهور من [from] لـ [to] — بالسالب لو [to] قبله.
+  /// بيرجّع null لو أي واحد فيهم مش على صيغة 'yyyy-mm'.
+  int? _monthsBetween(String from, String to) {
+    final a = from.split('-'), b = to.split('-');
+    if (a.length < 2 || b.length < 2) return null;
+    final ay = int.tryParse(a[0]), am = int.tryParse(a[1]);
+    final by = int.tryParse(b[0]), bm = int.tryParse(b[1]);
+    if (ay == null || am == null || by == null || bm == null) return null;
+    return (by - ay) * 12 + (bm - am);
+  }
+
+  /// 📌 تثبيت الدور لحساب فوترة: «شهر [month] الدور على الشق [isShiftA]».
+  /// بيغلب الاستنتاج التلقائي من تاريخ الفواتير، والبرنامج بيكمّل بالتبادل
+  /// لوحده — فمش هتقعد تكتبه كل شهر.
+  void pinAccountTurn(String accountId, String month, bool isShiftA) {
+    final i = db.billingAccounts.indexWhere((a) => a.id == accountId);
+    if (i < 0) return;
+    final acc = db.billingAccounts[i];
+    acc.turnPinMonth = month;
+    acc.turnPinIsShiftA = isShiftA;
+    _addLog(null, 'account_edit',
+        'تثبيت دور «${acc.name}»: شهر $month على الشق ${isShiftA ? 'الأول' : 'التاني'}');
+    save();
+    notifyListeners();
+  }
+
+  /// إلغاء التثبيت والرجوع للاستنتاج التلقائي من تاريخ الفواتير.
+  void clearAccountTurnPin(String accountId) {
+    final i = db.billingAccounts.indexWhere((a) => a.id == accountId);
+    if (i < 0) return;
+    final acc = db.billingAccounts[i];
+    if (acc.turnPinMonth == null) return;
+    acc.turnPinMonth = null;
+    _addLog(null, 'account_edit', 'إلغاء تثبيت دور «${acc.name}» → تلقائي');
+    save();
+    notifyListeners();
+  }
+
+  /// وصف الدور لشهر معيّن بالعربي — «الجاية على: ٠١٠٠٩... • ٠١١١١...».
+  /// بيرجّع نص فاضي لو الخط مش تابع لحساب فوترة.
+  String turnLabelFor(String groupId, String month) {
+    final acc = accountOfGroup(groupId);
+    if (acc == null) return '';
+    final ids = dueShiftGroupIds(acc, month);
+    if (ids.isEmpty) return '';
+    final phones = ids
+        .map((id) => db.groups
+            .firstWhere((g) => g.id == id, orElse: () => Group(id: '', phone: ''))
+            .phone)
+        .where((p) => p.isNotEmpty)
+        .join(' • ');
+    return phones;
   }
 
   // ─── قفل مراجعة فواتير الشهر (بعد ما تخلص مراجعة كاملة) ─────────────
@@ -3561,11 +3625,48 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 📆 ضبط سيكل الخط — 'cycle1' (تنزل يوم ١) أو 'cycle2' (تنزل يوم ١٥).
+  ///
+  /// السيكل هو اللي بيحدد الفاتورة بتغطي إيه: سيكل ١ بتغطي الشهر اللي فات
+  /// كله، وسيكل ٢ بتغطي من ١٥ للـ ١٥. شوف `AppDB.billCoveredPeriod`.
+  void setGroupBillingCycle(String gid, String cycle) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    final g = db.groups[i];
+    if (g.billingCycle == cycle) return;
+    g.billingCycle = cycle;
+    _addLog(null, 'group_edit',
+        'سيكل ${g.phone} → ${cycle == 'cycle2' ? '٢ (يوم ١٥)' : '١ (يوم ١)'}');
+    save();
+    notifyListeners();
+  }
+
   /// ضبط المبلغ الثابت (التقديري) لخط — يُستخدم في شاشة تقسيم فاتورة الحساب المدموج.
   void setGroupFixedBill(String gid, double amount) {
     final i = db.groups.indexWhere((g) => g.id == gid);
     if (i < 0) return;
     db.groups[i].fixedBillAmount = amount < 0 ? 0 : amount;
+    save();
+    notifyListeners();
+  }
+
+  /// 📊 ضبط أساس الربح لخط = تكلفة **الشهر الواحد**.
+  ///
+  /// منفصل عن [setGroupFixedBill] عن قصد: الخام هو اللي الشركة بتاخده
+  /// (٤٢٥٠ كل شهرين مثلاً)، وده تكلفة الشهر اللي الربح بيتحسب عليها.
+  /// تمرير null بيرجّع الخط للسلوك القديم (الربح على الخام).
+  ///
+  /// ⚠️ التغيير ده بيسري على **الجاي** بس — الفواتير المتسجّلة محتفظة
+  /// بنسختها من الأرقام في `CompanyBill.fixedAmount` ومابتتأثرش.
+  void setGroupProfitBill(String gid, double? amount) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    final g = db.groups[i];
+    final old = g.profitBillAmount;
+    g.profitBillAmount = (amount == null || amount <= 0) ? null : amount;
+    if (old == g.profitBillAmount) return;
+    _addLog(null, 'group_edit',
+        'أساس ربح ${g.phone}: ${old?.toStringAsFixed(0) ?? 'الخام'} → ${g.profitBillAmount?.toStringAsFixed(0) ?? 'الخام'} ج');
     save();
     notifyListeners();
   }
@@ -4045,10 +4146,17 @@ class AppProvider extends ChangeNotifier {
           ? issueDate.trim()
           : _today(),
     );
+    // لازم يتحسب **قبل** الإضافة، وإلا الفاتورة الجديدة تقارن نفسها بنفسها
+    // وتطلع دايماً «الأحدث».
+    final isLatest = db.monthIsLatestFor(gid, month);
     db.companyBills.insert(0, bill);
-    db.groups[i].lastBillAmount = amount;
     db.groups[i].billDebt += amount;
-    db.groups[i].actualBillAmount = amount;
+    // أرقام «آخر فاتورة» تتحدّث بس لو دي فعلاً أحدث فاتورة للخط.
+    // لو بتسجّل فاتورة شهر فايت بأثر رجعي، سيب أرقام المجموعة زي ما هي.
+    if (isLatest) {
+      db.groups[i].lastBillAmount = amount;
+      db.groups[i].actualBillAmount = amount;
+    }
     db.groups[i].groupNotes.insert(0, {
       'text': '📋 فاتورة $month — ${amount.toStringAsFixed(0)} ج${children.isNotEmpty ? ' (مجمّعة لـ ${children.length + 1} خط)' : ''}${note != null ? ' | $note' : ''}',
       'date': _today(),
@@ -4085,11 +4193,16 @@ class AppProvider extends ChangeNotifier {
     });
     final gi = db.groups.indexWhere((g) => g.id == bill.groupId);
     if (gi >= 0) {
+      // الفرق بيتحسب على المديونية مهما كان شهر الفاتورة — لو صحّحت مبلغ
+      // شهر قديم فانت فعلاً مدين بالفرق ده.
       db.groups[gi].billDebt = (db.groups[gi].billDebt + diff).clamp(0, double.infinity);
-      db.groups[gi].actualBillAmount = newAmount;
+      // لكن «آخر فاتورة» لأ — دي بتتغيّر بس لو بتعدّل أحدث فاتورة.
+      if (db.isLatestBill(bill)) {
+        db.groups[gi].actualBillAmount = newAmount;
+      }
     }
     _addLog(null, 'bill_edit',
-        'تعديل مبلغ فاتورة ${old.toStringAsFixed(0)} → ${newAmount.toStringAsFixed(0)} ج${reason != null && reason.trim().isNotEmpty ? ' — $reason' : ''}');
+        'تعديل مبلغ فاتورة ${bill.month}: ${old.toStringAsFixed(0)} → ${newAmount.toStringAsFixed(0)} ج${reason != null && reason.trim().isNotEmpty ? ' — $reason' : ''}');
     save(); notifyListeners();
   }
 
@@ -4263,9 +4376,10 @@ class AppProvider extends ChangeNotifier {
       note: fullNote.isEmpty ? null : fullNote,
       date: _today(),
     );
+    final isLatest = db.monthIsLatestFor(gid, month); // قبل الإضافة
     db.companyBills.insert(0, bill);
     db.groups[i].billDebt += amount;
-    db.groups[i].actualBillAmount = amount;
+    if (isLatest) db.groups[i].actualBillAmount = amount;
     db.groups[i].groupNotes.insert(0, {
       'text': '📊 فاتورة تقديرية $month — ${amount.toStringAsFixed(0)} ج${children.isNotEmpty ? ' (مجمّعة لـ ${children.length + 1} خط)' : ''}${note != null ? ' | $note' : ''}',
       'date': _today(),
@@ -4359,13 +4473,15 @@ class AppProvider extends ChangeNotifier {
     final oldAmount = db.companyBills[bi].actualAmount;
     final gid = db.companyBills[bi].groupId;
     final month = db.companyBills[bi].month;
+    final isLatest = db.isLatestBill(db.companyBills[bi]);
     db.companyBills[bi].actualAmount = newAmount;
     db.companyBills[bi].isActual = true;
     final diff = newAmount - oldAmount;
     final gi = db.groups.indexWhere((g) => g.id == gid);
     if (gi >= 0) {
       db.groups[gi].billDebt = (db.groups[gi].billDebt + diff).clamp(0, double.infinity);
-      db.groups[gi].actualBillAmount = newAmount;
+      // تأكيد فاتورة شهر قديم ما يغيّرش «آخر فاتورة» بتاعة المجموعة
+      if (isLatest) db.groups[gi].actualBillAmount = newAmount;
       db.groups[gi].groupNotes.insert(0, {
         'text': '✅ تأكيد فاتورة فعلية $month — ${newAmount.toStringAsFixed(0)} ج (كانت تقديرية: ${oldAmount.toStringAsFixed(0)} ج)',
         'date': _today(),

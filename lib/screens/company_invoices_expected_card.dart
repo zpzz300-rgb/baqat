@@ -240,6 +240,9 @@ class _ExpectedCardState extends State<_ExpectedCard> {
                       color: const Color(0xFF6a1b9a),
                       fontWeight: FontWeight.w700),
                 ),
+                // 🌿 التشجير — لازم يبان هنا كمان مش في «الشهر الماضي» بس،
+                // عشان وانت بتسجّل فاتورة الشهر ده تعرف هي على كام خط.
+                LinkedLinesStrip(db: prov.db, group: g),
                 if (widget.lastMonthAmount != null) ...[
                   const SizedBox(height: 2),
                   Text(
