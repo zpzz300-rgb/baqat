@@ -74,7 +74,12 @@ class _ExpectedCardState extends State<_ExpectedCard> {
   }
 
   void _checkOverAmountThenSave(double amount) {
-    final fixed = widget.group.fixedBillAmount;
+    // لازم يبقى المجموع مع الخطوط المضمومة، وإلا خط ضامم غيره هيطلّع
+    // تحذير «المبلغ أعلى من المتفق عليه» غلط في كل مرة تسجّل فيها فاتورته.
+    final kids =
+        LinkedLinesStrip.childrenOf(widget.prov.db, widget.group.id);
+    final fixed = widget.group.fixedBillAmount +
+        kids.fold<double>(0, (s, c) => s + c.fixedBillAmount);
     if (fixed > 0 && amount > fixed * 1.15) {
       showDialog(
         context: context,
@@ -233,13 +238,26 @@ class _ExpectedCardState extends State<_ExpectedCard> {
                       style: GoogleFonts.cairo(
                           fontSize: 10, color: AppColors.muted)),
                 const SizedBox(height: 4),
-                Text(
-                  'تقدير: ${g.fixedBillAmount.toStringAsFixed(0)} ج',
-                  style: GoogleFonts.cairo(
-                      fontSize: 12,
-                      color: const Color(0xFF6a1b9a),
-                      fontWeight: FontWeight.w700),
-                ),
+                // التقدير لازم يبقى **اللي هيتسجّل فعلاً**: لو الخط ضامم
+                // خطوط تانية، الفاتورة الواحدة بتغطيهم كلهم، فبنعرض
+                // المجموع مش رقم الخط الرئيسي لوحده — ده اللي addGroupBill
+                // بيسجّله بالظبط، وقبل كده كان الرقمين مختلفين على الشاشة.
+                Builder(builder: (_) {
+                  final kids = LinkedLinesStrip.childrenOf(prov.db, g.id);
+                  final combined = g.fixedBillAmount +
+                      kids.fold<double>(0, (s, c) => s + c.fixedBillAmount);
+                  return Text(
+                    kids.isEmpty
+                        ? 'تقدير: ${g.fixedBillAmount.toStringAsFixed(0)} ج'
+                        : 'تقدير: ${combined.toStringAsFixed(0)} ج '
+                            '(${g.fixedBillAmount.toStringAsFixed(0)} + '
+                            '${kids.length} خط مضموم)',
+                    style: GoogleFonts.cairo(
+                        fontSize: 12,
+                        color: const Color(0xFF6a1b9a),
+                        fontWeight: FontWeight.w700),
+                  );
+                }),
                 // 🌿 التشجير — لازم يبان هنا كمان مش في «الشهر الماضي» بس،
                 // عشان وانت بتسجّل فاتورة الشهر ده تعرف هي على كام خط.
                 LinkedLinesStrip(db: prov.db, group: g),

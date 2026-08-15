@@ -503,6 +503,46 @@ void _monthGuardTests() {
         date: '01/08/2026',
       );
 
+  // 🌿 الفاتورة الواحدة اللي بتغطي خط رئيسي + خطوطه المضمومة
+  group('🌿 التشجير — إجمالي الفاتورة المجمّعة', () {
+    AppDB tree() => AppDB()
+      ..groups.addAll([
+        Group(id: 'p', phone: '01555055531', fixedBillAmount: 4250),
+        Group(
+            id: 'c1',
+            phone: '01111170851',
+            fixedBillAmount: 4250,
+            parentGroupId: 'p'),
+        Group(
+            id: 'c2',
+            phone: '01009937666',
+            fixedBillAmount: 4250,
+            parentGroupId: 'p'),
+      ]);
+
+    double combined(AppDB db, String gid) {
+      final g = db.groups.firstWhere((x) => x.id == gid);
+      return g.fixedBillAmount +
+          db.groups
+              .where((x) => x.parentGroupId == gid)
+              .fold<double>(0, (s, c) => s + c.fixedBillAmount);
+    }
+
+    test('الإجمالي = الرئيسي + المضمومين', () {
+      expect(combined(tree(), 'p'), 12750);
+    });
+
+    test('⚠️ خط من غير مضمومين إجماليه هو نفسه', () {
+      final db = AppDB()
+        ..groups.add(Group(id: 'p', phone: '01000000000', fixedBillAmount: 2150));
+      expect(combined(db, 'p'), 2150);
+    });
+
+    test('الخط المضموم مايحسبش المضمومين بتوع غيره', () {
+      expect(combined(tree(), 'c1'), 4250);
+    });
+  });
+
   group('📅 حماية الشهور', () {
     test('أول فاتورة للخط تعتبر الأحدث', () {
       final db = AppDB();
