@@ -11,6 +11,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/menu_catalog.dart' show normalizeArabic;
 import '../models/models.dart';
 import '../widgets/common.dart';
@@ -498,7 +499,7 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
                   ],
                 ]),
               )
-            : ListView.builder(
+            : ResponsiveCards(
                 padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
                 itemCount: rows.length,
                 itemBuilder: (_, i) => _compact
@@ -632,7 +633,7 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
 
   // ── ⚙️ لوحة الفلاتر: كل الفلاتر في مكان واحد ─────────────────
   void _showFilterSheet(AppProvider prov) {
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
@@ -762,7 +763,7 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
           context, '✅ اتسجّل اتصال يوم ${fmt(d)} — العدّاد بدأ من أول وجديد');
     }
 
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (sheetCtx) => Directionality(
@@ -1578,7 +1579,7 @@ class _WorkNumsScreenState extends State<WorkNumsScreen> {
       return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
     }
 
-    showModalBottomSheet(
+    showAppSheet(
       useRootNavigator: true,
       context: context,
       isScrollControlled: true,

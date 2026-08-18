@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/supabase_service.dart';
 import '../models/models.dart';
 import '../widgets/member_card.dart';
@@ -110,7 +111,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
       final m = prov.db.members[idx];
       final g = prov.db.groups.firstWhere((x) => x.id == m.gid,
           orElse: () => Group(id: '', phone: '—'));
-      showModalBottomSheet(
+      showAppSheet(
         useRootNavigator: true,
         context: context,
         isScrollControlled: true,

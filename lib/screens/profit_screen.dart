@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/export_service.dart';
 import '../models/models.dart';
 
@@ -479,7 +480,7 @@ class _GroupsTabState extends State<_GroupsTab> {
               ? Center(
                   child: Text('مفيش نتائج مطابقة',
                       style: GoogleFonts.cairo(color: AppColors.muted)))
-              : ListView.builder(
+              : ResponsiveCards(
                   padding: const EdgeInsets.all(12),
                   itemCount: groups.length,
                   itemBuilder: (_, i) => _GroupProfitCard(group: groups[i], db: db),

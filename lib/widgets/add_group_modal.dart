@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import '../utils/phone_utils.dart';
 import '../utils/image_utils.dart';
 import 'common.dart';
+import 'money_words.dart';
 
 class AddGroupModal extends StatefulWidget {
   final Group? existing;
@@ -321,6 +322,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
   /// تغيير نوع الخط بيظبّط الـ Tier وعدد العملاء والدقائق والزيادة تلقائياً
   /// (دمجنا «نوع الباقة Tier» مع «نوع الخط» عشان متختارش الحجم مرتين).
   void _onTypeChanged(String v) {
+    if (v == _type) return; // نفس النوع — ما نلغيش أي رقم كتبته بإيدك
     setState(() {
       _type = v;
       if (v == '3800') {
@@ -334,6 +336,12 @@ class _AddGroupModalState extends State<AddGroupModal> {
         _totalMinutesCtrl.text = '10000';
         _extraFeeCtrl.text = '125';
       }
+      // 💰 الزرار مكتوب عليه سعر الفاتورة، فلازم يظبّط المبلغ الثابت كمان.
+      // من غير السطر ده كنت تختار «الكبير ٤٢٥٠» ويفضل المبلغ القديم
+      // متسجّل، وقايمة الفواتير تحسب على الرقم القديم الغلط. المبلغ
+      // فاضل قابل للتعديل تحت لو فاتورتك رقم تاني.
+      final price = kLineTypePrices[v];
+      if (price != null) _fixedBillCtrl.text = price.toStringAsFixed(0);
     });
   }
 
@@ -1598,7 +1606,7 @@ class _AddGroupModalState extends State<AddGroupModal> {
           ],
           const SizedBox(height: 10),
           AppFormField(
-            label: 'قيمة الفاتورة الثابتة (ج)',
+            label: MoneyWords.rawBillLabel,
             controller: _manualBillCtrl,
             keyboardType: TextInputType.number,
             textDirection: TextDirection.ltr,

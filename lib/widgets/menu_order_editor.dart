@@ -11,10 +11,11 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/menu_catalog.dart';
 
 /// بيفتح المحرّر كـ bottom sheet.
-Future<void> showMenuOrderEditor(BuildContext context) => showModalBottomSheet(
+Future<void> showMenuOrderEditor(BuildContext context) => showAppSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -309,7 +310,7 @@ class _MenuOrderEditorState extends State<MenuOrderEditor> {
   Future<void> _pickSection(BuildContext context, AppProvider prov, String key,
       String title) async {
     final current = prov.menuSectionOf(key);
-    await showModalBottomSheet(
+    await showAppSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (sheetCtx) => Container(

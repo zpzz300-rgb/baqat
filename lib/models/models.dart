@@ -139,6 +139,53 @@ class Group {
   //   'fixed'     = ثابت: تنزل فاتورة كل شهر
   //   'bimonthly' = شهر وشهر: تنزل فاتورة شهر، والشهر اللي بعده ببلاش
   String billingSystem; // 'fixed' | 'bimonthly'
+
+  /// 📌 مرساة الدورة — الشهر اللي انت مثبّت إن **فاتورة نزلت فيه** ('2026-07').
+  ///
+  /// دي العلامة الوحيدة اللي بتعلّمها بإيدك، **مرة واحدة بس**. منها البرنامج
+  /// يحسب أي شهر — ماضي أو مستقبل — الخط ده دوره ولا لأ، بالتبادل قدّام
+  /// ووراء لوحده: فرق زوجي من المرساة = دوره، فردي = ببلاش.
+  ///
+  /// null = ما اتعلّمش لسه → بنرجع للاستنتاج القديم من [BillingAccount]
+  /// زي ما كان بالظبط، فمفيش خط قديم بيتغيّر سلوكه لوحده.
+  String? billAnchorMonth;
+
+  /// ⚠️ استثناءات غلطات الشركة — { '2026-08': 'billed' | 'free' }.
+  ///
+  /// لما الشركة تغلط وتنزّل فاتورتين ورا بعض وتقول لك «هنعوضك الشهر الجاي
+  /// ببلاش»، بتعلّم الشهرين دول استثناء. الاستثناء بيغيّر **الشهر ده بس**
+  /// وما بيمسّش [billAnchorMonth]، فالدورة الأصلية بترجع لوحدها بعده.
+  Map<String, String> billMonthOverrides;
+
+  /// 🔁 كل كام شهر تنزل فاتورة؟ الافتراضي ٢ = «شهر وشهر».
+  ///
+  /// في خطوط دورتها ٣ شهور أو ٤ (عروض الشركات بتختلف). الرقم ده بيخلّي
+  /// نفس المرساة تشتغل مع أي طول دورة من غير منطق جديد.
+  ///
+  /// ⚠️ بيتحسب بس لما نظام الخط «شهر وشهر». الخط الثابت بينزل كل شهر
+  /// مهما كان الرقم ده.
+  int billCycleMonths;
+
+  /// 🛑 آخر شهر بتنزل فيه فواتير على الخط ده ('2026-09') — الخط اتقفل بعده.
+  ///
+  /// من غيره الخط المقفول يفضل طالع في قايمة الفواتير للأبد وانت بتدوّر
+  /// على فاتورته كل شهر ومش لاقيها، فتفتكر إن في فاتورة ضايعة.
+  ///
+  /// null = الخط شغّال عادي. الشهر ده **نفسه** لسه بتنزل فيه فاتورة —
+  /// اللي بعده هو اللي بيقف.
+  ///
+  /// ⚠️ ما بيمسحش أي فاتورة قديمة متسجّلة — التاريخ زي ما هو.
+  String? billEndMonth;
+
+  /// ☎️ أرقام الأرضي والهوم 4G المربوطة بالحساب ده — ids العملاء.
+  ///
+  /// دي بتتختار بإيدك (تعلّم صح على اللي في الحساب من قايمة كل أرقام
+  /// الأرضي والهوم 4G في البرنامج)، مش بتتحسب لوحدها، لأن الرقم ممكن يكون
+  /// باسم نفس صاحب الخط بس في حساب تاني خالص.
+  ///
+  /// فايدتها: لما تراجع الفاتورة مع الشركة ويقولوا لك «الزيادة بسبب
+  /// الأرضي»، تلاقي رقمه قدامك على طول من غير ما تدوّر.
+  List<String> sideNumberIds;
   double voucherValue; // قيمة القسيمة
   String voucherPeriod; // '6m' / '1y'
   String? voucherStartDate; // تاريخ بدء القسيمة (YYYY-MM-DD)
@@ -236,6 +283,11 @@ class Group {
     this.fixedBillAmount = 0,
     this.profitBillAmount,
     this.billingSystem = 'fixed',
+    this.billAnchorMonth,
+    Map<String, String>? billMonthOverrides,
+    this.billCycleMonths = 2,
+    this.billEndMonth,
+    List<String>? sideNumberIds,
     this.voucherValue = 0,
     this.voucherPeriod = '6m',
     this.voucherStartDate,
@@ -285,7 +337,9 @@ class Group {
         pointsRedemptions = pointsRedemptions ?? [],
         groupNotes = groupNotes ?? [],
         extraBundles = extraBundles ?? [],
-        coupons = coupons ?? [];
+        coupons = coupons ?? [],
+        billMonthOverrides = billMonthOverrides ?? {},
+        sideNumberIds = sideNumberIds ?? [];
 
   factory Group.fromJson(Map<String, dynamic> j) => Group(
         id: j['id'].toString(),
@@ -315,6 +369,12 @@ class Group {
         fixedBillAmount: (j['fixedBillAmount'] ?? 0).toDouble(),
         profitBillAmount: (j['profitBillAmount'] as num?)?.toDouble(),
         billingSystem: j['billingSystem'] ?? 'fixed',
+        billAnchorMonth: j['billAnchorMonth'],
+        billMonthOverrides:
+            Map<String, String>.from(j['billMonthOverrides'] ?? {}),
+        billCycleMonths: (j['billCycleMonths'] as num?)?.toInt() ?? 2,
+        billEndMonth: j['billEndMonth'],
+        sideNumberIds: List<String>.from(j['sideNumberIds'] ?? []),
         voucherValue: (j['voucherValue'] ?? 0).toDouble(),
         voucherPeriod: j['voucherPeriod'] ?? '6m',
         voucherStartDate: j['voucherStartDate'],
@@ -389,6 +449,11 @@ class Group {
         'fixedBillAmount': fixedBillAmount,
         'profitBillAmount': profitBillAmount,
         'billingSystem': billingSystem,
+        'billAnchorMonth': billAnchorMonth,
+        'billMonthOverrides': billMonthOverrides,
+        'billCycleMonths': billCycleMonths,
+        'billEndMonth': billEndMonth,
+        'sideNumberIds': sideNumberIds,
         'voucherValue': voucherValue,
         'voucherPeriod': voucherPeriod,
         'voucherStartDate': voucherStartDate,
@@ -543,6 +608,110 @@ class Group {
 
   /// هل الخط نظامه «شهر وشهر»؟ (فاتورة شهر، والشهر اللي بعده ببلاش)
   bool get isBimonthly => billingSystem == 'bimonthly';
+
+  /// هل الخط ده متعلّم عليه دورة (فيه مرساة)؟
+  bool get hasBillAnchor =>
+      billAnchorMonth != null && billAnchorMonth!.isNotEmpty;
+
+  /// 🔁 الشهر اللي الدورة بتتحسب منه فعلاً.
+  ///
+  /// الترتيب: المرساة اللي علّمتها بإيدك من قايمة الفواتير أولاً، وبعدها
+  /// «تاريخ آخر فاتورة نزلت» اللي كاتبه في تعديل المجموعة. كده اللي
+  /// بتظبطه في المجموعة يوصل للفواتير لوحده من غير ما تعلّمه مرتين.
+  ///
+  /// null = مفيش أي تاريخ نعرف منه، فالخط لسه «مش عارفينه».
+  String? get effectiveBillAnchor =>
+      hasBillAnchor ? billAnchorMonth : monthOf(lastBillDate);
+
+  /// هل الدورة اتحسبت من تاريخ المجموعة مش من تعليم بإيدك؟
+  bool get anchorFromGroupDate =>
+      !hasBillAnchor && monthOf(lastBillDate) != null;
+
+  /// 📅 يحوّل تاريخ مكتوب بأي شكل لشهر 'yyyy-mm' — بيقبل «2026-7» و
+  /// «2026-07» و «2026-07-01». بيرجّع null لو مش مفهوم.
+  static String? monthOf(String? raw) {
+    if (raw == null) return null;
+    final m = RegExp(r'^\s*(\d{4})\s*-\s*(\d{1,2})').firstMatch(raw.trim());
+    if (m == null) return null;
+    final mm = int.tryParse(m.group(2)!);
+    if (mm == null || mm < 1 || mm > 12) return null;
+    return '${m.group(1)}-${mm.toString().padLeft(2, '0')}';
+  }
+
+  /// عدد الشهور بين شهرين بصيغة 'yyyy-mm' — null لو أي واحد فيهم شكله غلط.
+  static int? monthsBetween(String from, String to) {
+    final a = from.split('-'), b = to.split('-');
+    if (a.length < 2 || b.length < 2) return null;
+    final ay = int.tryParse(a[0]), am = int.tryParse(a[1]);
+    final by = int.tryParse(b[0]), bm = int.tryParse(b[1]);
+    if (ay == null || am == null || by == null || bm == null) return null;
+    return (by - ay) * 12 + (bm - am);
+  }
+
+  /// 🔁 هل دور الخط ده ينزّل فاتورة في [month]؟
+  ///
+  /// الترتيب: الاستثناء اليدوي أولاً (غلطات الشركة)، بعده المرساة، وآخر
+  /// حاجة null معناها «مش عارفين» → اللي بيسأل يرجع لطريقته القديمة.
+  ///
+  ///   * خط ثابت → دايماً true (بينزل كل شهر).
+  ///   * شهر وشهر بمرساة → الفرق الزوجي عن المرساة = دوره.
+  bool? isDueIn(String month) {
+    final ov = billMonthOverrides[month];
+    if (ov == 'billed') return true;
+    if (ov == 'free') return false;
+    // 🛑 الخط اتقفل → مفيش فواتير بعد كده، سواء ثابت أو شهر وشهر.
+    //
+    // ⚠️ بييجي **بعد** الاستثناء عن قصد: لو علّمت «نزلت غصب عني» على شهر
+    // بعد القفل، يبقى الشركة فعلاً نزّلت فاتورة على خط مقفول — وده بالظبط
+    // اللي انت عايز تشوفه، مش نخبّيه.
+    if (isClosedIn(month)) return false;
+    if (!isBimonthly) return true;
+    // المرساة اللي علّمتها بإيدك أولاً، وبعدها «تاريخ آخر فاتورة نزلت» اللي
+    // كاتبه في تعديل المجموعة — عشان اللي بتظبطه هناك يوصل للفواتير لوحده
+    // من غير ما تعلّم نفس الحاجة مرتين.
+    final anchor = effectiveBillAnchor;
+    if (anchor == null) return null;
+    final gap = monthsBetween(anchor, month);
+    if (gap == null) return null;
+    // كل [billCycleMonths] شهر تنزل فاتورة. الافتراضي ٢ («شهر وشهر»)،
+    // والقسمة على الرقم ده بتشتغل مع أي طول دورة — ٣ شهور أو ٤.
+    // بنستخدم `%` مع تصحيح للسالب عشان الحساب يمشي **ورا** كمان مش
+    // قدّام بس (شهر قبل المرساة لازم يطلع صح).
+    final n = billCycleMonths;
+    return ((gap % n) + n) % n == 0;
+  }
+
+  /// 🛑 الخط كان مقفول في الشهر ده؟ (يعني بعد [billEndMonth]).
+  ///
+  /// شهر القفل نفسه **لسه بتنزل فيه فاتورة** — اللي بعده هو اللي بيقف.
+  bool isClosedIn(String month) {
+    final end = billEndMonth;
+    if (end == null || end.isEmpty) return false;
+    final gap = monthsBetween(end, month);
+    return gap != null && gap > 0;
+  }
+
+  /// الخط مقفول خلاص (النهاردة بعد شهر القفل)؟
+  bool get isClosedLine {
+    final end = billEndMonth;
+    if (end == null || end.isEmpty) return false;
+    final now = DateTime.now();
+    return isClosedIn('${now.year}-${now.month.toString().padLeft(2, '0')}');
+  }
+
+  /// 🎫 قيمة القسيمة موزّعة على **الشهر الواحد**.
+  ///
+  /// القسيمة بتنزل كل ٦ شهور أو كل سنة، مش كل شهر. فلو حسبناها كاملة في
+  /// شهر واحد، الشهر ده يبان مكسبان بجد والباقي خسران — وهو نفس الفلوس.
+  /// التوزيع بيدّي رقم تقدر تبني عليه.
+  double get voucherMonthlyValue {
+    if (voucherValue <= 0) return 0;
+    final months = voucherPeriod == '1y' ? 12 : 6;
+    return voucherValue / months;
+  }
+
+  /// هل الشهر ده متعدّل بإيدك بسبب غلطة من الشركة؟
+  bool isOverriddenIn(String month) => billMonthOverrides.containsKey(month);
 
   /// 📊 التكلفة اللي الربح بيتحسب عليها — **تكلفة الشهر الواحد**.
   ///
@@ -1149,6 +1318,18 @@ class CompanyBill {
   // ترجع تشوف ليه اتغيّر رقم الفاتورة بعد ما كان متسجل.
   List<Map<String, dynamic>> editHistory;
 
+  // ── 🧾 مطالبة على الشركة (اختيارية بالكامل) ────────────────────────
+  /// المبلغ اللي انت شايف إن الشركة غلطانة فيه — المفروض ٥٠٠٠ ونزلت ٥٣٠٠
+  /// يبقى ٣٠٠. بتكتبه بإيدك، وما لوش أي دعوة بحساب دور الشهر اللي بعده.
+  double disputeAmount;
+  /// سبب المطالبة بكلامك — «كلمت الشركة، قالوا هيعوضوني».
+  String? disputeNote;
+  /// اتقفلت خلاص (اترجعت أو اتعوّضت)؟
+  bool disputeResolved;
+
+  /// فيها مطالبة مفتوحة لسه؟
+  bool get hasOpenDispute => disputeAmount > 0 && !disputeResolved;
+
   CompanyBill({
     required this.id,
     required this.groupId,
@@ -1162,6 +1343,9 @@ class CompanyBill {
     this.deferDate,
     this.deferNote,
     List<Map<String, dynamic>>? editHistory,
+    this.disputeAmount = 0,
+    this.disputeNote,
+    this.disputeResolved = false,
   })  : payments = payments ?? [],
         editHistory = editHistory ?? [];
 
@@ -1194,6 +1378,9 @@ class CompanyBill {
         deferDate: j['deferDate'],
         deferNote: j['deferNote'],
         editHistory: List<Map<String, dynamic>>.from(j['editHistory'] ?? []),
+        disputeAmount: (j['disputeAmount'] as num?)?.toDouble() ?? 0,
+        disputeNote: j['disputeNote'],
+        disputeResolved: j['disputeResolved'] ?? false,
       );
 
   Map<String, dynamic> toJson() => {
@@ -1209,6 +1396,9 @@ class CompanyBill {
         'deferDate': deferDate,
         'deferNote': deferNote,
         'editHistory': editHistory,
+        'disputeAmount': disputeAmount,
+        'disputeNote': disputeNote,
+        'disputeResolved': disputeResolved,
       };
 }
 
@@ -1781,6 +1971,323 @@ class AppDB {
     final month = '${now.year}-${now.month.toString().padLeft(2, '0')}';
     final extraBundleCost = g.extraCostThisMonth(month);
     return income - cost - extraFee - extraBundleCost;
+  }
+
+  /// 🧾 إجمالي المطالبات المفتوحة على الشركة — «الشركة عليها لك كام».
+  ///
+  /// دي الأرقام اللي انت سجّلتها بإيدك على الفواتير الغلط. لو مجمّعتش
+  /// في رقم واحد، بتفضل متفرّقة على عشرين فاتورة ومحدش بيتابعها،
+  /// فتضيع.
+  double get totalOpenDisputes => companyBills
+      .where((b) => b.hasOpenDispute)
+      .fold<double>(0, (s, b) => s + b.disputeAmount);
+
+  /// عدد الفواتير اللي لسه فيها مطالبة مفتوحة.
+  int get openDisputeCount =>
+      companyBills.where((b) => b.hasOpenDispute).length;
+
+  /// 🧾 المطالبات المفتوحة لكل خط — مرتّبة بالأكبر.
+  List<({Group group, double amount, int count})> disputesByLine() {
+    final byGid = <String, ({double amount, int count})>{};
+    for (final b in companyBills.where((b) => b.hasOpenDispute)) {
+      final cur = byGid[b.groupId] ?? (amount: 0.0, count: 0);
+      byGid[b.groupId] =
+          (amount: cur.amount + b.disputeAmount, count: cur.count + 1);
+    }
+    final out = <({Group group, double amount, int count})>[];
+    for (final e in byGid.entries) {
+      final g = groups.where((x) => x.id == e.key).firstOrNull;
+      if (g == null) continue;
+      out.add((group: g, amount: e.value.amount, count: e.value.count));
+    }
+    out.sort((a, b) => b.amount.compareTo(a.amount));
+    return out;
+  }
+
+  /// 📈 خطوط شكلها الشركة رفعت سعرها.
+  ///
+  /// الشرط: **آخر فاتورتين فعليتين** على الخط الاتنين أعلى من فاتورة
+  /// الشركة المسجّلة، وبنفس الرقم تقريباً.
+  ///
+  /// ⚠️ فاتورة واحدة عالية = غلطة أو زيادة استهلاك، مش رفع سعر — عشان كده
+  /// بنطلب اتنين ورا بعض. من غير الشرط ده التنبيه هيرنّ كل شهر على غلطات
+  /// عادية، وهتتعوّد تتجاهله.
+  ///
+  /// [tolerance] = الفرق المسموح بيه بين الفاتورتين عشان نعتبرهم نفس الرقم.
+  List<({Group group, double oldPrice, double newPrice})> priceIncreaseSuspects(
+      {double tolerance = 5}) {
+    final out = <({Group group, double oldPrice, double newPrice})>[];
+    for (final g in groups) {
+      if (g.fixedBillAmount <= 0) continue;
+      final actual = companyBills
+          .where((b) => b.groupId == g.id && b.isActual && b.actualAmount > 0)
+          .toList()
+        ..sort((a, b) => b.month.compareTo(a.month));
+      if (actual.length < 2) continue;
+      final a = actual[0].actualAmount, b = actual[1].actualAmount;
+      // لازم الاتنين أعلى من المسجّل، وقريبين من بعض.
+      if (a <= g.fixedBillAmount || b <= g.fixedBillAmount) continue;
+      if ((a - b).abs() > tolerance) continue;
+      out.add((group: g, oldPrice: g.fixedBillAmount, newPrice: a));
+    }
+    out.sort((x, y) => (y.newPrice - y.oldPrice).compareTo(x.newPrice - x.oldPrice));
+    return out;
+  }
+
+  /// 🔮 ربح خط في شهر **معيّن** — نفس معادلة [groupProfit] بالظبط، بس
+  /// بتاخد الشهر بدل ما تفترض النهاردة.
+  ///
+  /// اللي بيفرق من شهر للتاني: الباقات الإضافية المؤقتة (بتخلص)، والخط
+  /// اللي اتقفل (بيبطّل يجيب دخل وتكلفة مع بعض).
+  double groupProfitIn(String gid, String month) {
+    final g = groups.firstWhere((x) => x.id == gid,
+        orElse: () => Group(id: '', phone: ''));
+    if (g.id.isEmpty) return 0;
+    // الخط المقفول: مفيش فاتورة ومفيش عملاء بيدفعوا — الربح صفر.
+    if (g.isClosedIn(month)) return 0;
+    final income = membersOf(gid).fold<double>(0, (s, m) => s + m.price);
+    final cost = g.profitBasis;
+    if (cost <= 0 && g.type != 'manual') return 0;
+    return income - cost - groupExtraLineFee(gid) - g.extraCostThisMonth(month);
+  }
+
+  /// 🔮 توقّع ربح الشهر [month] كله.
+  ///
+  /// ⚠️ **مش تخمين.** الربح بيتحسب أصلاً على [Group.profitBasis] — تكلفة
+  /// الشهر الواحد — فهو أصلاً مستوي على طول الشهور، مابيقفزش مع دورة
+  /// «شهر وشهر». اللي بيغيّره حاجتين بس:
+  ///
+  ///   * باقة إضافية مؤقتة بتخلص → التكلفة بتقل → الربح بيزيد
+  ///   * خط بيتقفل → دخله وتكلفته بيروحوا مع بعض
+  ///
+  /// فالرقم ده هو ربحك الشهر ده **لو مافيش عميل جديد ولا خارج**.
+  double profitForecast(String month, List<Rental> rentals) {
+    final bills = groups.fold<double>(0, (s, g) => s + groupProfitIn(g.id, month));
+    final rentalIncome = rentals
+        .where((r) => r.status == 'active')
+        .fold<double>(0, (s, r) => s + r.rent);
+    final gifts = groups
+        .where((g) => !g.isClosedIn(month))
+        .fold<double>(0, (s, g) => s + g.giftProfit);
+    final points = groups
+        .where((g) => !g.isClosedIn(month))
+        .fold<double>(0, (s, g) => s + g.monthlyPointsValue);
+    return bills + rentalIncome + gifts + points;
+  }
+
+  /// ⚖️ الاعتراضات المفتوحة مجمّعة **لكل شركة**.
+  ///
+  /// الاعتراض بيتسجّل على فاتورة خط واحد، فبتفضل شايف «٣٠٠ ج هنا، ٢٠٠ ج
+  /// هناك» ومش عارف انت مستحق كام من كل شركة. لما تروح تراجع مع الشركة
+  /// محتاج رقم واحد مجمّع تقف بيه قدامهم.
+  ///
+  /// مرتّبة بالأكبر — الشركة اللي مستحق منها أكتر هي اللي تبدأ بيها.
+  List<({String provider, double open, double resolved, int count})>
+      disputesByProvider() {
+    final open = <String, double>{};
+    final resolved = <String, double>{};
+    final count = <String, int>{};
+    for (final b in companyBills) {
+      if (b.disputeAmount <= 0) continue;
+      final g = groups.where((x) => x.id == b.groupId).firstOrNull;
+      final p = (g?.provider?.isNotEmpty ?? false) ? g!.provider! : 'غير محدد';
+      if (b.disputeResolved) {
+        resolved[p] = (resolved[p] ?? 0) + b.disputeAmount;
+      } else {
+        open[p] = (open[p] ?? 0) + b.disputeAmount;
+        count[p] = (count[p] ?? 0) + 1;
+      }
+    }
+    final all = {...open.keys, ...resolved.keys};
+    final rows = all
+        .map((p) => (
+              provider: p,
+              open: open[p] ?? 0,
+              resolved: resolved[p] ?? 0,
+              count: count[p] ?? 0,
+            ))
+        .toList()
+      ..sort((a, b) => b.open.compareTo(a.open));
+    return rows;
+  }
+
+  /// 📊 كشف حساب شركة: كل شهر بصفّه — المتوقع، اللي نزل، الفرق، والمعترض عليه.
+  ///
+  /// ده اللي بتقف بيه قدام الشركة. من غيره بتفتح كل فاتورة لوحدها وتجمع
+  /// بالورقة والقلم، وأول ما تغلط في جمعة بتخسر حقك.
+  ///
+  /// [provider] فاضي = كل الشركات مع بعض.
+  /// مرتّب من الأحدث للأقدم.
+  List<
+      ({
+        String month,
+        double expected,
+        double actual,
+        double diff,
+        double dispute,
+        int bills
+      })> companyStatement(String? provider) {
+    final ids = groups
+        .where((g) =>
+            provider == null ||
+            provider.isEmpty ||
+            (g.provider ?? '') == provider)
+        .map((g) => g.id)
+        .toSet();
+    if (ids.isEmpty) return const [];
+
+    final byMonth = <String, List<CompanyBill>>{};
+    for (final b in companyBills) {
+      if (!ids.contains(b.groupId)) continue;
+      byMonth.putIfAbsent(b.month, () => []).add(b);
+    }
+
+    final rows = byMonth.entries.map((e) {
+      final expected = e.value.fold<double>(0, (s, b) => s + b.fixedAmount);
+      final actual = e.value.fold<double>(0, (s, b) => s + b.actualAmount);
+      return (
+        month: e.key,
+        expected: expected,
+        actual: actual,
+        diff: actual - expected,
+        dispute: e.value.fold<double>(0, (s, b) => s + b.disputeAmount),
+        bills: e.value.length,
+      );
+    }).toList()
+      ..sort((a, b) => b.month.compareTo(a.month));
+    return rows;
+  }
+
+  /// 🧾 كام خط دوره الشهر ده وما اتسجّلّوش فاتورة؟
+  ///
+  /// الخط اللي **مش دوره** مابيتحسبش ناقص — ده صح إنه فاضي. لو حسبناه،
+  /// التذكير الأسبوعي كان هيقول لك «فيه ٣٠ فاتورة ناقصة» كل أسبوع وانت
+  /// مظبوط، فتتعوّد تتجاهله وتضيّع النقص الحقيقي.
+  int missingBillsCount(String month) {
+    final added = companyBills
+        .where((b) => b.month == month)
+        .map((b) => b.groupId)
+        .toSet();
+    return groups.where((g) {
+      if (g.parentGroupId?.isNotEmpty ?? false) return false;
+      if (added.contains(g.id)) return false;
+      if (g.isClosedIn(month)) return false;
+      if (g.fixedBillAmount <= 0) return false;
+      return g.isDueIn(month) ?? false;
+    }).length;
+  }
+
+  /// 🏢 الشركات اللي عندك خطوط عليها فعلاً — للاختيار في التصدير.
+  List<String> get activeProviders {
+    final s = groups
+        .map((g) => g.provider ?? '')
+        .where((p) => p.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    return s;
+  }
+
+  /// ⚖️ إجمالي الاعتراضات المفتوحة في البرنامج كله.
+  double get openDisputesTotal => companyBills
+      .where((b) => b.hasOpenDispute)
+      .fold<double>(0, (s, b) => s + b.disputeAmount);
+
+  /// 📋 انسخ إعدادات الدورة من خط لخطوط تانية — بيرجّع عدد اللي اتغيّر.
+  ///
+  /// بينسخ حاجتين بس: **العلامة** (المرساة) و**طول الدورة**. يعني الخطوط
+  /// دي هتنزل فواتيرها في نفس الشهور.
+  ///
+  /// ⚠️ **مش** بينسخ الاستثناءات (`billMonthOverrides`) ولا المبلغ. الاستثناء
+  /// معناه «الشركة غلطت في الخط ده الشهر ده» — لو نسخناه لخط تاني نبقى
+  /// اخترعنا غلطة ماحصلتش. والمبلغ بيختلف من خط للتاني بطبيعته.
+  ///
+  /// ⚠️ خط المصدر لو مالوش علامة أصلاً، مابننسخش حاجة — مسح علامات
+  /// خطوط سليمة أسوأ بكتير من إن العملية ما تتنفّذش.
+  int copyCycle(String srcGid, List<String> targetGids) {
+    final src = groups.where((g) => g.id == srcGid).firstOrNull;
+    if (src == null) return 0;
+    final anchor = src.effectiveBillAnchor;
+    if (anchor == null) return 0;
+    var n = 0;
+    for (final id in targetGids) {
+      if (id == srcGid) continue;
+      final g = groups.where((x) => x.id == id).firstOrNull;
+      if (g == null) continue;
+      if (g.billAnchorMonth == anchor &&
+          g.billCycleMonths == src.billCycleMonths) {
+        continue; // زي بعضه خلاص
+      }
+      g.billAnchorMonth = anchor;
+      g.billCycleMonths = src.billCycleMonths;
+      n++;
+    }
+    return n;
+  }
+
+  /// 💵 الربح **الحقيقي** = الربح المعروض + القسايم موزّعة على الشهور.
+  ///
+  /// ⚠️ رقم **زيادة**، مش بديل. الربح الأساسي في البرنامج كله لسه زي ما هو
+  /// بالظبط — عمداً. لو غيّرناه، كل رقم في كل شاشة كان هيتحرّك من غير ما
+  /// تعرف ليه، وساعتها مش هتثق في أي رقم منهم.
+  ///
+  /// القسيمة فلوس حقيقية بتيجي لك، بس بتنزل كل ٦ شهور أو سنة — فبتتوزّع
+  /// على الشهور عشان الرقم يبقى قابل للبناء عليه.
+  double realProfitForecast(String month, List<Rental> rentals) {
+    final vouchers = groups
+        .where((g) => !g.isClosedIn(month))
+        .fold<double>(0, (s, g) => s + g.voucherMonthlyValue);
+    return profitForecast(month, rentals) + vouchers;
+  }
+
+  /// 🎫 إجمالي القسايم الشهرية — الفرق بين الربح المعروض والحقيقي.
+  double voucherMonthlyTotal(String month) => groups
+      .where((g) => !g.isClosedIn(month))
+      .fold<double>(0, (s, g) => s + g.voucherMonthlyValue);
+
+  /// 👥 تكلفة الخط لكل عميل عليه.
+  ///
+  /// بتجاوب على «الخط ده بيكلفني كام لكل عميل، وانا باخد منه كام؟» — وهو
+  /// السؤال اللي بيحدد تسعّر بكام وتقبل عميل جديد ولا لأ.
+  ///
+  /// [costPerClient] = أساس الربح ÷ عدد العملاء (تكلفة الشهر الواحد).
+  /// [avgPrice] = متوسط اللي بتاخده من العميل.
+  /// الفرق بينهم هو ربحك من كل عميل.
+  ({double costPerClient, double avgPrice, int clients}) lineCostPerClient(
+      String gid) {
+    final g = groups.where((x) => x.id == gid).firstOrNull;
+    if (g == null) return (costPerClient: 0, avgPrice: 0, clients: 0);
+    final ms = membersOf(gid);
+    if (ms.isEmpty) {
+      // مفيش عملاء: التكلفة كلها عليك انت، ومفيش متوسط يتحسب.
+      return (costPerClient: g.profitBasis, avgPrice: 0, clients: 0);
+    }
+    final income = ms.fold<double>(0, (s, m) => s + m.price);
+    return (
+      costPerClient: g.profitBasis / ms.length,
+      avgPrice: income / ms.length,
+      clients: ms.length,
+    );
+  }
+
+  /// 📋 ليه الشهر الجاي مختلف عن الشهر ده؟ — سطر لكل سبب.
+  ///
+  /// من غير الأسباب دي الرقم بيبقى نبوءة معندهاش سبب، والمستخدم مش هيصدّقها
+  /// ولا هيعرف يتصرّف بيها.
+  List<({String reason, double delta})> profitForecastReasons(
+      String fromMonth, String toMonth) {
+    final out = <({String reason, double delta})>[];
+    for (final g in groups) {
+      final before = groupProfitIn(g.id, fromMonth);
+      final after = groupProfitIn(g.id, toMonth);
+      if ((after - before).abs() < 0.5) continue;
+      final why = g.isClosedIn(toMonth) && !g.isClosedIn(fromMonth)
+          ? 'الخط ${g.phone} بيتقفل'
+          : 'باقة إضافية على ${g.phone} بتخلص';
+      out.add((reason: why, delta: after - before));
+    }
+    out.sort((a, b) => b.delta.abs().compareTo(a.delta.abs()));
+    return out;
   }
 
   /// فواتير مجموعة مرتبة من الأحدث للأقدم

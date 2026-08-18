@@ -394,6 +394,8 @@ class _AuditCardState extends State<_AuditCard> {
                   _deferBtn(context),
                   const SizedBox(width: 6),
                 ],
+                _disputeBtn(context),
+                const SizedBox(width: 6),
                 _editBtn(context),
                 const SizedBox(width: 6),
                 _linkBtn(context),
@@ -783,7 +785,7 @@ class _AuditCardState extends State<_AuditCard> {
       child: Column(children: [
         row(
           '💰',
-          'سعر فاتورة الشركة الخام',
+          MoneyWords.rawBill,
           g.fixedBillAmount > 0 ? '${g.fixedBillAmount.toStringAsFixed(0)} ج' : '— اضغط',
           g.isBimonthly ? 'اللي بينزل كل شهرين' : 'اللي بينزل كل شهر',
           () => _editPricingDialog(context, g, raw: true),
@@ -792,7 +794,7 @@ class _AuditCardState extends State<_AuditCard> {
         const Divider(height: 8),
         row(
           '📊',
-          'أساس الربح (الشهر الواحد)',
+          '${MoneyWords.profitBasis} (الشهر الواحد)',
           g.profitBillAmount != null
               ? '${g.profitBillAmount!.toStringAsFixed(0)} ج'
               : 'زي الخام',
@@ -819,6 +821,43 @@ class _AuditCardState extends State<_AuditCard> {
               ),
             ]),
           ),
+
+        // ── 👥 الخط ده بيكلّفك كام لكل عميل؟ ─────────────────
+        // السؤال اللي بيحدد تسعّر بكام وتقبل عميل جديد ولا لأ. من غيره
+        // بتقارن رقم الفاتورة الكبير بسعر العميل الصغير ومافيش معنى.
+        Builder(builder: (_) {
+          final c = widget.prov.db.lineCostPerClient(g.id);
+          if (c.clients == 0) return const SizedBox.shrink();
+          final margin = c.avgPrice - c.costPerClient;
+          return Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Row(children: [
+              const Icon(Icons.groups_outlined,
+                  size: 13, color: Color(0xFF1565C0)),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  '${c.clients} عملاء · بيكلّفك '
+                  '${c.costPerClient.toStringAsFixed(0)} ج للعميل، '
+                  'وبتاخد ${c.avgPrice.toStringAsFixed(0)} ج',
+                  style: GoogleFonts.cairo(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF1565C0)),
+                ),
+              ),
+              Text(
+                '${margin >= 0 ? '+' : ''}${margin.toStringAsFixed(0)} ج',
+                style: GoogleFonts.cairo(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w900,
+                    color: margin >= 0
+                        ? const Color(0xFF2E7D32)
+                        : const Color(0xFFC62828)),
+              ),
+            ]),
+          );
+        }),
       ]),
     );
   }
@@ -836,7 +875,10 @@ class _AuditCardState extends State<_AuditCard> {
         textDirection: TextDirection.rtl,
         child: AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(raw ? '💰 سعر فاتورة الشركة الخام' : '📊 أساس الربح',
+          title: Text(
+              raw
+                  ? '💰 ${MoneyWords.rawBill}'
+                  : '📊 ${MoneyWords.profitBasis}',
               style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 15)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -844,9 +886,9 @@ class _AuditCardState extends State<_AuditCard> {
             children: [
               Text(
                 raw
-                    ? 'الرقم اللي الشركة بتاخده فعلاً. ملوش دعوة بالربح خالص.'
-                    : 'تكلفة الشهر الواحد اللي الربح بيتحسب عليها. سيبها فاضية '
-                        'عشان ترجع تتحسب على السعر الخام.',
+                    ? MoneyWords.rawBillWhat
+                    : '${MoneyWords.profitBasisWhat} سيبها فاضية عشان ترجع '
+                        'تتحسب على ${MoneyWords.rawBill}.',
                 style: GoogleFonts.cairo(fontSize: 11, color: AppColors.muted),
               ),
               const SizedBox(height: 10),
@@ -1029,7 +1071,7 @@ class _AuditCardState extends State<_AuditCard> {
       );
 
   void _showEditSheet(BuildContext context) {
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (_) => Directionality(
@@ -1058,7 +1100,7 @@ class _AuditCardState extends State<_AuditCard> {
             if (b.isActual)
               ListTile(
                 leading: const Icon(Icons.attach_money, color: Color(0xFF2E7D32)),
-                title: Text('تعديل مبلغ الفاتورة',
+                title: Text('تعديل ${MoneyWords.actualBill}',
                     style: GoogleFonts.cairo(fontSize: 13, fontWeight: FontWeight.w700)),
                 subtitle: Text('الحالي: ${b.actualAmount.toStringAsFixed(0)} ج',
                     style: GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),
@@ -1108,7 +1150,7 @@ class _AuditCardState extends State<_AuditCard> {
         textDirection: TextDirection.rtl,
         child: AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text('تعديل مبلغ الفاتورة',
+          title: Text('تعديل ${MoneyWords.actualBill}',
               style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 15)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1118,7 +1160,7 @@ class _AuditCardState extends State<_AuditCard> {
                 keyboardType: TextInputType.number,
                 textDirection: TextDirection.ltr,
                 decoration: InputDecoration(
-                  labelText: 'المبلغ الفعلي (ج)',
+                  labelText: MoneyWords.actualBillLabel,
                   labelStyle: GoogleFonts.cairo(fontSize: 13),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
@@ -1166,7 +1208,7 @@ class _AuditCardState extends State<_AuditCard> {
     final totalPaid = bills.fold<double>(0, (s, x) => s + x.paidAmount);
     final totalRemaining = bills.fold<double>(0, (s, x) => s + x.remaining);
 
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -1174,9 +1216,9 @@ class _AuditCardState extends State<_AuditCard> {
         textDirection: TextDirection.rtl,
         child: Container(
           constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
-          decoration: const BoxDecoration(
-            color: Color(0xFFf5f7fa),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+          decoration: BoxDecoration(
+            color: AppColors.bg,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
           ),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             const SizedBox(height: 10),
@@ -1383,7 +1425,7 @@ class _AuditCardState extends State<_AuditCard> {
   }
 
   Widget _splitBtn(BuildContext context) => GestureDetector(
-        onTap: () => showModalBottomSheet(
+        onTap: () => showAppSheet(
           useRootNavigator: true,
           context: context,
           isScrollControlled: true,
@@ -1397,6 +1439,28 @@ class _AuditCardState extends State<_AuditCard> {
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: const Color(0xFFA5D6A7))),
           child: const Icon(Icons.call_split, size: 14, color: Color(0xFF2E7D32)),
+        ),
+      );
+
+  // 🧾 مربع الفرق — «المفروض ٥٠٠٠ ونزلت ٥٣٠٠، سجّل الـ٣٠٠ على الشركة».
+  // اختياري بالكامل وما لوش دعوة بحساب دور الشهر اللي بعده.
+  Widget _disputeBtn(BuildContext context) => GestureDetector(
+        onTap: () => _CycleSheets.openDispute(context, prov, b),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+              color: b.hasOpenDispute ? AppColors.redLight : AppColors.surfaceAlt,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                  color: b.hasOpenDispute ? AppColors.red2 : AppColors.border)),
+          child: b.hasOpenDispute
+              ? Text('−${b.disputeAmount.toStringAsFixed(0)}',
+                  style: GoogleFonts.cairo(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.red2))
+              : Icon(Icons.report_gmailerrorred_outlined,
+                  size: 14, color: AppColors.muted),
         ),
       );
 
@@ -1687,7 +1751,7 @@ class _AuditCardState extends State<_AuditCard> {
                 textDirection: TextDirection.ltr,
                 onChanged: (_) => setLocal(() {}),
                 decoration: InputDecoration(
-                  labelText: 'المبلغ الفعلي (ج)',
+                  labelText: MoneyWords.actualBillLabel,
                   labelStyle: GoogleFonts.cairo(fontSize: 13),
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12)),

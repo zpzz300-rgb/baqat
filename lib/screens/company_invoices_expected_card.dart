@@ -35,13 +35,59 @@ class _ExpectedCardState extends State<_ExpectedCard> {
   void _saveInline() {
     final amount = double.tryParse(_amountCtrl.text.trim()) ?? 0;
     if (amount <= 0) return;
-    _checkLockThenSave(amount);
+    _checkDuplicateThenSave(amount);
   }
 
   void _finalizeSave(double amount) {
     widget.prov.addGroupBill(widget.group.id, amount, forMonth: widget.month);
     _amountCtrl.clear();
     FocusScope.of(context).unfocus();
+  }
+
+  /// 🛡 أول حاجة تتشيك: فاتورة اتسجّلت خلاص للحساب ده في نفس الشهر؟
+  ///
+  /// أشهر غلطة يدوية — تسجّل، تتلهي، ترجع تسجّل تاني، والمديونية تتضاعف
+  /// من غير ما حد ياخد باله. بنسأل قبل أي حاجة تانية.
+  void _checkDuplicateThenSave(double amount) {
+    final dup = widget.prov.existingBillFor(widget.group.id, widget.month);
+    if (dup == null) {
+      _checkLockThenSave(amount);
+      return;
+    }
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('🔁 فيه فاتورة متسجّلة خلاص',
+            style: GoogleFonts.cairo(
+                fontWeight: FontWeight.w900, fontSize: 14)),
+        content: Text(
+          'الحساب ده متسجّل عليه فاتورة ${dup.actualAmount.toStringAsFixed(0)} ج '
+          'في ${_monthLabel(widget.month)} بتاريخ ${dup.date}.\n\n'
+          'لو سجّلت تاني هيبقى عليك فاتورتين والمديونية هتتضاعف.\n\n'
+          'متأكد إن الشركة نزّلت فاتورتين فعلاً؟',
+          style: GoogleFonts.cairo(fontSize: 12),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('لأ، إلغاء',
+                style: GoogleFonts.cairo(
+                    color: AppColors.blue2, fontWeight: FontWeight.w800)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.red2),
+            onPressed: () {
+              Navigator.pop(context);
+              _checkLockThenSave(amount);
+            },
+            child: Text('أيوه، سجّل التانية',
+                style: GoogleFonts.cairo(
+                    color: AppColors.onAccent, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _checkLockThenSave(double amount) {
@@ -74,12 +120,57 @@ class _ExpectedCardState extends State<_ExpectedCard> {
   }
 
   void _checkOverAmountThenSave(double amount) {
-    // لازم يبقى المجموع مع الخطوط المضمومة، وإلا خط ضامم غيره هيطلّع
-    // تحذير «المبلغ أعلى من المتفق عليه» غلط في كل مرة تسجّل فيها فاتورته.
-    final kids =
-        LinkedLinesStrip.childrenOf(widget.prov.db, widget.group.id);
-    final fixed = widget.group.fixedBillAmount +
-        kids.fold<double>(0, (s, c) => s + c.fixedBillAmount);
+    // 📌 الحد يتحسب على الخطوط اللي **دورها** الشهر ده بس.
+    //
+    // كان بيجمع كل خطوط الحساب، فحساب فيه ٣ خطوط ودور خطين المفروض ٣٠٠٠
+    // كان الحد بتاعه ٥٠٠٠ — يعني الشركة تنزّل ٤٥٠٠ غلط والتحذير ما يضربش
+    // خالص. ده عكس الغرض من التحذير أصلاً.
+    final fixed = widget.prov
+        .expectedAccountAmount(widget.group.id, widget.month);
+
+    // 🔻 المبلغ **أقل** من المتوقع بكتير — ده مؤشر مهم زي الزيادة بالظبط.
+    //
+    // كان التحذير على الزيادة بس. لكن النقص معناه غالباً إن خط من خطوط
+    // الحساب ما نزلش، أو إن الشركة قسّمت الفاتورة — والاتنين محتاجين
+    // تراجعهم قبل ما تسجّل، مش بعدين لما الأرقام تلخبط.
+    if (fixed > 0 && amount < fixed * 0.7) {
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('🔻 المبلغ أقل من المتوقع',
+              style: GoogleFonts.cairo(
+                  fontWeight: FontWeight.w900, fontSize: 14)),
+          content: Text(
+            'المتوقع ${fixed.toStringAsFixed(0)} ج وانت كاتب '
+            '${amount.toStringAsFixed(0)} ج — أقل بـ '
+            '${(fixed - amount).toStringAsFixed(0)} ج.\n\n'
+            'غالباً خط من خطوط الحساب ما نزلش، أو الشركة قسّمت الفاتورة. '
+            'اتأكد قبل ما تسجّل.',
+            style: GoogleFonts.cairo(fontSize: 12),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('إلغاء',
+                    style: GoogleFonts.cairo(color: AppColors.muted))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.blue),
+              onPressed: () {
+                Navigator.pop(context);
+                _checkNotDueThenSave(amount);
+              },
+              child: Text('صح، سجّل',
+                  style: GoogleFonts.cairo(
+                      color: AppColors.onAccent, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     if (fixed > 0 && amount > fixed * 1.15) {
       showDialog(
         context: context,
@@ -238,29 +329,96 @@ class _ExpectedCardState extends State<_ExpectedCard> {
                       style: GoogleFonts.cairo(
                           fontSize: 10, color: AppColors.muted)),
                 const SizedBox(height: 4),
-                // التقدير لازم يبقى **اللي هيتسجّل فعلاً**: لو الخط ضامم
-                // خطوط تانية، الفاتورة الواحدة بتغطيهم كلهم، فبنعرض
-                // المجموع مش رقم الخط الرئيسي لوحده — ده اللي addGroupBill
-                // بيسجّله بالظبط، وقبل كده كان الرقمين مختلفين على الشاشة.
+                // 💰 الجملة الحاسمة: الشهر ده عليه كام — أو مفيش خالص.
+                //
+                // بنجمع الخطوط اللي **دورها** الشهر ده بس (الخط الرئيسي +
+                // المضمومين عليه). لو محدّش دوره بنكتبها بالعربي صريحة عشان
+                // لو لقيت فاتورة نزلت تعرف على طول إن فيه غلط، من غير ما
+                // تقعد تفكر هي كانت المفروض تنزل ولا لأ.
                 Builder(builder: (_) {
-                  final kids = LinkedLinesStrip.childrenOf(prov.db, g.id);
-                  final combined = g.fixedBillAmount +
-                      kids.fold<double>(0, (s, c) => s + c.fixedBillAmount);
-                  return Text(
-                    kids.isEmpty
-                        ? 'تقدير: ${g.fixedBillAmount.toStringAsFixed(0)} ج'
-                        : 'تقدير: ${combined.toStringAsFixed(0)} ج '
-                            '(${g.fixedBillAmount.toStringAsFixed(0)} + '
-                            '${kids.length} خط مضموم)',
-                    style: GoogleFonts.cairo(
-                        fontSize: 12,
-                        color: const Color(0xFF6a1b9a),
-                        fontWeight: FontWeight.w700),
+                  final lines = prov.accountLines(g.id);
+                  final due = prov.dueLinesOfAccount(g.id, month);
+                  final expected = prov.expectedAccountAmount(g.id, month);
+                  const purple = Color(0xFF6a1b9a);
+                  if (expected <= 0) {
+                    return Text(
+                      'مفيش فاتورة في ${_monthLabel(month)} — ٠',
+                      style: GoogleFonts.cairo(
+                          fontSize: 12,
+                          color: AppColors.muted,
+                          fontWeight: FontWeight.w900),
+                    );
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'الشهر ده عليه ${expected.toStringAsFixed(0)} ج',
+                        style: GoogleFonts.cairo(
+                            fontSize: 12.5,
+                            color: purple,
+                            fontWeight: FontWeight.w900),
+                      ),
+                      if (lines.length > 1)
+                        Text(
+                          'الدور على ${due.length} من ${lines.length} خط: '
+                          '${due.map((l) => l.phone).join(' • ')}',
+                          style: GoogleFonts.cairo(
+                              fontSize: 9.5,
+                              color: purple.withValues(alpha: 0.75),
+                              fontWeight: FontWeight.w600),
+                        ),
+                    ],
                   );
                 }),
+                // 🔁 زرار ظبط الدورة — تعلّم مرة واحدة والباقي يمشي لوحده
+                GestureDetector(
+                  onTap: () => _CycleSheets.openLine(context, prov, g, month),
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Text(
+                      switch (g.effectiveBillAnchor) {
+                        null => '🔁 علّم الدورة: آخر فاتورة نزلت إمتى؟',
+                        final a when g.anchorFromGroupDate =>
+                          '🔁 الدورة من تاريخ المجموعة (${_monthLabel(a)}) — غيّرها',
+                        final a => '🔁 الدورة متعلّمة من ${_monthLabel(a)} — غيّرها',
+                      },
+                      style: GoogleFonts.cairo(
+                        fontSize: 10,
+                        color: g.effectiveBillAnchor != null
+                            ? AppColors.green2
+                            : AppColors.orange,
+                        fontWeight: FontWeight.w800,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ),
+                ),
                 // 🌿 التشجير — لازم يبان هنا كمان مش في «الشهر الماضي» بس،
                 // عشان وانت بتسجّل فاتورة الشهر ده تعرف هي على كام خط.
-                LinkedLinesStrip(db: prov.db, group: g),
+                LinkedLinesStrip(
+                  db: prov.db,
+                  group: g,
+                  onManage: () => _CycleSheets.linkLines(context, prov, g),
+                ),
+                // زرار الضم — بيبان حتى لو الخط لسه مش ضامم حد، عشان ده
+                // المكان اللي بتبص فيه وانت بتراجع الفواتير.
+                if (LinkedLinesStrip.childrenOf(prov.db, g.id).isEmpty)
+                  GestureDetector(
+                    onTap: () => _CycleSheets.linkLines(context, prov, g),
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        '🌿 ضمّ خطوط تانية على الحساب ده',
+                        style: GoogleFonts.cairo(
+                          fontSize: 10,
+                          color: AppColors.blue,
+                          fontWeight: FontWeight.w800,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ),
                 if (widget.lastMonthAmount != null) ...[
                   const SizedBox(height: 2),
                   Text(

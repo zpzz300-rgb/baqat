@@ -238,7 +238,7 @@ class _TabBasePageState extends State<_TabBasePage> with RouteAware {
 
   @override
   Widget build(BuildContext context) =>
-      const Scaffold(backgroundColor: Color(0xFFF5F7FA));
+      Scaffold(backgroundColor: AppColors.bg);
 }
 
 class _TabRoot extends StatelessWidget {

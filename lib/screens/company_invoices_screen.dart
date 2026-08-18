@@ -2,23 +2,63 @@
 // شاشة مراجعة فواتير شركات الاتصالات — مركزية وتفصيلية
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Clipboard — نسخ الجدول لإكسل
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/app_provider.dart';
 import '../models/models.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/app_search.dart';
+import '../services/breakpoints.dart';
 import '../services/view_prefs.dart';
 import '../services/export_service.dart';
 import '../widgets/app_search_bar.dart';
+import '../widgets/common.dart';
 import '../widgets/linked_lines_strip.dart';
+import '../widgets/money_words.dart';
+import '../widgets/expected_actual_chart.dart';
 
 part 'company_invoices_audit_card.dart';
 part 'company_invoices_expected_card.dart';
 part 'company_invoices_split_sheet.dart';
+part 'company_invoices_cycle_views.dart';
+part 'company_invoices_cycle_sheets.dart';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 enum _Period { last, current, next }
+
+/// ⌨️ نيّة التنقّل للشهر اللي قبله (سهم اليمين في الشاشة العربية).
+class _PrevMonthIntent extends Intent {
+  const _PrevMonthIntent();
+}
+
+/// ⌨️ نيّة التنقّل للشهر اللي بعده (سهم الشمال في الشاشة العربية).
+class _NextMonthIntent extends Intent {
+  const _NextMonthIntent();
+}
+
+/// سهم تنقّل بين الشهور. `onTap = null` يعني وصلنا الآخر.
+class _MonthArrow extends StatelessWidget {
+  const _MonthArrow(
+      {required this.icon, required this.tip, required this.onTap});
+
+  final IconData icon;
+  final String tip;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+        tooltip: tip,
+        onPressed: onTap,
+        icon: Icon(icon, size: 20),
+        color: AppColors.blue2,
+        disabledColor: AppColors.border,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+        visualDensity: VisualDensity.compact,
+      );
+}
 
 enum _Anomaly { none, doubled, repeated, unexpectedBimonthly, sameMonthDuplicate }
 
@@ -64,6 +104,15 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
   String _sort = 'default'; // default | remaining | deadline | recent
   bool _onlyOverdue = false; // فات موعدها بس
   bool _missingOpen = false; // عرض الفواتير الغايبة
+  _CycleView _view = _CycleView.cards; // 🎚 طريقة العرض
+  /// 🔍 تكبير/تصغير الجدول. ١.٠ = المقاس الطبيعي.
+  ///
+  /// لازمته: على الكمبيوتر بتحب تصغّر عشان تشوف سنة كاملة في نظرة، وعلى
+  /// التاب بتحب تكبّر عشان الأرقام تبقى مقروءة. نفس الجدول، احتياجين.
+  double _zoom = 1.0;
+
+  /// 🗓 كام شهر يبان في الجدول. null = يتحسب من مقاس الشاشة.
+  int? _monthCount;
   final _searchCtrl = TextEditingController();
 
   // 💾 بيفتكر الفلاتر والترتيب
@@ -79,6 +128,16 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
         _typeFilter = m['type'] ?? 'all';
         _sort = m['sort'] ?? 'default';
         _onlyOverdue = m['onlyOverdue'] ?? false;
+        final vi = m['view'];
+        if (vi is int && vi >= 0 && vi < _CycleView.values.length) {
+          _view = _CycleView.values[vi];
+        }
+        // الحد مقصود: أقل من ٠.٧ الأرقام مابتتقراش، وأكتر من ١.٦ بيبقى
+        // عمودين في الشاشة. ولو القيمة المحفوظة بايظة بنرجع للطبيعي.
+        final z = m['zoom'];
+        if (z is num && z >= 0.7 && z <= 1.6) _zoom = z.toDouble();
+        final mc = m['monthCount'];
+        if (mc is int && mc >= 4 && mc <= 24) _monthCount = mc;
       });
     });
   }
@@ -96,6 +155,9 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
       'type': _typeFilter,
       'sort': _sort,
       'onlyOverdue': _onlyOverdue,
+      'view': _view.index,
+      'zoom': _zoom,
+      if (_monthCount != null) 'monthCount': _monthCount,
     });
   }
 
@@ -315,9 +377,14 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
         (b) => b.groupId == g.id && b.month == prevM && b.actualAmount > 0);
   }
 
-  /// مش دور الخط ده الشهر ده — إما نظام «شهر وشهر» بتاعه هو، أو حساب فوترة
-  /// (تبادل بين شقّين من الخطوط) مش عليه الدور فيه الشهر ده.
+  /// مش دور الخط ده الشهر ده.
+  ///
+  /// لو الخط متعلّم عليه (فيه مرساة دورة) بنمشي بالمرساة وخلاص — دي أدق
+  /// حاجة عندنا وانت اللي كاتبها بإيدك. لو لأ بنرجع للاستنتاج القديم من
+  /// تاريخ الفواتير وحسابات الشقّين، زي ما كان بالظبط.
   bool _isNotDueThisMonth(Group g, AppDB db, AppProvider prov) {
+    final byAnchor = g.isDueIn(_targetMonth);
+    if (byAnchor != null) return !byAnchor;
     if (_isBimonthlyFreeThisMonth(g, db)) return true;
     return !prov.isGroupDueForBilling(g.id, _targetMonth);
   }
@@ -362,11 +429,13 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
     for (final g in db.groups) {
       if (g.parentGroupId != null && g.parentGroupId!.isNotEmpty) continue;
       if (g.fixedBillAmount <= 0) continue;
-      if (!prov.isGroupDueForBilling(g.id, m)) continue;
+      // 📌 «متوقع» = مجموع الخطوط اللي دورها الشهر ده بس. كان بيجمع كل
+      // خطوط الحساب، فالملخص كان بيقول رقم أعلى من اللي الكارت نفسه
+      // بيعرضه — رقمين مختلفين لنفس الحاجة على نفس الشاشة.
+      final dueTotal = prov.expectedAccountAmount(g.id, m);
+      if (dueTotal <= 0) continue;
       expectedCount++;
-      final children = db.groups.where((c) => c.parentGroupId == g.id);
-      expectedTotal +=
-          g.fixedBillAmount + children.fold<double>(0, (s, c) => s + c.fixedBillAmount);
+      expectedTotal += dueTotal;
       if (billedGids.contains(g.id)) {
         billedCount++;
       } else {
@@ -400,8 +469,27 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 6)],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('📊 ملخص ${_monthLabel(_targetMonth)}',
-            style: GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.blue2)),
+        // الدوسة على العنوان بتفتح تقرير الفروق — «دفعت زيادة كام؟»
+        // من غير ما تفتح كل فاتورة وتقارن بإيدك.
+        InkWell(
+          onTap: () =>
+              _CycleSheets.openDiffReport(context, prov, _targetMonth),
+          borderRadius: BorderRadius.circular(6),
+          child: Row(children: [
+            Text('📊 ملخص ${_monthLabel(_targetMonth)}',
+                style: GoogleFonts.cairo(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                    color: AppColors.blue2)),
+            const SizedBox(width: 5),
+            Text('— شوف الفروق',
+                style: GoogleFonts.cairo(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.blue,
+                    decoration: TextDecoration.underline)),
+          ]),
+        ),
         const SizedBox(height: 8),
         Row(children: [
           _statTile('متوقع', '${s.expectedCount} خط', '${s.expectedTotal.toStringAsFixed(0)} ج',
@@ -441,7 +529,432 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
             ),
           ),
         ],
+
+        // ── 🔮 توقّع الربح ──────────────────────────────────────
+        // الملخص فوق بيقول «هيتشال منك كام». ده بيقول «هيفضل معاك كام» —
+        // وهو الرقم اللي بيهمّك فعلاً.
+        _profitForecastRow(db),
+
+        // ── 🧾 الشركة عليها لك كام ───────────────────────────
+        _disputesRow(db),
+
+        // ── 📈 الشركة رفعت السعر؟ ────────────────────────────
+        _priceIncreaseRow(db, prov),
       ]),
+    );
+  }
+
+  /// 🔮 ربحك الشهر ده والشهر الجاي.
+  ///
+  /// الربح بيتحسب على **أساس الربح** (تكلفة الشهر الواحد) فهو مستوي على
+  /// طول الشهور ومابيقفزش مع دورة «شهر وشهر». عشان كده لو الشهرين طلعوا
+  /// نفس الرقم مابنعرضش الشهر الجاي أصلاً — رقم متكرر مالوش لازمة.
+  Widget _profitForecastRow(AppDB db) {
+    final next = _nextMonthOf(_targetMonth);
+    final now = db.profitForecast(_targetMonth, db.rentals);
+    final soon = db.profitForecast(next, db.rentals);
+    if (now == 0 && soon == 0) return const SizedBox.shrink();
+    final changed = (soon - now).abs() >= 1;
+    final reasons = changed
+        ? db.profitForecastReasons(_targetMonth, next)
+        : const <({String reason, double delta})>[];
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: InkWell(
+        onTap: reasons.isEmpty ? null : () => _showForecastReasons(next, reasons),
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceAlt,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Row(children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('🔮 ربحك في ${_monthLabel(_targetMonth)}',
+                      style: GoogleFonts.cairo(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.muted)),
+                  if (changed)
+                    Text(
+                      'الشهر الجاي ${soon.toStringAsFixed(0)} ج — '
+                      '${soon > now ? 'أحسن' : 'أقل'} بـ '
+                      '${(soon - now).abs().toStringAsFixed(0)} ج · دوس تعرف ليه',
+                      style: GoogleFonts.cairo(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: soon > now ? AppColors.green2 : AppColors.orange),
+                    )
+                  else
+                    Text('الشهر الجاي زيه — مفيش حاجة بتتغيّر',
+                        style: GoogleFonts.cairo(
+                            fontSize: 10, color: AppColors.muted)),
+                  // 🎫 القسايم — فلوس حقيقية بس بتنزل كل ٦ شهور أو سنة،
+                  // فبتتوزّع على الشهور. رقم زيادة، مش بديل.
+                  if (db.voucherMonthlyTotal(_targetMonth) > 0)
+                    Text(
+                      'ومعاهم ${db.voucherMonthlyTotal(_targetMonth).toStringAsFixed(0)} ج '
+                      'قسايم موزّعة → الحقيقي '
+                      '${db.realProfitForecast(_targetMonth, db.rentals).toStringAsFixed(0)} ج',
+                      style: GoogleFonts.cairo(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.blue2),
+                    ),
+                ],
+              ),
+            ),
+            Text('${now.toStringAsFixed(0)} ج',
+                style: GoogleFonts.cairo(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                    color: now >= 0 ? AppColors.green2 : AppColors.red2)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// 🧾 مجموع اللي انت مطالب بيه الشركة — مفيش غيره بيلمّه في رقم واحد.
+  ///
+  /// من غير الرقم ده، المطالبات بتفضل متفرّقة على فواتير كتير ومحدش
+  /// بيتابعها، فتضيع فلوس انت أصلاً سجّلتها بإيدك.
+  Widget _disputesRow(AppDB db) {
+    final total = db.totalOpenDisputes;
+    if (total <= 0) return const SizedBox.shrink();
+    final byLine = db.disputesByLine();
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: InkWell(
+        onTap: () => _showDisputesBreakdown(db, byLine, total),
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: AppColors.orangeLight,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('🧾 الشركة عليها لك',
+                      style: GoogleFonts.cairo(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.orange)),
+                  Text(
+                      '${db.openDisputeCount} فاتورة في ${byLine.length} خط · '
+                      'دوس تشوف التفصيل',
+                      style: GoogleFonts.cairo(
+                          fontSize: 10, color: AppColors.orange)),
+                ],
+              ),
+            ),
+            Text('${total.toStringAsFixed(0)} ج',
+                style: GoogleFonts.cairo(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.orange)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  void _showDisputesBreakdown(
+      AppDB db,
+      List<({Group group, double amount, int count})> byLine,
+      double total) {
+    showDialog(
+      context: context,
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('الشركة عليها لك ${total.toStringAsFixed(0)} ج',
+              style:
+                  GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 14)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── ⚖️ مجمّع لكل شركة ─────────────────────────
+                // ده الرقم اللي بتقف بيه قدام الشركة. التفصيل بالخط تحته
+                // عشان لما يسألوك «فين؟» تلاقي الأرقام جاهزة.
+                for (final r in db.disputesByProvider())
+                  if (r.open > 0)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Row(children: [
+                        Expanded(
+                          child: Text(
+                            '${_providerLabel(r.provider)} · ${r.count} فاتورة'
+                            // اللي اتحلّ بيبان عشان تعرف إن المراجعة بتجيب
+                            // نتيجة فعلاً — مش بتضيع.
+                            '${r.resolved > 0 ? ' · اتحلّ ${r.resolved.toStringAsFixed(0)} ج قبل كده' : ''}',
+                            style: GoogleFonts.cairo(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900,
+                                color: AppColors.text),
+                          ),
+                        ),
+                        Text('${r.open.toStringAsFixed(0)} ج',
+                            style: GoogleFonts.cairo(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w900,
+                                color: AppColors.orange)),
+                      ]),
+                    ),
+                const Divider(height: 16),
+                Text('التفصيل بالخط:',
+                    style: GoogleFonts.cairo(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.muted)),
+                for (final e in byLine)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(e.group.phone,
+                                textDirection: TextDirection.ltr,
+                                style: GoogleFonts.cairo(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.text)),
+                            Text('${e.count} فاتورة',
+                                style: GoogleFonts.cairo(
+                                    fontSize: 10, color: AppColors.muted)),
+                          ],
+                        ),
+                      ),
+                      Text('${e.amount.toStringAsFixed(0)} ج',
+                          style: GoogleFonts.cairo(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w900,
+                              color: AppColors.orange)),
+                    ]),
+                  ),
+                const SizedBox(height: 8),
+                Text(
+                  'دي الأرقام اللي انت كاتبها بإيدك على الفواتير الغلط. '
+                  'أول ما الشركة تعوّضك، افتح الفاتورة وعلّم إن المطالبة اتقفلت.',
+                  style:
+                      GoogleFonts.cairo(fontSize: 10.5, color: AppColors.muted),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('تمام', style: GoogleFonts.cairo()),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+
+  static String _providerLabel(String p) => switch (p) {
+        'vodafone' => 'فودافون',
+        'etisalat' => 'اتصالات',
+        'orange' => 'أورنچ',
+        'we' => 'وي',
+        _ => p,
+      };
+
+  /// 📈 الشركة رفعت سعر خطوط؟
+  ///
+  /// بيبان بس لما **آخر فاتورتين** على الخط يبقوا أعلى من المسجّل وبنفس
+  /// الرقم — فاتورة واحدة عالية غلطة، مش رفع سعر.
+  Widget _priceIncreaseRow(AppDB db, AppProvider prov) {
+    final ups = db.priceIncreaseSuspects();
+    if (ups.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: InkWell(
+        onTap: () => _showPriceIncreases(ups, prov),
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: AppColors.redLight,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(children: [
+            Icon(Icons.trending_up, size: 18, color: AppColors.red2),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('📈 ${ups.length} خط شكل الشركة رفعت سعرهم',
+                      style: GoogleFonts.cairo(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.red2)),
+                  Text('آخر فاتورتين أعلى من المسجّل · دوس تظبّطهم',
+                      style: GoogleFonts.cairo(
+                          fontSize: 10, color: AppColors.red2)),
+                ],
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  void _showPriceIncreases(
+      List<({Group group, double oldPrice, double newPrice})> ups,
+      AppProvider prov) {
+    showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setLocal) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Text('الشركة رفعت السعر؟',
+                style: GoogleFonts.cairo(
+                    fontWeight: FontWeight.w900, fontSize: 14)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'الخطوط دي آخر فاتورتين عليها نزلوا أعلى من الرقم اللي '
+                    'انت مسجّله — يعني على الأغلب ده بقى السعر الجديد.\n\n'
+                    'لو ظبّطت الرقم، التقدير هيبقى صح. الربح هيتأثر لأن '
+                    'التكلفة زادت فعلاً.',
+                    style: GoogleFonts.cairo(
+                        fontSize: 11, color: AppColors.muted),
+                  ),
+                  const SizedBox(height: 10),
+                  for (final u in ups)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(u.group.phone,
+                                  textDirection: TextDirection.ltr,
+                                  style: GoogleFonts.cairo(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.text)),
+                              Text(
+                                  '${u.oldPrice.toStringAsFixed(0)} ← '
+                                  '${u.newPrice.toStringAsFixed(0)} ج',
+                                  textDirection: TextDirection.ltr,
+                                  style: GoogleFonts.cairo(
+                                      fontSize: 10.5, color: AppColors.red2)),
+                            ],
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            prov.setGroupFixedBill(u.group.id, u.newPrice);
+                            setLocal(() {});
+                          },
+                          child: Text('ظبّط',
+                              style: GoogleFonts.cairo(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppColors.blue2)),
+                        ),
+                      ]),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text('تمام', style: GoogleFonts.cairo()),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showForecastReasons(
+      String month, List<({String reason, double delta})> reasons) {
+    showDialog(
+      context: context,
+      builder: (_) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('ليه ${_monthLabel(month)} مختلف؟',
+              style:
+                  GoogleFonts.cairo(fontWeight: FontWeight.w900, fontSize: 14)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final r in reasons)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(children: [
+                      Expanded(
+                        child: Text(r.reason,
+                            style: GoogleFonts.cairo(
+                                fontSize: 12, color: AppColors.text)),
+                      ),
+                      Text(
+                        '${r.delta > 0 ? '+' : ''}${r.delta.toStringAsFixed(0)} ج',
+                        style: GoogleFonts.cairo(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w900,
+                            color: r.delta > 0
+                                ? AppColors.green2
+                                : AppColors.orange),
+                      ),
+                    ]),
+                  ),
+                const SizedBox(height: 10),
+                Text(
+                  'ده لو مافيش عميل جديد ولا خارج. البرنامج مابيتوقعش '
+                  'العملاء — بيحسب اللي هو عارفه بس.',
+                  style:
+                      GoogleFonts.cairo(fontSize: 10.5, color: AppColors.muted),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('تمام', style: GoogleFonts.cairo()),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -509,7 +1022,7 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
 
   void _showOverdueAcrossMonthsSheet(
       BuildContext context, AppProvider prov, List<(Group, String)> overdue) {
-    showModalBottomSheet(
+    showAppSheet(
       useRootNavigator: true,
       context: context,
       isScrollControlled: true,
@@ -523,9 +1036,9 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
           maxChildSize: 0.95,
           expand: false,
           builder: (_, sc) => Container(
-            decoration: const BoxDecoration(
-              color: Color(0xFFf8fbff),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            decoration: BoxDecoration(
+              color: AppColors.bg,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
             ),
             child: Column(children: [
               const SizedBox(height: 10),
@@ -584,21 +1097,99 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
 
     return Directionality(
       textDirection: TextDirection.rtl,
-      // ListView واحدة للشاشة كلها (هيدر + كل الأقسام) بدل Column+Expanded ثابت
-      // عشان لو محتوى الهيدر زاد (ملخص/تنبيهات) الشاشة تتمرجل بدل ما تفيض (overflow).
-      child: ListView(
+      // ⌨️ سهم يمين/شمال بينقّل بين الشهور من الكيبورد.
+      //
+      // ⚠️ الشاشة عربية (RTL) — فالسهم اللي **على اليمين** معناه رجوع
+      // للشهر اللي قبله، عكس الإنجليزي. لو عكسناهم، كل ضغطة هتوديك
+      // ناحية غير اللي شايفها في الشاشة.
+      child: Shortcuts(
+        shortcuts: const {
+          SingleActivator(LogicalKeyboardKey.arrowRight): _PrevMonthIntent(),
+          SingleActivator(LogicalKeyboardKey.arrowLeft): _NextMonthIntent(),
+        },
+        child: Actions(
+          actions: {
+            _PrevMonthIntent: CallbackAction<_PrevMonthIntent>(
+              onInvoke: (_) {
+                if (_period != _Period.last) {
+                  setState(() => _period = _Period.values[_period.index - 1]);
+                }
+                return null;
+              },
+            ),
+            _NextMonthIntent: CallbackAction<_NextMonthIntent>(
+              onInvoke: (_) {
+                if (_period != _Period.next) {
+                  setState(() => _period = _Period.values[_period.index + 1]);
+                }
+                return null;
+              },
+            ),
+          },
+          child: Focus(
+            autofocus: true,
+            // ListView واحدة للشاشة كلها (هيدر + كل الأقسام) بدل
+            // Column+Expanded ثابت عشان لو محتوى الهيدر زاد (ملخص/تنبيهات)
+            // الشاشة تتمرجل بدل ما تفيض (overflow).
+            child: ListView(
         padding: EdgeInsets.zero,
         children: [
           _buildHeader(context, prov, db, bills.length, expected.length,
               totalActual, totalUnpaid, anomalyCount),
           _monthlySummaryPanel(db, prov),
-          if (prov.isBillMonthLocked(_targetMonth)) _lockedMonthBanner(),
+          if (prov.isBillMonthLocked(_targetMonth))
+            _lockedMonthBanner()
+          else
+            _monthDoneRow(prov, db),
           _overdueAcrossMonthsBanner(db, prov),
           _buildPeriodSelector(),
+          _ViewSwitcher(
+            value: _view,
+            onChanged: (v) => _set(() => _view = v),
+          ),
+          // 🔁 الشركة نزّلت فاتورتين ورا بعض؟ — أخطر غلط وبيبان الأول
+          _consecutiveBillsBanner(prov),
+          // 🔍 شريط المراجعة — بيظهر بس لما يكون فيه بيانات محتاجة نظرة
+          _dataAuditBanner(prov),
           _buildSearchSortRow(),
           _buildProviderChips(),
-          _buildTypeChips(),
-          if (!hasContent)
+          // فلاتر النوع (تقديرية/فعلية/مسددة) بتخصّ الكروت بس — العروض
+          // التانية بتتفرّج على الدورة نفسها مش على حالة الفاتورة.
+          if (_view == _CycleView.cards) _buildTypeChips(),
+
+          // 🔁 العروض الأربعة الجديدة — كلها بتقرا نفس المنطق، بس بشكل تاني
+          if (_view != _CycleView.cards)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 24),
+              child: switch (_view) {
+                _CycleView.accounts => _AccountsView(
+                    prov: prov,
+                    month: _targetMonth,
+                    provFilter: _provFilter,
+                    search: _search),
+                _CycleView.grid => _GridView(
+                    prov: prov,
+                    month: _targetMonth,
+                    provFilter: _provFilter,
+                    search: _search,
+                    zoom: _zoom,
+                    onZoom: (z) => _set(() => _zoom = z),
+                    monthCount: _monthCount,
+                    onMonthCount: (n) => _set(() => _monthCount = n)),
+                _CycleView.bars => _BarsView(
+                    prov: prov,
+                    month: _targetMonth,
+                    provFilter: _provFilter,
+                    search: _search),
+                _CycleView.month => _MonthView(
+                    prov: prov,
+                    month: _targetMonth,
+                    provFilter: _provFilter,
+                    search: _search),
+                _CycleView.cards => const SizedBox.shrink(),
+              },
+            )
+          else if (!hasContent)
             SizedBox(height: 300, child: _emptyState())
           else
             Padding(
@@ -616,25 +1207,205 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
                     const Color(0xFF6a1b9a),
                     const Color(0xFFF3E5F5),
                   ),
-                  for (final g in expected)
-                    _ExpectedCard(group: g, month: _targetMonth, prov: prov),
+                  ResponsiveRowGroup(children: [
+                    for (final g in expected)
+                      _ExpectedCard(group: g, month: _targetMonth, prov: prov),
+                  ]),
                   const SizedBox(height: 6),
                 ],
                 // Bills grouped by provider
                 for (final entry in grouped.entries) ...[
                   if (grouped.length > 1 || expected.isNotEmpty)
                     _provSectionHeader(entry.key, entry.value, db),
-                  for (final b in entry.value)
-                    _AuditCard(
-                      bill: b,
-                      db: db,
-                      prov: prov,
-                      anomaly: _anomalyOf(b, db.companyBills),
-                    ),
+                  // 📐 الكروت جنب بعض على التاب والكمبيوتر. عنوان الشركة
+                  // بيفضل بعرض الشاشة كله عشان يفصل بين الأقسام بوضوح،
+                  // والكروت اللي تحته بس هي اللي بتتقسم أعمدة.
+                  ResponsiveRowGroup(children: [
+                    for (final b in entry.value)
+                      _AuditCard(
+                        bill: b,
+                        db: db,
+                        prov: prov,
+                        anomaly: _anomalyOf(b, db.companyBills),
+                      ),
+                  ]),
                 ],
               ]),
             ),
-        ],
+            ],
+          ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// ✅ «الشهر ده خلص» — بيجاوب على سؤال بتسأله كل شهر.
+  ///
+  /// قفل الشهر كان موجود، بس مدفون في منيو الـ ⋯. فكنت لازم تفتكر إنه
+  /// موجود، وتفتكر تدوس عليه، وقبل كده تعرف انت خلّصت ولا لأ — يعني
+  /// تعدّ الفواتير الناقصة بعينك.
+  ///
+  /// السطر ده بيقول لك **انت واقف فين** وبيدّيك الزرار في نفس المكان.
+  Widget _monthDoneRow(AppProvider prov, AppDB db) {
+    // الشهر الجاي لسه ما نزلش — مالوش معنى نقول «خلص».
+    if (_period == _Period.next) return const SizedBox.shrink();
+    final missing = _missingGroups(db).length;
+
+    final done = missing == 0;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          color: done ? AppColors.greenLight : AppColors.surfaceAlt,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: done ? AppColors.green2 : AppColors.border),
+        ),
+        child: Row(children: [
+          Icon(done ? Icons.task_alt : Icons.pending_actions,
+              size: 17, color: done ? AppColors.green2 : AppColors.muted),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              done
+                  ? 'كل فواتير ${_monthLabel(_targetMonth)} اتسجّلت'
+                  : 'لسه $missing فاتورة ما اتسجّلتش في '
+                      '${_monthLabel(_targetMonth)}',
+              style: GoogleFonts.cairo(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                  color: done ? AppColors.green2 : AppColors.muted),
+            ),
+          ),
+          // الزرار بيبان في الحالتين — ساعات بتقفل الشهر وانت عارف إن
+          // فاتورة مش هتنزل خالص، فما ينفعش نمنعك.
+          TextButton(
+            onPressed: () => _toggleMonthLock(context, prov),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text('الشهر ده خلص',
+                style: GoogleFonts.cairo(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w900,
+                    color: done ? AppColors.green2 : AppColors.blue2)),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  /// 🔁 تنبيه: خطوط «شهر وشهر» نزلت لها فواتير في شهرين ورا بعض.
+  ///
+  /// ده بالظبط اللي بتخاف منه — الشركة تنزّل فاتورتين ورا بعض. البرنامج
+  /// بيمسكها من تاريخ الفواتير المسجّل، مش محتاج تدوّر انت.
+  ///
+  /// الشهور اللي علّمتها استثناء بإيدك مابتتحسبش هنا — انت عارفها وموافق.
+  Widget _consecutiveBillsBanner(AppProvider prov) {
+    final issues = prov.allConsecutiveBillIssues();
+    if (issues.isEmpty) return const SizedBox.shrink();
+    final total = issues.values.fold<int>(0, (s, v) => s + v.length);
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: AppColors.redLight,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.red2),
+      ),
+      child: Row(children: [
+        Icon(Icons.repeat_on_rounded, size: 17, color: AppColors.red2),
+        const SizedBox(width: 7),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '🔁 $total فاتورة نزلت في شهرين ورا بعض',
+                style: GoogleFonts.cairo(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.red2),
+              ),
+              Text(
+                'على ${issues.length} خط نظامهم شهر وشهر — يا إما الشركة '
+                'غلطت يا إما اتسجّلت مرتين. راجعهم.',
+                style: GoogleFonts.cairo(
+                    fontSize: 9.5, color: AppColors.red2),
+              ),
+              const SizedBox(height: 3),
+              for (final e in issues.entries.take(4))
+                Builder(builder: (_) {
+                  final g = prov.db.groups
+                      .where((x) => x.id == e.key)
+                      .firstOrNull;
+                  if (g == null) return const SizedBox.shrink();
+                  return Text(
+                    '• ${g.phone}: ${e.value.map(_monthLabel).join(' • ')}',
+                    style: GoogleFonts.cairo(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.red2),
+                  );
+                }),
+              if (issues.length > 4)
+                Text('… و${issues.length - 4} خط كمان',
+                    style: GoogleFonts.cairo(
+                        fontSize: 9, color: AppColors.red2)),
+            ],
+          ),
+        ),
+      ]),
+    );
+  }
+
+  /// 🔍 شريط مراجعة البيانات — «الأرقام دي مظبوطة ولا في غلط؟».
+  ///
+  /// بيظهر بس لما يكون فيه خط بيانته ناقصة أو رقمه شكله نص فاتورة، وبيختفي
+  /// لوحده لما تخلّص. عشان ما تقعدش تشك في كل رقم قدامك.
+  Widget _dataAuditBanner(AppProvider prov) {
+    final bad = prov.linesWithBillIssues();
+    if (bad.isEmpty) return const SizedBox.shrink();
+    final halved = bad
+        .where((g) => prov.billIssuesOf(g).contains(AppProvider.kBillIssueHalved))
+        .length;
+
+    return GestureDetector(
+      onTap: () => _CycleSheets.openAudit(context, prov, _targetMonth),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          color: halved > 0 ? AppColors.orangeLight : AppColors.surfaceAlt,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: halved > 0 ? AppColors.orange : AppColors.border),
+        ),
+        child: Row(children: [
+          Icon(halved > 0 ? Icons.warning_amber_rounded : Icons.fact_check_outlined,
+              size: 17,
+              color: halved > 0 ? AppColors.orange : AppColors.muted),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              halved > 0
+                  ? '$halved خط رقمهم شكله نص الفاتورة — التوقّع بيطلع ناقص'
+                  : '${bad.length} خط بياناتهم ناقصة — اضغط للمراجعة',
+              style: GoogleFonts.cairo(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: halved > 0 ? AppColors.orange : AppColors.muted),
+            ),
+          ),
+          Icon(Icons.chevron_left,
+              size: 17,
+              color: halved > 0 ? AppColors.orange : AppColors.muted),
+        ]),
       ),
     );
   }
@@ -842,6 +1613,7 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
                 case 'generate': _showGenerateDialog(ctx, prov); break;
                 case 'rotation': _showRotationDialog(ctx, prov); break;
                 case 'export':   ExportService.exportInvoicesExcel(ctx, prov); break;
+                case 'statement': ExportService.exportCompanyStatements(ctx, prov); break;
                 case 'compare':  _showMonthlyComparison(ctx, prov); break;
                 case 'mistakes': _showMistakesReport(ctx, prov); break;
                 case 'archive':  _showArchives(ctx, prov); break;
@@ -852,6 +1624,8 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
               _menuItem('generate', Icons.autorenew, 'جهّز فواتير الشهر'),
               _menuItem('rotation', Icons.sync, 'تدوير شهر وشهر'),
               _menuItem('export', Icons.table_view, 'تصدير Excel'),
+              // ورقة لكل شركة — ده اللي بتروح بيه تراجع معاهم
+              _menuItem('statement', Icons.receipt_long, 'كشف حساب الشركات'),
               _menuItem('compare', Icons.bar_chart, 'مقارنة شهرية'),
               _menuItem('mistakes', Icons.report_gmailerrorred, 'تقرير أخطاء الشركات'),
               _menuItem('archive', Icons.archive_outlined, 'أرشيف الشهور المقفولة'),
@@ -1062,7 +1836,7 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
       final d = DateTime(now.year, now.month - i);
       keys.add('${d.year}-${d.month.toString().padLeft(2, '0')}');
     }
-    showModalBottomSheet(
+    showAppSheet(
       context: ctx,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -1070,14 +1844,16 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
         textDirection: TextDirection.rtl,
         child: Container(
           constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.85),
-          decoration: const BoxDecoration(
-            color: Color(0xFFf5f7fa),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+          decoration: BoxDecoration(
+            // كانت لون ثابت فاتح — يعني في الوضع الليلي شيت أبيض
+            // بنص أبيض. بتتغيّر مع الثيم دلوقتي.
+            color: AppColors.bg,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
           ),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             const SizedBox(height: 10),
             Container(width: 40, height: 4,
-                decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+                decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2))),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Row(children: [
@@ -1098,6 +1874,10 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(12, 6, 12, 20),
                   children: [
+                    // 📊 المتوقع ضد اللي نزل — فوق المقارنة لأنه بيجاوب
+                    // على «الشركة غلطت فين؟» وده السؤال الأهم.
+                    ExpectedActualChart(db: prov.db, months: 8),
+                    const SizedBox(height: 12),
                     for (final entry in data.entries)
                       _comparisonCard(entry.key, entry.value, keys),
                   ],
@@ -1194,6 +1974,19 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
       color: AppColors.surface,
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
       child: Row(children: [
+        // ⌨️ سهم يمين/شمال بينقّل بين الشهور — على الكمبيوتر بتفضل
+        // بتراجع شهر ورا شهر، والوصول للماوس كل مرة بيبطّأك.
+        if (context.isWide) ...[
+          _MonthArrow(
+            icon: Icons.chevron_right,
+            tip: 'الشهر اللي قبله',
+            onTap: _period == _Period.last
+                ? null
+                : () => setState(() => _period =
+                    _Period.values[_period.index - 1]),
+          ),
+          const SizedBox(width: 4),
+        ],
         for (final p in _Period.values) ...[
           Expanded(
             child: GestureDetector(
@@ -1224,6 +2017,17 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
             ),
           ),
           if (p != _Period.next) const SizedBox(width: 6),
+        ],
+        if (context.isWide) ...[
+          const SizedBox(width: 4),
+          _MonthArrow(
+            icon: Icons.chevron_left,
+            tip: 'الشهر اللي بعده',
+            onTap: _period == _Period.next
+                ? null
+                : () => setState(
+                    () => _period = _Period.values[_period.index + 1]),
+          ),
         ],
       ]),
     );
@@ -1773,7 +2577,7 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
     final noteCtrl = TextEditingController();
     final selectedMonth = _targetMonth;
 
-    showModalBottomSheet(
+    showAppSheet(
       context: ctx,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -2055,7 +2859,7 @@ class _CompanyInvoicesScreenState extends State<CompanyInvoicesScreen> {
                           textDirection: TextDirection.ltr,
                           decoration: InputDecoration(
                             labelText:
-                                'مبلغ الفاتورة الفعلية (ج)',
+                                MoneyWords.actualBillLabel,
                             labelStyle: GoogleFonts.cairo(
                                 fontSize: 13),
                             border: OutlineInputBorder(

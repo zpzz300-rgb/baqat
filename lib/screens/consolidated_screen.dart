@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/app_search.dart';
 import '../services/view_prefs.dart';
 import '../widgets/app_search_bar.dart';
@@ -227,7 +228,7 @@ class _MemberRow extends StatelessWidget {
     final debtBg    = hasDebt ? AppColors.redLight : AppColors.greenLight;
 
     return GestureDetector(
-      onTap: () => showModalBottomSheet(useRootNavigator: true,
+      onTap: () => showAppSheet(useRootNavigator: true,
         context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,

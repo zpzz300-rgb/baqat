@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import 'workspace_bar.dart' show kWorkspaceScreens, WorkspaceScreenDef;
 import 'menu_order_editor.dart' show showMenuOrderEditor;
 import '../services/menu_catalog.dart' show normalizeArabic;
@@ -60,7 +61,7 @@ class WorkspaceSwitcherButton extends StatelessWidget {
   }
 
   void _openSwitcher(BuildContext context) {
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (_) => const _SwitcherSheet(),

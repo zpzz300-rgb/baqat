@@ -10,11 +10,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/app_provider.dart';
 import '../models/models.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/breakpoints.dart';
 import '../services/supabase_service.dart';
 import 'employees_screen.dart';
 import '../widgets/group_card.dart';
 import '../widgets/groups_table.dart';
+import '../widgets/account_grouped_list.dart';
 import '../widgets/common.dart';
 import '../utils/print_helper.dart';
 import 'profit_screen.dart';
@@ -85,6 +87,20 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _tableView = v);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kTablePrefKey, v);
+  }
+
+  /// 👛 عرض بالحساب: الخطوط اللي بتنزل في فاتورة واحدة تحت هيدر واحد.
+  static const _kAccountPrefKey = 'groups_account_view';
+  bool _accountView = false;
+
+  Future<void> _setAccountView(bool v) async {
+    setState(() {
+      _accountView = v;
+      if (v) _tableView = false; // العرضين مايشتغلوش مع بعض
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kAccountPrefKey, v);
+    if (v) await prefs.setBool(_kTablePrefKey, false);
   }
   bool _empViewAll = false; // الموظف: false=شغلي، true=القائمة العامة
 
@@ -197,6 +213,8 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       if (savedCycle != null) _cycleFilter = savedCycle;
       _tableView = prefs.getBool(_kTablePrefKey) ?? false;
+      _accountView = prefs.getBool(_kAccountPrefKey) ?? false;
+      if (_accountView) _tableView = false;
     });
   }
 
@@ -600,7 +618,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         border: true,
                         onTap: () {
                           if (!guardEdit(context)) return;
-                          showModalBottomSheet(
+                          showAppSheet(
                             useRootNavigator: true,
                             context: context,
                             isScrollControlled: true,
@@ -617,7 +635,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         textColor: AppColors.blue2,
                         onTap: () {
                           if (!guardEdit(context)) return;
-                          showModalBottomSheet(
+                          showAppSheet(
                             useRootNavigator: true,
                             context: context,
                             isScrollControlled: true,
@@ -640,7 +658,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       _iconBtn(Icons.auto_awesome,
                           tip: 'المساعد الذكي',
                           color: AppColors.purple,
-                          onTap: () => showModalBottomSheet(
+                          onTap: () => showAppSheet(
                             useRootNavigator: true,
                             context: context,
                             isScrollControlled: true,
@@ -889,7 +907,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ─── قائمة المديونين (تظهر عند الضغط على بطاقة «ديون») ──────────
   void _showDebtorsList(AppProvider prov) {
-    showModalBottomSheet(
+    showAppSheet(
       useRootNavigator: true,
       context: context,
       isScrollControlled: true,
@@ -902,9 +920,9 @@ class _HomeScreenState extends State<HomeScreen> {
         final total = debtors.fold<double>(0, (s, m) => s + (-m.balance));
         return Container(
           constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.85),
-          decoration: const BoxDecoration(
-            color: Color(0xFFf5f7fa),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          decoration: BoxDecoration(
+            color: AppColors.bg,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             const SizedBox(height: 10),
@@ -951,7 +969,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         return GestureDetector(
                           onTap: () {
                             Navigator.pop(ctx);
-                            showModalBottomSheet(
+                            showAppSheet(
                               useRootNavigator: true,
                               context: context,
                               isScrollControlled: true,
@@ -1088,7 +1106,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<ShortcutActivator, VoidCallback> _shortcuts(AppProvider prov) {
     void sheet(Widget child) {
       if (!guardEdit(context)) return;
-      showModalBottomSheet(
+      showAppSheet(
         useRootNavigator: true,
         context: context,
         isScrollControlled: true,
@@ -1684,18 +1702,35 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 6),
           Row(children: [
             Expanded(child: _buildProviderFilterBar(prov)),
-            // 📊 تبديل بين الكروت والجدول
+            // 👛 عرض بالحساب — الخطوط اللي في فاتورة واحدة تحت هيدر واحد
             Tooltip(
-              message: _tableView ? 'رجّع الكروت' : 'وضع الجدول (يشيل أكتر)',
+              message: _accountView
+                  ? 'رجّع القايمة العادية'
+                  : 'عرض بالحساب (الخطوط اللي في فاتورة واحدة مع بعض)',
               child: IconButton(
                 visualDensity: VisualDensity.compact,
-                onPressed: () => _setTableView(!_tableView),
+                onPressed: () => _setAccountView(!_accountView),
                 icon: Icon(
-                    _tableView ? Icons.view_agenda : Icons.table_rows,
+                    _accountView
+                        ? Icons.account_balance_wallet
+                        : Icons.account_balance_wallet_outlined,
                     size: 20,
-                    color: _tableView ? AppColors.purple : AppColors.blue2),
+                    color: _accountView ? AppColors.purple : AppColors.blue2),
               ),
             ),
+            // 📊 تبديل بين الكروت والجدول
+            if (!_accountView)
+              Tooltip(
+                message: _tableView ? 'رجّع الكروت' : 'وضع الجدول (يشيل أكتر)',
+                child: IconButton(
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => _setTableView(!_tableView),
+                  icon: Icon(
+                      _tableView ? Icons.view_agenda : Icons.table_rows,
+                      size: 20,
+                      color: _tableView ? AppColors.purple : AppColors.blue2),
+                ),
+              ),
             if (!_tableView)
               Tooltip(
                 message: _allExpanded ? 'اقفل كل الخطوط' : 'افتح كل الخطوط',
@@ -2227,6 +2262,16 @@ class _HomeScreenState extends State<HomeScreen> {
     // الترتيب المحفوظ (لأن الـ indexes ساعتها مش بتاعة الترتيب الأصلي)
     // ⚠️ السحب بيشتغل بأرقام الترتيب في القايمة الكاملة — فلازم يتقفل لو
     // في فلتر شركة شغّال، وإلا الترتيب المحفوظ هيتبوّظ.
+    // 👛 عرض بالحساب — الخطوط اللي بتنزل في فاتورة واحدة تحت هيدر واحد
+    // بمجموعها. بيشتغل فوق نفس الفلاتر والترتيب، مابيزوّدش ولا بيشيل خط.
+    if (_accountView) {
+      return AccountGroupedList(
+        prov: prov,
+        groups: groups,
+        initiallyExpanded: _allExpanded,
+      );
+    }
+
     // 📊 وضع الجدول — سطر لكل خط، والدوسة بتفتحه في تاب
     if (_tableView) {
       return GroupsTable(
@@ -2322,7 +2367,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ─── GLOBAL SEARCH ───────────────────────────────────────────
   void _showGlobalSearch(AppProvider prov) {
-    showModalBottomSheet(useRootNavigator: true,
+    showAppSheet(useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -2366,7 +2411,7 @@ class _HomeScreenState extends State<HomeScreen> {
         // يروح لمجموعة العميل ويمرّر لها — فلمّا يقفل كارت العميل يلاقي
         // مجموعته قدامه (الرجوع بيوديه للمجموعة).
         _goToGroup(gid);
-        showModalBottomSheet(useRootNavigator: true,
+        showAppSheet(useRootNavigator: true,
           context: context,
           isScrollControlled: true,
           backgroundColor: Colors.transparent,
@@ -2406,7 +2451,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ('all',    '📅 إضافة شهر للجميع',   'كل الخطوط بدون استثناء'),
     ];
 
-    showModalBottomSheet(useRootNavigator: true,
+    showAppSheet(useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -2825,7 +2870,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showSaveOptions() {
-    showModalBottomSheet(useRootNavigator: true,
+    showAppSheet(useRootNavigator: true,
       context: context,
       backgroundColor: Colors.transparent,
               barrierColor: Colors.black54,

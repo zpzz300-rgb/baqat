@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/app_search.dart';
 import '../services/view_prefs.dart';
 import '../widgets/app_search_bar.dart';
@@ -187,16 +188,19 @@ class _GuestsScreenState extends State<GuestsScreen> {
               : ListView(
                   padding: const EdgeInsets.all(12),
                   children: [
-                    // GuestUser cards
-                    ...list.map((g) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _GuestCard(
-                        guest: g,
-                        onEdit:   () => _showForm(context, prov, g),
-                        onDelete: () => _deleteDialog(context, prov, g),
-                        onTransfer: () => _transferDialog(context, prov, g),
-                      ),
-                    )),
+                    // GuestUser cards — أعمدة على التاب والكمبيوتر
+                    ResponsiveRowGroup(children: [
+                      for (final g in list)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _GuestCard(
+                            guest: g,
+                            onEdit: () => _showForm(context, prov, g),
+                            onDelete: () => _deleteDialog(context, prov, g),
+                            onTransfer: () => _transferDialog(context, prov, g),
+                          ),
+                        ),
+                    ]),
                     // Member-type guests section
                     if (filteredMemberGuests.isNotEmpty) ...[
                       if (list.isNotEmpty) const SizedBox(height: 4),
@@ -215,13 +219,18 @@ class _GuestsScreenState extends State<GuestsScreen> {
                           const Expanded(child: Divider()),
                         ]),
                       ),
-                      ...filteredMemberGuests.map((m) {
-                        final grp = prov.db.groups.where((g) => g.id == m.gid).firstOrNull;
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _MemberGuestCard(member: m, group: grp),
-                        );
-                      }),
+                      ResponsiveRowGroup(children: [
+                        for (final m in filteredMemberGuests)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _MemberGuestCard(
+                              member: m,
+                              group: prov.db.groups
+                                  .where((g) => g.id == m.gid)
+                                  .firstOrNull,
+                            ),
+                          ),
+                      ]),
                     ],
                   ],
                 ),
@@ -255,7 +264,7 @@ class _GuestsScreenState extends State<GuestsScreen> {
   }
 
   void _showForm(BuildContext context, AppProvider prov, GuestUser? existing) {
-    showModalBottomSheet(useRootNavigator: true,
+    showAppSheet(useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -685,7 +694,7 @@ class _MemberGuestCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasDebt = member.balance < 0;
     return GestureDetector(
-      onTap: () => showModalBottomSheet(useRootNavigator: true,
+      onTap: () => showAppSheet(useRootNavigator: true,
         context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,

@@ -15,6 +15,7 @@ import 'package:share_plus/share_plus.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/app_search.dart';
 import 'member_card.dart';
 
@@ -212,7 +213,7 @@ class _NotesBubbleState extends State<NotesBubble>
   }
 
   void _openSheet(BuildContext context) {
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -663,7 +664,7 @@ class _NotesSheetState extends State<_NotesSheet> {
     final g = prov.db.groups.cast<Group?>()
         .firstWhere((x) => x!.id == m.gid, orElse: () => null);
     if (g == null) return;
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,

@@ -9,6 +9,7 @@ import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
 import '../utils/image_utils.dart';
 import 'common.dart';
+import 'money_words.dart';
 
 class EditGroupModal extends StatefulWidget {
   final Group group;
@@ -157,7 +158,19 @@ class _EditGroupModalState extends State<EditGroupModal> {
         const SizedBox(height: 6),
         LineTypeSelector(
             value: _type,
-            onChanged: (v) => setState(() => _type = v),
+            onChanged: (v) {
+              if (v == _type) return; // نفس النوع — ما نلغيش رقم كتبته بإيدك
+              setState(() {
+                _type = v;
+                // 💰 الزرار مكتوب عليه السعر، فيظبّط المبلغ الثابت معاه —
+                // وإلا تختار «الكبير ٤٢٥٠» ويفضل المبلغ القديم متسجّل
+                // وقايمة الفواتير تحسب غلط. فاضل قابل للتعديل تحت.
+                final price = kLineTypePrices[v];
+                if (price != null) {
+                  _fixedAmountCtrl.text = price.toStringAsFixed(0);
+                }
+              });
+            },
             prefix: 'eg'),
         const SizedBox(height: 12),
 
@@ -224,13 +237,14 @@ class _EditGroupModalState extends State<EditGroupModal> {
                 Row(children: [
                   Expanded(
                     child: AppFormField(
-                      label: '💰 سعر فاتورة الشركة الخام (ج)',
+                      label: MoneyWords.rawBillLabel,
                       controller: _fixedAmountCtrl,
                       keyboardType: TextInputType.number,
                       hint: 'اللي الشركة بتاخده فعلاً',
                       onChanged: (_) => setState(() {}),
                     ),
                   ),
+                  const MoneyWordsHelp(compact: true),
                 ]),
                 const SizedBox(height: 10),
                 // 📊 أساس الربح — منفصل عن الخام.
@@ -239,7 +253,7 @@ class _EditGroupModalState extends State<EditGroupModal> {
                 Row(children: [
                   Expanded(
                     child: AppFormField(
-                      label: '📊 أساس الربح — الشهر الواحد (ج)',
+                      label: MoneyWords.profitBasisLabel,
                       controller: _profitBillCtrl,
                       keyboardType: TextInputType.number,
                       hint: 'سيبها فاضية = زي الخام',
@@ -902,7 +916,9 @@ class _EditGroupModalState extends State<EditGroupModal> {
           ],
           const SizedBox(height: 10),
           AppFormField(
-            label: 'قيمة الفاتورة الثابتة (ج)',
+            // نفس الرقم بالظبط اللي في الخانة اللي فوق للخطوط العادية —
+            // بيتحفظ في نفس المكان، فلازم يبقى ليه نفس الاسم.
+            label: MoneyWords.rawBillLabel,
             controller: _manualBillCtrl,
             keyboardType: TextInputType.number,
             textDirection: TextDirection.ltr,

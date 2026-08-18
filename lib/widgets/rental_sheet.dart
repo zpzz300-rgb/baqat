@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../utils/phone_utils.dart';
 import 'common.dart';
 
@@ -93,7 +94,7 @@ class _RentalSheetState extends State<RentalSheet> {
   }
 
   void _showRentalForm(BuildContext context, AppProvider prov, Rental? existing) {
-    showModalBottomSheet(useRootNavigator: true,
+    showAppSheet(useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -211,7 +212,7 @@ class _RentalCardState extends State<_RentalCard> {
                 _actionBtn('🔄 تغيير مستأجر', AppColors.blueLight, AppColors.blue3, () => _showChangeRenterDialog(context, prov, rental)),
                 // Edit
                 _actionBtn('✏️ تعديل', AppColors.blueLight, AppColors.blue3, () {
-                  showModalBottomSheet(useRootNavigator: true,
+                  showAppSheet(useRootNavigator: true,
                     context: context,
                     isScrollControlled: true,
                     backgroundColor: Colors.transparent,

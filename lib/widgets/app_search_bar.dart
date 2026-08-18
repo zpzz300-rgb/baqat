@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/app_search.dart' show SearchField;
 import '../services/app_theme.dart';
+import '../services/breakpoints.dart';
 
 /// خانة البحث + (اختياري) زرار فلاتر بعدّاد + أي زراير زيادة.
 class AppSearchBar extends StatelessWidget {
@@ -42,50 +43,55 @@ class AppSearchBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final empty = controller.text.isEmpty;
+    // 📐 خانة البحث مالهاش لازمة تبقى بعرض ١٩٠٠ بكسل — انت بتكتب فيها كلمة
+    // أو رقم، والباقي مساحة ضايعة والزراير بتبعد عنها لآخر الشاشة. على
+    // الشاشة العريضة بتاخد ٥٢٠ بكسل والزراير بتفضل جنبها على طول.
+    final field = TextField(
+      controller: controller,
+      onChanged: onChanged,
+      textInputAction: TextInputAction.search,
+      style: GoogleFonts.cairo(fontSize: 13),
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: hint,
+        hintStyle: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
+        suffixIcon: empty
+            ? (onHelp == null
+                ? null
+                : IconButton(
+                    icon: Icon(Icons.help_outline,
+                        size: 17, color: AppColors.muted),
+                    tooltip: 'البحث بيدوّر في إيه؟',
+                    onPressed: onHelp,
+                  ))
+            : IconButton(
+                icon: const Icon(Icons.close, size: 17),
+                tooltip: 'امسح البحث',
+                onPressed: () {
+                  controller.clear();
+                  onChanged('');
+                },
+              ),
+        filled: true,
+        fillColor: AppColors.surface,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        border: _b(AppColors.border),
+        enabledBorder: _b(AppColors.border),
+        focusedBorder: _b(AppColors.blue),
+      ),
+    );
+
     return Padding(
       padding: padding,
       child: Row(children: [
-        Expanded(
-          child: TextField(
-            controller: controller,
-            onChanged: onChanged,
-            textInputAction: TextInputAction.search,
-            style: GoogleFonts.cairo(fontSize: 13),
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: hint,
-              hintStyle: GoogleFonts.cairo(fontSize: 12, color: AppColors.muted),
-              suffixIcon: empty
-                  ? (onHelp == null
-                      ? null
-                      : IconButton(
-                          icon: Icon(Icons.help_outline,
-                              size: 17, color: AppColors.muted),
-                          tooltip: 'البحث بيدوّر في إيه؟',
-                          onPressed: onHelp,
-                        ))
-                  : IconButton(
-                      icon: const Icon(Icons.close, size: 17),
-                      tooltip: 'امسح البحث',
-                      onPressed: () {
-                        controller.clear();
-                        onChanged('');
-                      },
-                    ),
-              filled: true,
-              fillColor: AppColors.surface,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              border: _b(AppColors.border),
-              enabledBorder: _b(AppColors.border),
-              focusedBorder: _b(AppColors.blue),
-            ),
-          ),
-        ),
+        if (context.isWide)
+          SizedBox(width: 520, child: field)
+        else
+          Expanded(child: field),
         if (onFilter != null) ...[
           const SizedBox(width: 6),
-          AppIconPill(
-              icon: Icons.tune, badge: filterBadge, onTap: onFilter!),
+          AppIconPill(icon: Icons.tune, badge: filterBadge, onTap: onFilter!),
         ],
         for (final w in trailing) ...[const SizedBox(width: 6), w],
       ]),
@@ -119,38 +125,41 @@ class AppIconPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final pill = GestureDetector(
-      onTap: onTap,
-      child: Stack(clipBehavior: Clip.none, children: [
-        Container(
-          padding: const EdgeInsets.all(9),
-          decoration: BoxDecoration(
-            color: (filled || active) ? AppColors.blue2 : AppColors.blueLight,
-            borderRadius: BorderRadius.circular(11),
-            border: Border.all(color: AppColors.blueMid),
-          ),
-          child: Icon(icon,
-              size: 18,
-              color: (filled || active) ? Colors.white : AppColors.blue2),
-        ),
-        if (badge > 0)
-          Positioned(
-            top: -3,
-            left: -3,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                  color: AppColors.red2,
-                  borderRadius: BorderRadius.circular(9),
-                  border: Border.all(color: Colors.white, width: 1.5)),
-              child: Text('$badge',
-                  style: GoogleFonts.cairo(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w900,
-                      color: Colors.white)),
+    final pill = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Stack(clipBehavior: Clip.none, children: [
+          Container(
+            padding: const EdgeInsets.all(9),
+            decoration: BoxDecoration(
+              color: (filled || active) ? AppColors.blue2 : AppColors.blueLight,
+              borderRadius: BorderRadius.circular(11),
+              border: Border.all(color: AppColors.blueMid),
             ),
+            child: Icon(icon,
+                size: 18,
+                color: (filled || active) ? Colors.white : AppColors.blue2),
           ),
-      ]),
+          if (badge > 0)
+            Positioned(
+              top: -3,
+              left: -3,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                    color: AppColors.red2,
+                    borderRadius: BorderRadius.circular(9),
+                    border: Border.all(color: Colors.white, width: 1.5)),
+                child: Text('$badge',
+                    style: GoogleFonts.cairo(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white)),
+              ),
+            ),
+        ]),
+      ),
     );
     return tooltip == null ? pill : Tooltip(message: tooltip!, child: pill);
   }
@@ -178,41 +187,46 @@ class AppChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = color ?? AppColors.blue2;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected ? c : c.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(11),
-          border: Border.all(
-              color: c.withValues(alpha: selected ? 1 : 0.35),
-              width: selected ? 1.6 : 1),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Text(label,
-              style: GoogleFonts.cairo(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w900,
-                  color: selected ? AppColors.onAccent : c)),
-          if (count != null) ...[
-            const SizedBox(width: 5),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                color: selected
-                    ? AppColors.onAccent.withValues(alpha: 0.28)
-                    : c.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(7),
+    // 🖱 مؤشر إيد على الكمبيوتر — الشريحة دي مستعملة في كل الشاشات
+    // تقريباً، فالتعديل هنا بيظهر في البرنامج كله مرة واحدة.
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected ? c : c.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(11),
+            border: Border.all(
+                color: c.withValues(alpha: selected ? 1 : 0.35),
+                width: selected ? 1.6 : 1),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(label,
+                style: GoogleFonts.cairo(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w900,
+                    color: selected ? AppColors.onAccent : c)),
+            if (count != null) ...[
+              const SizedBox(width: 5),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? AppColors.onAccent.withValues(alpha: 0.28)
+                      : c.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: Text('$count',
+                    style: GoogleFonts.cairo(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        color: selected ? AppColors.onAccent : c)),
               ),
-              child: Text('$count',
-                  style: GoogleFonts.cairo(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w900,
-                      color: selected ? AppColors.onAccent : c)),
-            ),
-          ],
-        ]),
+            ],
+          ]),
+        ),
       ),
     );
   }

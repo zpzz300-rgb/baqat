@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/notification_service.dart';
 import '../models/models.dart';
 import '../widgets/member_card.dart';
@@ -792,7 +793,7 @@ class _DebtorsTab extends StatelessWidget {
         ),
       ),
       Expanded(
-        child: ListView.builder(
+        child: ResponsiveCards(
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 80),
           itemCount: debtors.length,
           itemBuilder: (_, i) {
@@ -947,7 +948,7 @@ class _DebtorsTab extends StatelessWidget {
   }
 
   void _openMember(BuildContext context, Member m, Group g) {
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -1104,7 +1105,7 @@ class _DeferralsTab extends StatelessWidget {
         ),
       ),
       Expanded(
-        child: ListView.builder(
+        child: ResponsiveCards(
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 80),
           itemCount: deferred.length,
           itemBuilder: (_, i) {
@@ -1172,7 +1173,7 @@ class _DeferralsTab extends StatelessWidget {
                         const SizedBox(height: 6),
                         Row(children: [
                           GestureDetector(
-                            onTap: () => showModalBottomSheet(useRootNavigator: true,
+                            onTap: () => showAppSheet(useRootNavigator: true,
                               context: context,
                               isScrollControlled: true,
                               backgroundColor: Colors.transparent,

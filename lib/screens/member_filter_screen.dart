@@ -8,6 +8,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
+import '../services/breakpoints.dart';
 import '../utils/phone_utils.dart';
 import '../widgets/member_card.dart';
 
@@ -24,6 +26,10 @@ class _MemberFilterScreenState extends State<MemberFilterScreen> {
   int? _year;          // سنة الاشتراك
   String _type = 'all'; // all | regular | landline | homeforgee
   String _q = '';
+
+  /// الفلاتر مفتوحة على الموبايل؟ (على الشاشة العريضة مالهاش لازمة —
+  /// اللوح الجنبي دايماً ظاهر).
+  bool _filtersOpen = true;
 
   static const _monthNames = [
     'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
@@ -94,7 +100,7 @@ class _MemberFilterScreenState extends State<MemberFilterScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        backgroundColor: const Color(0xFFF4F7FB),
+        backgroundColor: AppColors.bg,
         appBar: AppBar(
           backgroundColor: AppColors.blue2,
           foregroundColor: Colors.white,
@@ -109,7 +115,9 @@ class _MemberFilterScreenState extends State<MemberFilterScreen> {
               ),
           ],
         ),
-        body: Column(children: [
+        body: _layout(
+          context,
+          filters: [
           // ── بحث سريع جوّه النتيجة ──
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
@@ -209,8 +217,8 @@ class _MemberFilterScreenState extends State<MemberFilterScreen> {
             ),
           ),
 
-          // ── شريط النتيجة ──
-          Padding(
+          ],
+          summary: Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -233,20 +241,113 @@ class _MemberFilterScreenState extends State<MemberFilterScreen> {
           ),
 
           // ── جدول العملاء ──
-          Expanded(
-            child: filtered.isEmpty
-                ? Center(child: Text('لا يوجد عملاء مطابقين للفلتر',
-                    style: GoogleFonts.cairo(color: AppColors.muted, fontSize: 13)))
-                : ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 20),
-                    itemCount: filtered.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 6),
-                    itemBuilder: (_, i) => _memberRow(filtered[i], prov),
-                  ),
-          ),
-        ]),
+          list: filtered.isEmpty
+              ? Center(
+                  child: Text('لا يوجد عملاء مطابقين للفلتر',
+                      style: GoogleFonts.cairo(
+                          color: AppColors.muted, fontSize: 13)))
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 20),
+                  itemCount: filtered.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 6),
+                  itemBuilder: (_, i) => _memberRow(filtered[i], prov),
+                ),
+          activeCount: _activeFilterCount,
+        ),
       ),
     );
+  }
+
+  /// كام فلتر شغّال دلوقتي — بيظهر جنب زرار الطي عشان تعرف إن في فلتر
+  /// مخبّي وانت مش شايفه.
+  int get _activeFilterCount => [
+        _gb != null,
+        _pay != 'all',
+        _month != null,
+        _year != null,
+        _type != 'all',
+      ].where((x) => x).length;
+
+  /// 📐 توزيع الشاشة.
+  ///
+  /// **المشكلة اللي بيحلّها:** الفلاتر كانت ٥ صفوف فوق بعض فوق النتيجة —
+  /// يعني بتاكل نص الشاشة والنتيجة بتفضل في شريط صغير تحت. وده بيبوظ على
+  /// كل المقاسات، بس على الكمبيوتر بيبقى أوحش لأن الشاشة عريضة وفاضية
+  /// من الجنب وبنكدّس فيها من فوق لتحت.
+  ///
+  /// * **عريض** → الفلاتر في **لوح جنبي** ثابت والنتيجة واخدة الطول كله.
+  /// * **موبايل** → الفلاتر **بتتطوي**، فتفتحها تختار وتقفلها وتشوف النتيجة.
+  Widget _layout(
+    BuildContext context, {
+    required List<Widget> filters,
+    required Widget summary,
+    required Widget list,
+    required int activeCount,
+  }) {
+    if (context.isWide) {
+      return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        SizedBox(
+          width: context.bp == Bp.desktop ? 340 : 290,
+          child: Material(
+            color: AppColors.surface,
+            child: ListView(children: filters),
+          ),
+        ),
+        VerticalDivider(width: 1, color: AppColors.border),
+        Expanded(child: Column(children: [summary, Expanded(child: list)])),
+      ]);
+    }
+
+    return Column(children: [
+      // زرار الطي — بيقول كام فلتر شغّال عشان ما تنساش واحد مقفول عليك
+      InkWell(
+        onTap: () => setState(() => _filtersOpen = !_filtersOpen),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+          child: Row(children: [
+            Icon(_filtersOpen ? Icons.expand_less : Icons.expand_more,
+                size: 20, color: AppColors.blue2),
+            const SizedBox(width: 6),
+            Text('الفلاتر',
+                style: GoogleFonts.cairo(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.blue2)),
+            if (activeCount > 0) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.blue2,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Text('$activeCount',
+                    style: GoogleFonts.cairo(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        color: AppColors.onAccent)),
+              ),
+            ],
+            const Spacer(),
+            if (!_filtersOpen)
+              Text('دوس تفتحها',
+                  style:
+                      GoogleFonts.cairo(fontSize: 10, color: AppColors.muted)),
+          ]),
+        ),
+      ),
+      if (_filtersOpen)
+        // بحد أقصى ٤٥٪ من الشاشة — يعني النتيجة عمرها ما تقل عن النص،
+        // حتى لو الفلاتر زادت بعدين.
+        ConstrainedBox(
+          constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.45),
+          child: ListView(shrinkWrap: true, children: filters),
+        ),
+      summary,
+      Expanded(child: list),
+    ]);
   }
 
   Widget _sectionTitle(String t) => Align(
@@ -265,7 +366,7 @@ class _MemberFilterScreenState extends State<MemberFilterScreen> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
-              color: sel ? AppColors.blue2 : Colors.white,
+              color: sel ? AppColors.blue2 : AppColors.surface,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: sel ? AppColors.blue2 : AppColors.border),
             ),
@@ -285,7 +386,7 @@ class _MemberFilterScreenState extends State<MemberFilterScreen> {
     return GestureDetector(
       onTap: () {
         if (g != null) {
-          showModalBottomSheet(
+          showAppSheet(
             context: context,
             isScrollControlled: true,
             backgroundColor: Colors.transparent,
@@ -359,7 +460,7 @@ class _MemberFilterScreenState extends State<MemberFilterScreen> {
 
   // ── 📣 رسالة جماعية لكل عملاء النتيجة — واحد ورا التاني مع ✅ ──
   void _showBulkMsg(List<Member> members, AppProvider prov) {
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,

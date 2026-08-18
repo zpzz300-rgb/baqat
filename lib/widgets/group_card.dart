@@ -6,12 +6,14 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/breakpoints.dart';
 import 'member_card.dart';
 import 'add_member_modal.dart';
 import 'add_group_modal.dart';
 import 'complaints_sheet.dart';
 import 'common.dart';
+import 'money_words.dart';
 import '../services/supabase_service.dart';
 import 'rental_sheet.dart';
 import 'pin_dialog.dart';
@@ -379,24 +381,48 @@ class _GroupCardState extends State<GroupCard> {
 
                   const SizedBox(height: 8),
 
-                  // ── Row C: GB bar (full width) ───────────────────
-                  _buildGbBar(prov),
+                  // 🖥 البيانات دي بتتحط في **عمودين** لما الكارت يكون
+                  // واسع كفاية. الكارت الواسع بيبقى فاضي من الجنب وطويل
+                  // من تحت، فبتلف بالماوس عشان توصل لآخره — والعمودين
+                  // بيقصّروا طوله للنص.
+                  //
+                  // ⚠️ القياس على عرض **الكارت** مش عرض الشاشة. الشاشة
+                  // العريضة بتعرض ٣ كروت جنب بعض، فالكارت نفسه بيبقى
+                  // ضيّق — ولو قسمناه نصّين وقتها، الصفوف اللي جواه
+                  // (زي شريط الجيجا) ما بتلاقيش مكان وتطلع مقصوصة.
+                  // الحد ٤٢٠ عشان كل عمود ياخد ٢١٠ على الأقل.
+                  LayoutBuilder(builder: (ctx, c) {
+                  return ResponsiveRowGroup(
+                    columns: c.maxWidth >= 420 ? 2 : 1,
+                    children: [
+                      // ── Row C: GB bar (full width) ───────────────
+                      _buildGbBar(prov),
 
-                  // ── Minutes Bar (Phase 2) ────────────────────────
-                  _buildMinutesBar(prov),
+                      // ── Minutes Bar (Phase 2) ────────────────────
+                      _buildMinutesBar(prov),
 
-                  // ── 📆 عدّاد الإلغاء (الأهم) + دايرة نهاية العرض ──
-                  _buildDeadlineCountdowns(),
+                      // ── 📆 عدّاد الإلغاء + دايرة نهاية العرض ─────
+                      _buildDeadlineCountdowns(),
 
-                  // ── Insurance / WE coupon badges ─────────────────
-                  _buildInsuranceBadge(),
-                  _buildWeCouponBadge(),
+                      // ── Insurance / WE coupon badges ─────────────
+                      _buildInsuranceBadge(),
+                      _buildWeCouponBadge(),
 
-                  // ── Row D: Financial summary (if set) ────────────
-                  if (group.fixedBillAmount > 0) ...[
-                    const SizedBox(height: 8),
-                    _buildFinancialRow(group),
-                  ],
+                      // ── Row D: Financial summary (if set) ────────
+                      if (group.fixedBillAmount > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: _buildFinancialRow(group),
+                        ),
+                      // ── 🔁 دورة «شهر وشهر» ──────────────────────
+                      if (group.isBimonthly)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: _buildCycleRow(context, group),
+                        ),
+                    ],
+                  );
+                  }),
                 ],
               ),
             ),
@@ -1163,6 +1189,75 @@ class _GroupCardState extends State<GroupCard> {
   }
 
   // ── Financial Row ─────────────────────────────────────────────
+  /// 🔁 سطر دورة «شهر وشهر» — الشهر ده عليه فاتورة ولا ببلاش.
+  ///
+  /// كان لازم تفتح شاشة الفواتير عشان تعرف. وانت بتقلّب في الخطوط عايز
+  /// تعرف على طول: الخط ده عليه فلوس الشهر ده ولا لأ.
+  ///
+  /// لو الخط لسه ما اتعلّمش عليه بيبان تنبيه برتقالي بدل رقم غلط.
+  Widget _buildCycleRow(BuildContext context, Group group) {
+    final now = DateTime.now();
+    final month = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    final due = group.isDueIn(month);
+
+    final (label, color, bg) = switch (due) {
+      true => (
+          'الشهر ده عليه ${group.fixedBillAmount.toStringAsFixed(0)} ج',
+          AppColors.green2,
+          AppColors.greenLight
+        ),
+      false => ('الشهر ده ببلاش', AppColors.muted, AppColors.surfaceAlt),
+      null => (
+          'شهر وشهر — لسه ما اتعلّمش عليه',
+          AppColors.orange,
+          AppColors.orangeLight
+        ),
+    };
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(
+          horizontal: context.d(10), vertical: context.d(6)),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(children: [
+        Icon(Icons.repeat, size: 13, color: color),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(label,
+              style: GoogleFonts.cairo(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: color)),
+        ),
+        if (due != null)
+          Text(_cycleHint(group, month),
+              style: GoogleFonts.cairo(
+                  fontSize: 9, fontWeight: FontWeight.w700, color: color)),
+      ]),
+    );
+  }
+
+  /// «الجاية في سبتمبر» — أقرب شهر جاي عليه فاتورة.
+  String _cycleHint(Group group, String month) {
+    final p = month.split('-');
+    final y = int.tryParse(p[0]) ?? DateTime.now().year;
+    final m = int.tryParse(p.length > 1 ? p[1] : '1') ?? 1;
+    const names = [
+      '', 'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+      'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+    ];
+    for (var i = 1; i <= 3; i++) {
+      final d = DateTime(y, m + i);
+      final key = '${d.year}-${d.month.toString().padLeft(2, '0')}';
+      if (group.isDueIn(key) == true) return 'الجاية ${names[d.month]}';
+    }
+    return '';
+  }
+
   Widget _buildFinancialRow(Group group) {
     final fixed = group.fixedBillAmount;
     final voucher = group.voucherValue;
@@ -1221,7 +1316,7 @@ class _GroupCardState extends State<GroupCard> {
     final bg = active ? AppColors.greenLight : AppColors.orangeLight;
 
     return GestureDetector(
-      onTap: () => showModalBottomSheet(useRootNavigator: true,
+      onTap: () => showAppSheet(useRootNavigator: true,
         context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
@@ -1301,7 +1396,7 @@ class _GroupCardState extends State<GroupCard> {
     final usedMin = prov.db.groupUsedMinutes(g.id);
     final usedIntl = prov.db.groupUsedInternational(g.id);
 
-    showModalBottomSheet(
+    showAppSheet(
       useRootNavigator: true,
       context: context,
       isScrollControlled: true,
@@ -1314,9 +1409,9 @@ class _GroupCardState extends State<GroupCard> {
           maxChildSize: 0.95,
           expand: false,
           builder: (_, sc) => Container(
-            decoration: const BoxDecoration(
-              color: Color(0xFFf8fbff),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            decoration: BoxDecoration(
+              color: AppColors.bg,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
             ),
             child: Column(children: [
               const SizedBox(height: 10),
@@ -1544,7 +1639,7 @@ class _GroupCardState extends State<GroupCard> {
   }
 
   void _openPointsSheet(BuildContext context, AppProvider prov) {
-    showModalBottomSheet(useRootNavigator: true,
+    showAppSheet(useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -1562,7 +1657,7 @@ class _GroupCardState extends State<GroupCard> {
         group.complaints.where((c) => c['resolved'] != true).length;
     if (unresolved == 0) return const SizedBox.shrink();
     return GestureDetector(
-      onTap: () => showModalBottomSheet(useRootNavigator: true,
+      onTap: () => showAppSheet(useRootNavigator: true,
         context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
@@ -1876,7 +1971,7 @@ class _GroupCardState extends State<GroupCard> {
               keyboardType: TextInputType.number,
               textDirection: TextDirection.ltr,
               decoration: InputDecoration(
-                hintText: 'قيمة الفاتورة الجديدة (ج)',
+                hintText: MoneyWords.actualBillLabel,
                 hintStyle: GoogleFonts.cairo(fontSize: 12),
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -2204,7 +2299,7 @@ class _GroupCardState extends State<GroupCard> {
     }
     switch (action) {
       case 'edit':
-        showModalBottomSheet(useRootNavigator: true,
+        showAppSheet(useRootNavigator: true,
           context: ctx,
           isScrollControlled: true,
           backgroundColor: Colors.transparent,
@@ -2216,7 +2311,7 @@ class _GroupCardState extends State<GroupCard> {
         );
         break;
       case 'addMember':
-        showModalBottomSheet(useRootNavigator: true,
+        showAppSheet(useRootNavigator: true,
           context: ctx,
           isScrollControlled: true,
           backgroundColor: Colors.transparent,
@@ -2225,7 +2320,7 @@ class _GroupCardState extends State<GroupCard> {
         );
         break;
       case 'notepad':
-        showModalBottomSheet(useRootNavigator: true,
+        showAppSheet(useRootNavigator: true,
           context: ctx,
           isScrollControlled: true,
           backgroundColor: Colors.transparent,
@@ -2240,7 +2335,7 @@ class _GroupCardState extends State<GroupCard> {
         _editStickyNote(ctx, prov, freshGroup);
         break;
       case 'complaints':
-        showModalBottomSheet(useRootNavigator: true,
+        showAppSheet(useRootNavigator: true,
           context: ctx,
           isScrollControlled: true,
           backgroundColor: Colors.transparent,
@@ -2249,7 +2344,7 @@ class _GroupCardState extends State<GroupCard> {
         );
         break;
       case 'rental':
-        showModalBottomSheet(useRootNavigator: true,
+        showAppSheet(useRootNavigator: true,
           context: ctx,
           isScrollControlled: true,
           backgroundColor: Colors.transparent,

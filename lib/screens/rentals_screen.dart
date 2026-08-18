@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../widgets/common.dart';
 
 class RentalsScreen extends StatefulWidget {
@@ -121,8 +122,9 @@ class _RentalsScreenState extends State<RentalsScreen> {
                         style: GoogleFonts.cairo(color: AppColors.muted, fontSize: 14)),
                   ],
                 ))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(12),
+              // 📐 على التاب والكمبيوتر الكروت بتتوزّع على عمودين/تلاتة
+              // بدل كارت واحد مفرود بعرض ١٩٠٠ بكسل.
+              : ResponsiveCards(
                   itemCount: rentals.length,
                   itemBuilder: (_, i) => _RentalCard(rental: rentals[i]),
                 ),
@@ -183,7 +185,7 @@ class _RentalsScreenState extends State<RentalsScreen> {
   }
 
   void _showAddRental(BuildContext context) {
-    showModalBottomSheet(useRootNavigator: true,
+    showAppSheet(useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -443,7 +445,7 @@ class _RentalCardState extends State<_RentalCard> {
   }
 
   void _edit(BuildContext context, Rental r) {
-    showModalBottomSheet(useRootNavigator: true,
+    showAppSheet(useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,

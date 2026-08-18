@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/supabase_service.dart';
 import '../services/app_search.dart' show searchMatches;
 import '../widgets/common.dart';
@@ -170,7 +171,7 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
         .where((e) => e['status'] == 'active')
         .map((e) => {'id': e['id'].toString(), 'name': (e['name'] ?? '').toString()})
         .toList();
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -186,7 +187,7 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
         .where((e) => e['status'] == 'active')
         .map((e) => (e['name'] ?? '').toString())
         .toList();
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -311,9 +312,9 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
       AppSnackbar.show(context, 'مفيش موظف تاني مفعّل تنقل له');
       return;
     }
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => Padding(
@@ -362,7 +363,7 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
     final empNames = {
       for (final e in _employees) e['id'].toString(): (e['name'] ?? '').toString()
     };
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -558,9 +559,9 @@ class _AssignSheetState extends State<_AssignSheet> {
         maxChildSize: 0.95,
         expand: false,
         builder: (_, scrollCtrl) => Container(
-          decoration: const BoxDecoration(
-            color: Color(0xFFf8fbff),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          decoration: BoxDecoration(
+            color: AppColors.bg,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(children: [
             const SizedBox(height: 10),

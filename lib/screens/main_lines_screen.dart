@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import '../models/main_line.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/app_search.dart';
 import '../utils/phone_utils.dart';
 import '../widgets/app_search_bar.dart';
@@ -67,7 +68,7 @@ class _MainLinesScreenState extends State<MainLinesScreen> {
                     ),
                   ]),
                 )
-              : ListView.builder(
+              : ResponsiveCards(
                   padding: const EdgeInsets.fromLTRB(12, 10, 12, 80),
                   itemCount: filtered.length,
                   itemBuilder: (_, i) => _MainLineCard(
@@ -140,7 +141,7 @@ class _MainLinesScreenState extends State<MainLinesScreen> {
   );
 
   void _openForm(BuildContext context, AppProvider prov, {MainLine? existing}) {
-    showModalBottomSheet(useRootNavigator: true,
+    showAppSheet(useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -245,11 +246,11 @@ class _MainLineCard extends StatelessWidget {
 
   // ── provider picker (bottom sheet) ───────────────────────────
   void _editProvider(BuildContext ctx) {
-    showModalBottomSheet(useRootNavigator: true,
+    showAppSheet(useRootNavigator: true,
       context: ctx,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       builder: (_) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -299,11 +300,11 @@ class _MainLineCard extends StatelessWidget {
 
   // ── billing cycle picker (bottom sheet) ───────────────────────
   void _editCycle(BuildContext ctx) {
-    showModalBottomSheet(useRootNavigator: true,
+    showAppSheet(useRootNavigator: true,
       context: ctx,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       builder: (_) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
         child: Column(mainAxisSize: MainAxisSize.min, children: [

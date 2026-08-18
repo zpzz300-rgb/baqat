@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../providers/app_provider.dart';
 import '../models/models.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/app_search.dart';
 import '../services/view_prefs.dart';
 import '../widgets/app_search_bar.dart';
@@ -244,7 +245,7 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
     final maxVal =
         byMonth.values.isEmpty ? 1.0 : byMonth.values.reduce((a, b) => a > b ? a : b);
 
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -334,7 +335,7 @@ class _BillingMatrixScreenState extends State<BillingMatrixScreen> {
   void _openLineHistory(BuildContext context, AppDB db, Group g) {
     final bills = db.companyBills.where((b) => b.groupId == g.id).toList()
       ..sort((a, b) => b.month.compareTo(a.month)); // الأحدث فوق
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,

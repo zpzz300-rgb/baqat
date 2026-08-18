@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/notification_service.dart';
 import '../utils/phone_utils.dart';
 import 'common.dart';
@@ -283,7 +284,7 @@ class MemberCard extends StatelessWidget {
   }
 
   void _openDrawer(BuildContext context) {
-    showModalBottomSheet(useRootNavigator: true,
+    showAppSheet(useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -696,9 +697,9 @@ class _MemberDrawerState extends State<MemberDrawer> {
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.93,
-      decoration: const BoxDecoration(
-        color: Color(0xFFf8fbff),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: AppColors.bg,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(children: [
         // ── Handle ────────────────────────────────────────────
@@ -1515,7 +1516,7 @@ class _MemberDrawerState extends State<MemberDrawer> {
   }
 
   Future<void> _openGiftTemplateEditor() async {
-    final changed = await showModalBottomSheet<bool>(
+    final changed = await showAppSheet<bool>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,
@@ -1798,7 +1799,7 @@ class _MemberDrawerState extends State<MemberDrawer> {
   }
 
   void _editLogEntry(Map<String, dynamic> entry, int idx, AppProvider prov) {
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -1923,7 +1924,7 @@ class _MemberDrawerState extends State<MemberDrawer> {
   }
 
   void _showReminderLog(Member member, AppProvider prov) {
-    showModalBottomSheet(
+    showAppSheet(
       useRootNavigator: true,
       context: context,
       isScrollControlled: true,
@@ -2088,7 +2089,7 @@ class _MemberDrawerState extends State<MemberDrawer> {
             Navigator.pop(context);
             await Future.delayed(const Duration(milliseconds: 350));
             if (!rootCtx.mounted) return;
-            showModalBottomSheet(useRootNavigator: true,
+            showAppSheet(useRootNavigator: true,
               context: rootCtx,
               isScrollControlled: true,
               backgroundColor: Colors.transparent,
@@ -2300,7 +2301,7 @@ class _MemberDrawerState extends State<MemberDrawer> {
   // ── WhatsApp preview dialog ──────────────────────────────────
   void _showWAPreview(String msg, String phone, {String? memberId, String? channel}) {
     final ctrl = TextEditingController(text: msg);
-    showModalBottomSheet(useRootNavigator: true,
+    showAppSheet(useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,

@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 import '../services/demo_data.dart';
+import '../services/app_search.dart' show extractPhones, phoneKey;
 import '../services/menu_catalog.dart';
 
 /// 🗂️ جلسة تاب في مساحة العمل — شاشة مفتوحة بالتوازي بتحتفظ بحالتها
@@ -1335,7 +1336,29 @@ class AppProvider extends ChangeNotifier {
     } else {
       NotificationService.cancelBillDueAlerts();
     }
+
+    // 📅 تذكير أسبوعي بالفواتير اللي لسه ما اتسجّلتش الشهر ده.
+    //
+    // بيمشي مع نفس مفتاح تنبيهات الفواتير — لو قافلها يبقى قافل ده كمان،
+    // عشان ما يبقاش عندك مفتاح بيقفل نص التنبيهات بس.
+    if (_notifBillDue) {
+      final m = _currentMonthKey();
+      NotificationService.scheduleWeeklyMissingBills(
+        missingCount: _missingBillsCount(m),
+        monthLabel: m,
+      );
+    } else {
+      NotificationService.cancelWeeklyMissingBills();
+    }
   }
+
+  String _currentMonthKey() {
+    final n = DateTime.now();
+    return '${n.year}-${n.month.toString().padLeft(2, '0')}';
+  }
+
+  /// المنطق نفسه في `AppDB.missingBillsCount` عشان يتغطّى باختبارات.
+  int _missingBillsCount(String month) => db.missingBillsCount(month);
 
   // ─── AUTO BACKUP ─────────────────────────────────────────────
   /// مجلد النسخ الاحتياطي — نفس الاسم على كل الأجهزة عشان تلاقيه بسهولة.
@@ -1429,6 +1452,55 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
+  /// 🛟 نسخة أمان قبل أي عملية بتغيّر خطوط كتير مرة واحدة.
+  ///
+  /// اسمها **مختلف** عن النسخة اليومية (`telecom_before_…`) عشان النسخ
+  /// الاحتياطي التلقائي ما يكتبش فوقها بعد كده، وفيها الساعة والدقيقة
+  /// عشان كل عملية تسيب أثرها لوحدها. مفيش ملف بيتمسح.
+  Future<String?> safetyBackup(String reason) async {
+    if (SupabaseService.isEmployee) return null;
+    File? tmp;
+    try {
+      final now = DateTime.now();
+      String two(int n) => n.toString().padLeft(2, '0');
+      final stamp = '${now.year}-${two(now.month)}-${two(now.day)}'
+          '_${two(now.hour)}${two(now.minute)}${two(now.second)}';
+      final dir = await _backupDir();
+      final payload = jsonEncode(db.toJson());
+
+      // نفس أسلوب `performBackup`: نكتب مؤقت، نتأكد، وبعدين نسمّيه.
+      tmp = File('${dir.path}/.telecom_before_${reason}_$stamp.part');
+      await tmp.writeAsString(payload, flush: true);
+      final check = jsonDecode(await tmp.readAsString()) as Map<String, dynamic>;
+      if (((check['groups'] as List?)?.length ?? -1) != db.groups.length) {
+        await tmp.delete();
+        return null;
+      }
+      final target = File('${dir.path}/telecom_before_${reason}_$stamp.json');
+      await tmp.rename(target.path);
+      return target.path;
+    } catch (_) {
+      try {
+        if (tmp != null && await tmp.exists()) await tmp.delete();
+      } catch (_) {}
+      return null;
+    }
+  }
+
+  /// التصليح الجماعي **بعد** ما ياخد نسخة أمان.
+  ///
+  /// بيرجّع عدد اللي اتصلّح ومكان النسخة. لو النسخة فشلت بنكمّل برضه —
+  /// التراجع (`undoBulkFix`) لسه شغّال — بس بنقول للمستخدم إنها فشلت
+  /// بدل ما نوهمه إنه متأمّن.
+  Future<({int fixed, String? backup})> fixAllHalvedRawPricesSafely() async {
+    final n = db.groups
+        .where((g) => billIssuesOf(g).contains(kBillIssueHalved))
+        .length;
+    if (n == 0) return (fixed: 0, backup: null);
+    final path = await safetyBackup('اصلاح-الاسعار');
+    return (fixed: fixAllHalvedRawPrices(), backup: path);
+  }
+
   Future<void> _checkAutoBackup() async {
     if (!_autoBackup) return;
     final today = DateTime.now();
@@ -1519,7 +1591,21 @@ class AppProvider extends ChangeNotifier {
 
   void editGroup(Group g) {
     final i = db.groups.indexWhere((x) => x.id == g.id);
-    if (i >= 0) db.groups[i] = g;
+    if (i >= 0) {
+      // 🛡️ حقول دورة الفوترة بتتظبط من كارت الفاتورة مش من مودال التعديل،
+      // ومودال التعديل بيعيد بناء الخط من الأول — فمن غير الحماية دي كنت
+      // تعدّل اسم صاحب الخط فيرجع نظامه «ثابت» وتضيع مرساة الدورة معاه.
+      final old = db.groups[i];
+      if (g.billingSystem == 'fixed') g.billingSystem = old.billingSystem;
+      g.billAnchorMonth ??= old.billAnchorMonth;
+      if (g.billMonthOverrides.isEmpty) {
+        g.billMonthOverrides = old.billMonthOverrides;
+      }
+      if (g.sideNumberIds.isEmpty) g.sideNumberIds = old.sideNumberIds;
+      if (g.billCycleMonths == 2) g.billCycleMonths = old.billCycleMonths;
+      g.billEndMonth ??= old.billEndMonth;
+      db.groups[i] = g;
+    }
     _scheduleVoucherNotifications();
     _addLog(null, 'edit', 'تعديل المجموعة ${g.phone}',
         targetId: g.id, targetType: 'group');
@@ -1792,6 +1878,600 @@ class AppProvider extends ChangeNotifier {
     return dueShiftGroupIds(acc, targetMonth).contains(groupId);
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // 🔁 دورة «شهر وشهر» بالمرساة — علامة واحدة تكفي للأبد
+  //
+  // انت بتعلّم مرة واحدة «الفاتورة نزلت في الشهر ده» على كل خط، والباقي
+  // بيتحسب لوحده قدّام ووراء. الحساب الواحد = خط رئيسي + الخطوط المضمومة
+  // عليه، وفاتورة الشهر = مجموع اللي دورهم بس.
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// خطوط الحساب الواحد: الخط الرئيسي الأول وبعده المضمومين عليه.
+  List<Group> accountLines(String headGid) {
+    final head = db.groups.where((g) => g.id == headGid).firstOrNull;
+    if (head == null) return const [];
+    return [
+      head,
+      ...db.groups.where((g) => g.parentGroupId == headGid),
+    ];
+  }
+
+  /// الخط الرئيسي للحساب اللي الخط ده جواه — بيرجّع الخط نفسه لو مش مضموم.
+  Group? accountHeadOf(String gid) {
+    final g = db.groups.where((x) => x.id == gid).firstOrNull;
+    if (g == null) return null;
+    final pid = g.parentGroupId;
+    if (pid == null || pid.isEmpty) return g;
+    return db.groups.where((x) => x.id == pid).firstOrNull ?? g;
+  }
+
+  /// 🔁 هل دور الخط ده ينزّل فاتورة في [month]؟
+  ///
+  /// المرساة والاستثناءات بيغلبوا. لو الخط ما اتعلّمش عليه لسه بنرجع
+  /// لنظام الشقّين القديم زي ما هو، فمفيش خط قديم بيتغيّر سلوكه لوحده.
+  bool isLineDueIn(Group g, String month) =>
+      g.isDueIn(month) ?? isGroupDueForBilling(g.id, month);
+
+  /// خطوط الحساب اللي دورها ينزّل فاتورة في [month].
+  List<Group> dueLinesOfAccount(String headGid, String month) =>
+      accountLines(headGid).where((g) => isLineDueIn(g, month)).toList();
+
+  /// 💰 فاتورة الحساب المتوقعة في [month] = مجموع سعر الخطوط اللي دورها بس.
+  /// صفر معناها «الشهر ده مفيش فاتورة على الحساب ده خالص».
+  double expectedAccountAmount(String headGid, String month) =>
+      dueLinesOfAccount(headGid, month)
+          .fold<double>(0, (s, g) => s + g.fixedBillAmount);
+
+  // ─── 🔍 مراجعة بيانات الفوترة — «هي مظبوطة ولا في غلط؟» ────────────
+  //
+  // أشهر غلط في البيانات القديمة: قبل ما «السعر الخام» و«أساس الربح»
+  // ينفصلوا كان في حقل واحد، والناس كانت بتكتب فيه **نص** الفاتورة عشان
+  // الربح يطلع صح. بعد الفصل الرقم المنصّف فضل قاعد في خانة الخام، فقايمة
+  // الفواتير بتتوقّع نص المبلغ اللي هينزل فعلاً.
+
+  /// نوع المشكلة في بيانات خط.
+  /// * `halved` — الخام شكله نص الفاتورة (أقل بكتير من سعر الباقة)
+  /// * `noAmount` — مفيش سعر خام أصلاً، فالتوقّع صفر
+  /// * `noAnchor` — خط شهر وشهر من غير تعليم دورة، فمش عارفين دوره إمتى
+  static const kBillIssueHalved = 'halved';
+  static const kBillIssueNoAmount = 'noAmount';
+  static const kBillIssueNoAnchor = 'noAnchor';
+
+  /// سعر الباقة حسب نوع الخط — الرقم المكتوب على الزرار في شاشة التعديل.
+  static const _tierPrices = <String, double>{'3800': 4250, '1800': 2150};
+
+  /// سعر الباقة للخط ده — null للخط اليدوي (انت اللي بتكتب مبلغه).
+  double? tierPriceOf(Group g) => _tierPrices[g.type];
+
+  /// هل الخط ده أصلاً بتنزل عليه فواتير من الشركة؟
+  ///
+  /// المراجعة لازم تعدّي الخطوط اللي مالهاش فواتير — الضيوف، والخطوط
+  /// المتوقفة، واللي لسه ما اتظبطتش. من غير الفلتر ده الشريط البرتقالي
+  /// بيقول لك «٢٠ خط فيهم مشكلة» وهما مش مشاكل، فتتعوّد تتجاهله —
+  /// وساعتها التنبيه الحقيقي بيضيع وسطهم.
+  bool _isBilledLine(Group g) {
+    if (g.type == 'guest') return false;
+    // الخط المقفول مش هتنزل عليه فواتير تاني، فمفيش حاجة تتصلّح فيه.
+    if (g.isClosedLine) return false;
+    // خط بينزل عليه فواتير فعلاً، أو نظامه شهر وشهر (يعني انت ظابطه كده
+    // عن قصد)، أو ليه سعر متسجّل.
+    if (g.isBimonthly) return true;
+    if (g.fixedBillAmount > 0) return true;
+    return db.companyBills.any((b) => b.groupId == g.id);
+  }
+
+  /// مشاكل بيانات الخط ده — لستة فاضية يعني الخط مظبوط.
+  List<String> billIssuesOf(Group g) {
+    if (!_isBilledLine(g)) return const [];
+    final issues = <String>[];
+    final tier = tierPriceOf(g);
+    if (g.fixedBillAmount <= 0) {
+      issues.add(kBillIssueNoAmount);
+    } else if (g.isBimonthly && tier != null && g.fixedBillAmount < tier * 0.75) {
+      issues.add(kBillIssueHalved);
+    }
+    if (g.isBimonthly && g.effectiveBillAnchor == null) {
+      issues.add(kBillIssueNoAnchor);
+    }
+    return issues;
+  }
+
+  /// كل الخطوط اللي فيها مشكلة — مرتبة: المنصّف الأول لأنه بيغلّط الأرقام.
+  List<Group> linesWithBillIssues() {
+    final out = db.groups.where((g) => billIssuesOf(g).isNotEmpty).toList();
+    int rank(Group g) {
+      final i = billIssuesOf(g);
+      if (i.contains(kBillIssueHalved)) return 0;
+      if (i.contains(kBillIssueNoAmount)) return 1;
+      return 2;
+    }
+    out.sort((a, b) {
+      final r = rank(a).compareTo(rank(b));
+      return r != 0 ? r : a.phone.compareTo(b.phone);
+    });
+    return out;
+  }
+
+  /// 🔧 تصليح الرقم المنصّف: الخام يرجع سعر الباقة، والرقم القديم يروح
+  /// لأساس الربح.
+  ///
+  /// **الربح مابيتغيّرش ولا جنيه**: الربح بيتحسب من
+  /// `profitBillAmount ?? fixedBillAmount`. قبل التصليح كان أساس الربح
+  /// فاضي فالربح على الخام المنصّف؛ بعده الخام المنصّف بقى هو أساس الربح
+  /// نفسه، فالنتيجة واحدة بالظبط. اللي بيتصلّح هو **التوقّع** بس.
+  ///
+  /// بيرجّع true لو اتصلّح فعلاً.
+  bool fixHalvedRawPrice(String gid) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return false;
+    final g = db.groups[i];
+    final tier = tierPriceOf(g);
+    if (tier == null || !billIssuesOf(g).contains(kBillIssueHalved)) {
+      return false;
+    }
+    final old = g.fixedBillAmount;
+    g.profitBillAmount ??= old;
+    g.fixedBillAmount = tier;
+    _addLog(null, 'group_edit',
+        'تصليح سعر ${g.phone}: الخام ${old.toStringAsFixed(0)} → '
+        '${tier.toStringAsFixed(0)} ج، وأساس الربح بقى ${old.toStringAsFixed(0)} ج');
+    save();
+    notifyListeners();
+    return true;
+  }
+
+  /// 🔙 آخر تصليح جماعي — عشان تقدر تتراجع عنه.
+  ///
+  /// التصليح الجماعي بيلمس عشرات الخطوط مرة واحدة. من غير تراجع، لو طلع
+  /// إن الفحص غلط في خط أو اتنين تبقى قاعد تصلّحهم بإيدك واحد واحد.
+  /// بنحفظ الأرقام القديمة في الذاكرة (مش على الديسك) — يعني التراجع متاح
+  /// طول ما البرنامج مفتوح.
+  List<({String gid, double raw, double? profit})>? _lastBulkFix;
+
+  /// فيه تصليح جماعي ينفع نتراجع عنه؟
+  bool get canUndoBulkFix => (_lastBulkFix?.isNotEmpty ?? false);
+
+  /// عدد الخطوط في آخر تصليح جماعي.
+  int get lastBulkFixCount => _lastBulkFix?.length ?? 0;
+
+  /// تصليح كل الخطوط المنصّفة مرة واحدة — بيرجّع عددهم.
+  int fixAllHalvedRawPrices() {
+    final ids = db.groups
+        .where((g) => billIssuesOf(g).contains(kBillIssueHalved))
+        .map((g) => g.id)
+        .toList();
+    // نصوّر الحالة قبل التصليح عشان التراجع
+    final before = <({String gid, double raw, double? profit})>[];
+    for (final id in ids) {
+      final g = db.groups.where((x) => x.id == id).firstOrNull;
+      if (g == null) continue;
+      before.add((gid: id, raw: g.fixedBillAmount, profit: g.profitBillAmount));
+    }
+    var n = 0;
+    for (final id in ids) {
+      if (fixHalvedRawPrice(id)) n++;
+    }
+    _lastBulkFix = n > 0 ? before : null;
+    return n;
+  }
+
+  /// 🔙 رجّع آخر تصليح جماعي زي ما كان بالظبط — بيرجّع عدد اللي اترجعوا.
+  int undoBulkFix() {
+    final snap = _lastBulkFix;
+    if (snap == null || snap.isEmpty) return 0;
+    for (final s in snap) {
+      final i = db.groups.indexWhere((g) => g.id == s.gid);
+      if (i < 0) continue;
+      db.groups[i].fixedBillAmount = s.raw;
+      db.groups[i].profitBillAmount = s.profit;
+    }
+    _addLog(null, 'group_edit',
+        'تراجع عن تصليح ${snap.length} خط — الأسعار رجعت زي ما كانت');
+    _lastBulkFix = null;
+    save();
+    notifyListeners();
+    return snap.length;
+  }
+
+  // ─── 🌿 ضم الخطوط في حساب واحد (التشجير) ──────────────────────────
+
+  /// الخطوط اللي ينفع تضمّها على [headGid] — مع علامة إذا كانت مضمومة
+  /// عليه بالفعل.
+  ///
+  /// بنستبعد: الخط نفسه، والخطوط اللي مضمومة على حساب **تاني** (عشان خط
+  /// مايبقاش في حسابين)، والخطوط اللي هي نفسها ضامّة خطوط تحتها (عشان
+  /// مايبقاش عندنا شجرة على تلات مستويات — الحساب مستوى واحد وبس).
+  List<Group> linkCandidatesFor(String headGid) {
+    return db.groups.where((g) {
+      if (g.id == headGid) return false;
+      final pid = g.parentGroupId;
+      if (pid != null && pid.isNotEmpty && pid != headGid) return false;
+      if (db.groups.any((x) => x.parentGroupId == g.id)) return false;
+      return true;
+    }).toList()
+      ..sort((a, b) => a.phone.compareTo(b.phone));
+  }
+
+  /// ضبط خطوط الحساب دفعة واحدة: [memberIds] هي الخطوط المضمومة على
+  /// [headGid] بعد التعديل. اللي اتشال بيرجع خط مستقل لوحده.
+  void setAccountLines(String headGid, List<String> memberIds) {
+    final wanted = memberIds.toSet()..remove(headGid);
+    var changed = 0;
+    for (final g in db.groups) {
+      if (g.id == headGid) continue;
+      final isChild = g.parentGroupId == headGid;
+      if (wanted.contains(g.id) && !isChild) {
+        g.parentGroupId = headGid;
+        changed++;
+      } else if (!wanted.contains(g.id) && isChild) {
+        g.parentGroupId = null;
+        changed++;
+      }
+    }
+    if (changed == 0) return;
+    final head = db.groups.where((g) => g.id == headGid).firstOrNull;
+    _addLog(null, 'group_edit',
+        'حساب ${head?.phone ?? headGid}: بقى فيه ${wanted.length + 1} خط',
+        targetId: headGid, targetType: 'group');
+    save();
+    notifyListeners();
+  }
+
+  /// ☎️ كل أرقام الأرضي والهوم 4G في البرنامج — دي اللي بتختار منها
+  /// أرقام الحساب. بتتعرض في شيت الاختيار مرتبة بالاسم.
+  List<Member> get allSideNumbers => db.members
+      .where((m) => m.type == 'landline' || m.type == 'homeforgee')
+      .toList()
+    ..sort((a, b) => a.name.compareTo(b.name));
+
+  /// أرقام الأرضي والهوم 4G المربوطة بالحساب ده (اللي انت علّمت عليها).
+  List<Member> sideNumbersOf(String headGid) {
+    final head = db.groups.where((g) => g.id == headGid).firstOrNull;
+    if (head == null || head.sideNumberIds.isEmpty) return const [];
+    final ids = head.sideNumberIds.toSet();
+    return db.members.where((m) => ids.contains(m.id)).toList();
+  }
+
+  /// ربط/فك أرقام الأرضي والهوم 4G بالحساب.
+  void setAccountSideNumbers(String headGid, List<String> memberIds) {
+    final i = db.groups.indexWhere((g) => g.id == headGid);
+    if (i < 0) return;
+    db.groups[i].sideNumberIds = memberIds;
+    _addLog(null, 'edit',
+        'أرقام الأرضي/الهوم 4G لحساب ${db.groups[i].phone}: ${memberIds.length} رقم',
+        targetId: headGid, targetType: 'group');
+    save();
+    notifyListeners();
+  }
+
+  /// اقتراح أولي: أرقام الأرضي والهوم 4G اللي أصلاً جوّه خطوط الحساب —
+  /// بنعلّمها لك سلفاً في شيت الاختيار، وانت تزوّد أو تشيل.
+  List<String> suggestedSideNumberIds(String headGid) {
+    final ids = {for (final l in accountLines(headGid)) l.id};
+    return db.members
+        .where((m) =>
+            ids.contains(m.gid) &&
+            (m.type == 'landline' || m.type == 'homeforgee'))
+        .map((m) => m.id)
+        .toList();
+  }
+
+  /// 🔁 طول الدورة: كل كام شهر تنزل فاتورة (٢ = شهر وشهر).
+  void setBillCycleMonths(String gid, int months) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    final n = months.clamp(2, 12);
+    if (db.groups[i].billCycleMonths == n) return;
+    db.groups[i].billCycleMonths = n;
+    _addLog(null, 'group_edit',
+        'دورة ${db.groups[i].phone}: كل $n شهور',
+        targetId: gid, targetType: 'group');
+    save();
+    notifyListeners();
+  }
+
+  /// 📥 استيراد الدورة من كشف الشركة.
+  ///
+  /// الشركة بتبعت كشف بالخطوط اللي نزلت عليها فواتير الشهر ده (رسالة، أو
+  /// ملف تفتحه وتنسخ منه). بدل ما تعلّم على كل خط لوحده، بتلزق الكلام كله
+  /// هنا والبرنامج يطلّع منه الأرقام.
+  ///
+  /// بيقرا **أي** نص: بيدوّر على تسلسلات أرقام متلزقة طولها من ١٠ لـ ١٥ رقم،
+  /// ويقارن بآخر ٩ أرقام (عشان `+20` و`0020` و`01` كلهم يوصلوا لنفس الخط).
+  ///
+  /// ⚠️ بيدوّر على النص زي ما هو (بعد تحويل الأرقام العربية لإنجليزية)
+  /// **مش** على أرقامه ملزوقة — لو لزقناهم الأول، رقمين ورا بعض بيبقوا
+  /// رقم واحد طويل غلط.
+  ///
+  /// بيرجّع: الخطوط اللي عرفها، والأرقام اللي مالقاش لها خط.
+  ({List<Group> found, List<String> unknown}) matchPhonesInText(String text) {
+    final byKey = <String, Group>{};
+    for (final g in db.groups) {
+      final k = phoneKey(g.phone);
+      if (k.isNotEmpty) byKey[k] = g;
+    }
+    final found = <Group>[];
+    final unknown = <String>[];
+    for (final raw in extractPhones(text)) {
+      final g = byKey[phoneKey(raw)];
+      if (g != null) {
+        found.add(g);
+      } else {
+        unknown.add(raw);
+      }
+    }
+    return (found: found, unknown: unknown);
+  }
+
+  /// 📌 علّم إن فواتير الخطوط دي نزلت في [month] — من كشف الشركة.
+  ///
+  /// بيحطّ المرساة على الشهر ده. مابيلمسش المبالغ ولا بيسجّل فواتير —
+  /// ده تعليم دورة بس، وانت اللي بتسجّل الفلوس بإيدك زي ما انت متعوّد.
+  int applyImportedCycle(List<String> gids, String month) {
+    var n = 0;
+    for (final id in gids) {
+      final i = db.groups.indexWhere((g) => g.id == id);
+      if (i < 0) continue;
+      final g = db.groups[i];
+      if (!g.isBimonthly) continue; // الثابت بينزل كل شهر، مالوش مرساة
+      if (g.billAnchorMonth == month) continue;
+      g.billAnchorMonth = month;
+      n++;
+    }
+    if (n == 0) return 0;
+    _addLog(null, 'group_edit', 'استيراد دورة من كشف الشركة: $n خط علامتهم $month');
+    save();
+    notifyListeners();
+    return n;
+  }
+
+  /// 🛑 اقفل الخط: آخر شهر تنزل فيه فاتورة. [month] = null يفتحه تاني.
+  ///
+  /// مابيمسحش ولا فاتورة قديمة — التاريخ زي ما هو، بس الشهور الجاية
+  /// بتبقى «مفيش فاتورة» بدل ما تفضل تدوّر على فاتورة مش هتيجي.
+  void setBillEndMonth(String gid, String? month) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    final g = db.groups[i];
+    if (g.billEndMonth == month) return;
+    g.billEndMonth = (month?.isEmpty ?? true) ? null : month;
+    _addLog(
+        null,
+        'group_edit',
+        g.billEndMonth == null
+            ? 'الخط ${g.phone} اتفتح تاني — الفواتير رجعت'
+            : 'الخط ${g.phone} اتقفل — آخر فاتورة ${g.billEndMonth}',
+        targetId: gid,
+        targetType: 'group');
+    save();
+    notifyListeners();
+  }
+
+  /// الخطوط «شهر وشهر» اللي ينفع تنسخ لها دورة — من غير الخط نفسه.
+  List<Group> cycleCopyCandidates(String srcGid) => db.groups
+      .where((g) => g.id != srcGid && g.isBimonthly && _isBilledLine(g))
+      .toList()
+    ..sort((a, b) => a.phone.compareTo(b.phone));
+
+  /// 📋 انسخ إعدادات الدورة من خط لخطوط تانية.
+  ///
+  /// بينسخ حاجتين بس: **العلامة** (المرساة) و**طول الدورة**. يعني الخطوط
+  /// دي هتنزل فواتيرها في نفس الشهور.
+  ///
+  /// ⚠️ **مش** بينسخ الاستثناءات (`billMonthOverrides`) ولا المبلغ. الاستثناء
+  /// معناه «الشركة غلطت في الخط ده الشهر ده» — لو نسخناه لخط تاني نبقى
+  /// اخترعنا غلطة ماحصلتش. والمبلغ بيختلف من خط للتاني بطبيعته.
+  ///
+  /// بيرجّع عدد اللي اتغيّر فعلاً. المنطق نفسه في `AppDB.copyCycle` عشان
+  /// يبقى متغطّي باختبارات من غير ما نحتاج Supabase.
+  int copyCycleTo(String srcGid, List<String> targetGids) {
+    final src = db.groups.where((g) => g.id == srcGid).firstOrNull;
+    if (src == null) return 0;
+    final anchor = src.effectiveBillAnchor;
+    final n = db.copyCycle(srcGid, targetGids);
+    if (n == 0) return 0;
+    _addLog(null, 'group_edit',
+        'نسخ دورة ${src.phone} لـ $n خط — علامة $anchor، كل ${src.billCycleMonths} شهور',
+        targetId: srcGid, targetType: 'group');
+    save();
+    notifyListeners();
+    return n;
+  }
+
+  /// 📌 تعليم مرساة الدورة: «فاتورة الخط ده نزلت في الشهر ده».
+  /// [month] = null يشيل التعليم ويرجّع الخط للاستنتاج القديم.
+  void setBillAnchor(String gid, String? month) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    final g = db.groups[i];
+    g.billAnchorMonth = (month == null || month.isEmpty) ? null : month;
+    _addLog(null, 'edit',
+        month == null
+            ? 'إلغاء تعليم دورة الفواتير للخط ${g.phone}'
+            : 'تعليم دورة الفواتير: ${g.phone} نزلت له فاتورة $month',
+        targetId: gid, targetType: 'group');
+    save();
+    notifyListeners();
+  }
+
+  /// 💡 اقتراح مرساة الخط من تاريخ فواتيره الفعلية.
+  ///
+  /// لو الخط له فواتير مسجّلة، آخر شهر نزلت فيه فاتورة **هو** المرساة —
+  /// مفيش داعي تدوّر في ورق. بيرجّع null لو مفيش فواتير خالص.
+  String? suggestedAnchorFor(String gid) {
+    final months = db.companyBills
+        .where((b) => b.groupId == gid && b.actualAmount > 0)
+        .map((b) => b.month)
+        .toList()
+      ..sort();
+    return months.isEmpty ? null : months.last;
+  }
+
+  /// 📌 تعليم جماعي: كل خطوط الحساب مرة واحدة.
+  ///
+  /// [anchors] = { لكل خط، الشهر اللي نزلت فيه آخر فاتورة }. الحساب اللي
+  /// فيه ٣ خطوط كان بيتطلّب ٣ فتحات للشيت؛ دي بتخلّصها في مرة.
+  void setAccountAnchors(Map<String, String> anchors) {
+    var changed = 0;
+    for (final e in anchors.entries) {
+      final i = db.groups.indexWhere((g) => g.id == e.key);
+      if (i < 0) continue;
+      if (db.groups[i].billAnchorMonth == e.value) continue;
+      db.groups[i].billAnchorMonth = e.value.isEmpty ? null : e.value;
+      changed++;
+    }
+    if (changed == 0) return;
+    _addLog(null, 'group_edit', 'تعليم دورة $changed خط دفعة واحدة');
+    save();
+    notifyListeners();
+  }
+
+  /// ⚠️ استثناء شهر بسبب غلطة من الشركة.
+  /// [state]: 'billed' نزلت غصب عني • 'free' الشهر ده تعويض ببلاش •
+  /// null يشيل الاستثناء ويرجّع الشهر للدورة الطبيعية.
+  void setBillMonthOverride(String gid, String month, String? state) {
+    final i = db.groups.indexWhere((g) => g.id == gid);
+    if (i < 0) return;
+    final g = db.groups[i];
+    if (state == null) {
+      g.billMonthOverrides.remove(month);
+    } else {
+      g.billMonthOverrides[month] = state;
+    }
+    _addLog(null, 'edit',
+        state == null
+            ? 'إلغاء استثناء $month للخط ${g.phone}'
+            : 'استثناء $month للخط ${g.phone}: '
+                '${state == 'billed' ? 'نزلت فاتورة غصب' : 'ببلاش تعويض'}',
+        targetId: gid, targetType: 'group');
+    save();
+    notifyListeners();
+  }
+
+  /// 🧾 تسجيل مطالبة على الشركة على فاتورة — الفرق اللي نزل زيادة وسببه.
+  /// [amount] = 0 يشيل المطالبة.
+  void setBillDispute(String billId, double amount, {String? note}) {
+    final i = db.companyBills.indexWhere((b) => b.id == billId);
+    if (i < 0) return;
+    final b = db.companyBills[i];
+    b.disputeAmount = amount <= 0 ? 0 : amount;
+    b.disputeNote = amount <= 0 ? null : note;
+    if (amount <= 0) b.disputeResolved = false;
+    _addLog(null, 'edit',
+        amount <= 0
+            ? 'إلغاء مطالبة فاتورة ${b.month}'
+            : 'مطالبة على الشركة ${b.month}: ${amount.toStringAsFixed(0)} ج'
+                '${note != null && note.isNotEmpty ? ' — $note' : ''}',
+        targetId: b.groupId, targetType: 'group');
+    save();
+    notifyListeners();
+  }
+
+  /// قفل/فتح المطالبة (اترجعت الفلوس أو اتعوّضت).
+  void toggleBillDisputeResolved(String billId) {
+    final i = db.companyBills.indexWhere((b) => b.id == billId);
+    if (i < 0) return;
+    db.companyBills[i].disputeResolved = !db.companyBills[i].disputeResolved;
+    save();
+    notifyListeners();
+  }
+
+  // ─── 🛡 حماية من غلطات التسجيل ──────────────────────────────────
+
+  /// فاتورة اتسجّلت خلاص لنفس الحساب في نفس الشهر؟
+  ///
+  /// أشهر غلطة يدوية: تسجّل الفاتورة، تتلهي، ترجع تسجّلها تاني — فالمديونية
+  /// تتضاعف من غير ما حد ياخد باله.
+  CompanyBill? existingBillFor(String gid, String month) {
+    for (final b in db.companyBills) {
+      if (b.groupId == gid && b.month == month && b.actualAmount > 0) return b;
+    }
+    return null;
+  }
+
+  /// ⚠️ خط «شهر وشهر» نزلت له فواتير في شهرين **ورا بعض** — يا إما الشركة
+  /// غلطت يا إما انت سجّلت مرتين. بيرجّع الشهور اللي فيها المشكلة.
+  List<String> consecutiveBillMonths(String gid) {
+    final g = db.groups.where((x) => x.id == gid).firstOrNull;
+    if (g == null || !g.isBimonthly) return const [];
+    final months = db.companyBills
+        .where((b) => b.groupId == gid && b.actualAmount > 0)
+        .map((b) => b.month)
+        .toSet()
+        .toList()
+      ..sort();
+    final bad = <String>[];
+    for (var i = 1; i < months.length; i++) {
+      // الاستثناء اليدوي معناه إنك عارف وموافق، فمانضربش إنذار عليه
+      if (g.isOverriddenIn(months[i])) continue;
+      if (Group.monthsBetween(months[i - 1], months[i]) == 1) {
+        bad.add(months[i]);
+      }
+    }
+    return bad;
+  }
+
+  /// كل الحسابات اللي فيها فواتير في شهور متتالية — لتنبيه في شاشة الفواتير.
+  Map<String, List<String>> allConsecutiveBillIssues() {
+    final out = <String, List<String>>{};
+    for (final g in db.groups) {
+      if (!g.isBimonthly) continue;
+      final bad = consecutiveBillMonths(g.id);
+      if (bad.isNotEmpty) out[g.id] = bad;
+    }
+    return out;
+  }
+
+  /// 📊 تقرير الفروق لشهر: كل حساب والمتوقع والفعلي والفرق بينهم.
+  ///
+  /// ده اللي بيجاوب على «أنا دفعت زيادة كام السنة دي؟» — بدل ما تفتح كل
+  /// فاتورة وتقارن بإيدك. مرتّب بالأكبر فرقاً لأنه هو اللي يستاهل مراجعة.
+  List<({Group head, double expected, double actual, double diff})>
+      monthDiffReport(String month) {
+    final out = <({Group head, double expected, double actual, double diff})>[];
+    for (final g in db.groups) {
+      final pid = g.parentGroupId;
+      if (pid != null && pid.isNotEmpty) continue;
+      final expected = expectedAccountAmount(g.id, month);
+      final actual = db.companyBills
+          .where((b) => b.groupId == g.id && b.month == month)
+          .fold<double>(0, (s, b) => s + b.actualAmount);
+      if (expected <= 0 && actual <= 0) continue;
+      out.add((
+        head: g,
+        expected: expected,
+        actual: actual,
+        diff: actual - expected,
+      ));
+    }
+    out.sort((a, b) => b.diff.abs().compareTo(a.diff.abs()));
+    return out;
+  }
+
+  /// إجمالي اللي دفعته زيادة عن المتوقع في مدى شهور — بالسالب يعني وفّرت.
+  double totalOverpayAcross(List<String> months) {
+    var total = 0.0;
+    for (final m in months) {
+      for (final r in monthDiffReport(m)) {
+        total += r.diff;
+      }
+    }
+    return total;
+  }
+
+  /// 📜 سجل تغييرات السعر الخام لخط — من الـ activity log.
+  /// بيرجّع الأحدث الأول.
+  List<Map<String, dynamic>> rawPriceHistory(String gid) => db.activityLog
+      .where((e) =>
+          e['targetId'] == gid &&
+          (e['text']?.toString() ?? '').contains('الخام'))
+      .toList();
+
+  /// إجمالي المطالبات المفتوحة على الشركة — لبادچ في شاشة الفواتير.
+  double get openDisputesTotal => db.companyBills
+      .where((b) => b.hasOpenDispute)
+      .fold<double>(0, (s, b) => s + b.disputeAmount);
+
   String _prevMonthOf(String month) {
     final p = month.split('-');
     final d = DateTime(int.parse(p[0]), int.parse(p[1]) - 1);
@@ -1875,11 +2555,13 @@ class AppProvider extends ChangeNotifier {
     for (final g in db.groups) {
       if (g.parentGroupId != null && g.parentGroupId!.isNotEmpty) continue;
       if (g.fixedBillAmount <= 0) continue;
-      if (!isGroupDueForBilling(g.id, month)) continue;
+      // 📌 دور الحساب بالمرساة الجديدة (وبتقع على القديم لو مفيش تعليم)،
+      // والمجموع = اللي دورهم بس مش كل خطوط الحساب. الأرشيف بيتقفل على
+      // الرقم ده وما بيتحسبش تاني، فلو غلط بيفضل غلط للأبد.
+      final dueTotal = expectedAccountAmount(g.id, month);
+      if (dueTotal <= 0) continue;
       expectedCount++;
-      final children = db.groups.where((c) => c.parentGroupId == g.id);
-      expectedTotal +=
-          g.fixedBillAmount + children.fold<double>(0, (s, c) => s + c.fixedBillAmount);
+      expectedTotal += dueTotal;
       if (billedGids.contains(g.id)) {
         billedCount++;
       } else {
@@ -4127,9 +4809,19 @@ class AppProvider extends ChangeNotifier {
     final now = DateTime.now();
     final month = forMonth ?? '${now.year}-${now.month.toString().padLeft(2, '0')}';
     final children = db.groups.where((g) => g.parentGroupId == gid).toList();
-    // الفاتورة الثابتة المرجعية = الثابت للخط الرئيسي + الخطوط المضمومة
-    final combinedFixed = db.groups[i].fixedBillAmount +
-        children.fold<double>(0, (s, c) => s + c.fixedBillAmount);
+    // 📌 الفاتورة المرجعية = مجموع الخطوط اللي **دورها** الشهر ده بس.
+    //
+    // كان بيجمع كل خطوط الحساب على طول، فحساب فيه ٣ خطوط ودور خطين بس
+    // كان بيسجّل مرجع ٥٠٠٠ والمفروض ٣٠٠٠ — والفرق ده بيغلّط تحذير «المبلغ
+    // أعلى من المتفق» ومربع المطالبة اللي بيقرا منه.
+    //
+    // لو الشهر ده مفيش حد دوره (وانت مسجّل غصب عن التحذير) بنرجع للمجموع
+    // الكامل عشان الفاتورة ما تفضلش من غير مرجع خالص.
+    final dueTotal = expectedAccountAmount(gid, month);
+    final combinedFixed = dueTotal > 0
+        ? dueTotal
+        : db.groups[i].fixedBillAmount +
+            children.fold<double>(0, (s, c) => s + c.fixedBillAmount);
     final childNote = children.isEmpty
         ? null
         : 'تشمل ${children.length} خط: ${children.map((c) => c.phone).join(' • ')}';
@@ -4357,11 +5049,15 @@ class AppProvider extends ChangeNotifier {
     final i = db.groups.indexWhere((g) => g.id == gid);
     if (i < 0) return;
     final children = db.groups.where((g) => g.parentGroupId == gid).toList();
-    final amount = db.groups[i].fixedBillAmount +
-        children.fold<double>(0, (s, c) => s + c.fixedBillAmount);
-    if (amount <= 0) return;
     final now = DateTime.now();
     final month = forMonth ?? '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    // 📌 التقديرية = مجموع اللي **دورهم** الشهر ده بس.
+    //
+    // كان بيجمع كل خطوط الحساب، فكان بيسجّل ٥٠٠٠ في شهر المفروض فيه ٣٠٠٠.
+    // ولو محدّش دوره الشهر ده الرقم بيطلع صفر والدالة بتقف — وده الصح،
+    // ماينفعش نسجّل فاتورة تقديرية في شهر مفيش فيه فاتورة أصلاً.
+    final amount = expectedAccountAmount(gid, month);
+    if (amount <= 0) return;
     final childNote = children.isEmpty
         ? null
         : 'تشمل ${children.length} خط: ${children.map((c) => c.phone).join(' • ')}';

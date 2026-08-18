@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../providers/app_provider.dart';
 import '../models/models.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/app_search.dart';
 import '../services/view_prefs.dart';
 import '../widgets/app_search_bar.dart';
@@ -284,7 +285,7 @@ class _NotesScreenState extends State<NotesScreen> {
                               color: AppColors.muted, fontSize: 14)),
                     ]),
               )
-            : ListView.builder(
+            : ResponsiveCards(
                 padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
                 itemCount: notes.length,
                 itemBuilder: (_, i) {

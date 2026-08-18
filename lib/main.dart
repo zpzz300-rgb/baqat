@@ -1,7 +1,10 @@
 // lib/main.dart
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -11,6 +14,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'providers/app_provider.dart';
 import 'services/app_theme.dart';
 import 'services/breakpoints.dart';
+import 'services/responsive.dart';
 import 'services/supabase_service.dart';
 import 'services/auth_service.dart';
 import 'screens/home_screen.dart';
@@ -86,6 +90,94 @@ class _OfflineBanner extends StatelessWidget {
   }
 }
 
+/// 🪟 يرجّع النافذة لآخر حجم ومكان سبتها عليهم (كمبيوتر بس).
+///
+/// بيحفظ في `SharedPreferences` جنب باقي إعدادات العرض — مالوش أي علاقة
+/// بقاعدة البيانات، فمستحيل يأثّر على بياناتك.
+///
+/// 🛡 لو المقاس المحفوظ بايظ أو صغير أوي، بنتجاهله ونفتح بمقاس معقول:
+/// نافذة بعرض ٣٠٠ بكسل بتخلّي البرنامج مش قابل للاستخدام ومحدش هيعرف
+/// يكبّرها بسهولة.
+Future<void> _restoreWindow() async {
+  if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) return;
+  try {
+    await windowManager.ensureInitialized();
+    final p = await SharedPreferences.getInstance();
+    final w = p.getDouble('win_w') ?? 1280;
+    final h = p.getDouble('win_h') ?? 800;
+    final ok = w >= 800 && h >= 600 && w <= 8000 && h <= 8000;
+    await windowManager.waitUntilReadyToShow(
+      WindowOptions(
+        size: ok ? Size(w, h) : const Size(1280, 800),
+        minimumSize: const Size(800, 600),
+        title: 'باقات الاتصالات',
+      ),
+      () async {
+        // لو كانت متكبّرة، ترجع متكبّرة — مش بمقاسها المحفوظ.
+        if (p.getBool('win_max') ?? false) {
+          await windowManager.maximize();
+        }
+        await windowManager.show();
+      },
+    );
+  } catch (e) {
+    debugPrint('⚠️ window restore failed: $e');
+  }
+}
+
+/// بيحفظ حجم النافذة ومكانها كل ما تتغيّر.
+class _WindowSaver extends StatefulWidget {
+  const _WindowSaver({required this.child});
+  final Widget child;
+  @override
+  State<_WindowSaver> createState() => _WindowSaverState();
+}
+
+class _WindowSaverState extends State<_WindowSaver> with WindowListener {
+  @override
+  void initState() {
+    super.initState();
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      windowManager.addListener(this);
+    }
+  }
+
+  @override
+  void dispose() {
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      windowManager.removeListener(this);
+    }
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final max = await windowManager.isMaximized();
+      await p.setBool('win_max', max);
+      // وهي متكبّرة مابنحفظش المقاس — لو حفظناه، أول ما تصغّرها بعدين
+      // هتلاقيها بمقاس الشاشة كلها.
+      if (!max) {
+        final s = await windowManager.getSize();
+        await p.setDouble('win_w', s.width);
+        await p.setDouble('win_h', s.height);
+      }
+    } catch (_) {}
+  }
+
+  @override
+  void onWindowResized() => _save();
+
+  @override
+  void onWindowMaximize() => _save();
+
+  @override
+  void onWindowUnmaximize() => _save();
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -107,6 +199,13 @@ void main() async {
     statusBarIconBrightness: Brightness.light,
   ));
 
+  // 🪟 الكمبيوتر: البرنامج يفتكر حجم النافذة ومكانها.
+  //
+  // من غير ده كنت تكبّر النافذة كل مرة تفتح البرنامج — وده مش إزعاج بس:
+  // التصميم بيتغيّر مع العرض، فكنت تفتح على مقاس صغير وتشوف نسخة الموبايل
+  // لحد ما تكبّرها بإيدك.
+  await _restoreWindow();
+
   try {
     await SupabaseService.initialize();
     // استرجاع سياق الموظف (لو كان داخل كموظف) قبل تحميل أي بيانات
@@ -123,7 +222,9 @@ void main() async {
   runApp(
     ChangeNotifierProvider(
       create: (_) => AppProvider()..init(),
-      child: const TelecomApp(),
+      // 🪟 بيحفظ حجم النافذة كل ما تتغيّر (كمبيوتر بس — على الموبايل
+      // بيعدّي من غير ما يعمل حاجة).
+      child: const _WindowSaver(child: TelecomApp()),
     ),
   );
 }
@@ -140,6 +241,10 @@ class TelecomApp extends StatelessWidget {
           debugShowCheckedModeBanner: false,
           title: 'باقات الاتصالات',
           scaffoldMessengerKey: rootMessengerKey,
+          // 🖱 الماوس يسحب القوايم زي الصباع — من غيرها الشرايط اللي
+          // بتتزحلق يمين وشمال (فلاتر الشركات، أعمدة الشهور في الجدول)
+          // بتبان مقفولة على الكمبيوتر ومش عارف توصل لآخرها.
+          scrollBehavior: const AppScrollBehavior(),
           theme: AppTheme.resolve(prov.themeStyle, prov.fontSize, prov.darkMode),
           locale: const Locale('ar', 'EG'),
           localizationsDelegates: const [

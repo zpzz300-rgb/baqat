@@ -49,9 +49,10 @@ class _GiftTemplateSheetState extends State<_GiftTemplateSheet> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Container(
-        decoration: const BoxDecoration(
-          color: Color(0xFFF8FBFF),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        decoration: BoxDecoration(
+          color: AppColors.bg,
+          borderRadius:
+              const BorderRadius.vertical(top: Radius.circular(22)),
         ),
         padding: EdgeInsets.only(
           left: 16,

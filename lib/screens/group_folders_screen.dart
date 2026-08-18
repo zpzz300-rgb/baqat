@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/app_search.dart';
 import '../widgets/app_search_bar.dart';
 
@@ -324,7 +325,7 @@ class _GroupFoldersScreenState extends State<GroupFoldersScreen> {
   }
 
   void _pickFolderForGroup(BuildContext context, AppProvider prov, Group g) {
-    showModalBottomSheet(
+    showAppSheet(
       useRootNavigator: true,
       context: context,
       isScrollControlled: true,
@@ -349,7 +350,7 @@ class _GroupFoldersScreenState extends State<GroupFoldersScreen> {
     }
 
     collect(f.id);
-    showModalBottomSheet(
+    showAppSheet(
       useRootNavigator: true,
       context: context,
       isScrollControlled: true,

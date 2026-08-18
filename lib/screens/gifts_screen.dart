@@ -11,6 +11,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/app_search.dart';
 import '../services/view_prefs.dart';
 import '../widgets/app_search_bar.dart';
@@ -477,9 +478,9 @@ class _GiftsScreenState extends State<GiftsScreen> {
 
   void _slotMenu(AppProvider p, String gid, int slot,
       List<Map<String, dynamic>> catalog) {
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
       builder: (_) => SafeArea(

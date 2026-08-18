@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/app_search.dart';
 import '../services/export_service.dart';
 import '../services/view_prefs.dart';
@@ -386,14 +387,14 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
 
   /// 📣 رسالة جماعية — شيت بكل الكفلاء، إرسال واحد ورا التاني مع علامة ✅
   void _showBroadcast(BuildContext context, AppProvider prov, List<_GuarantorEntry> entries) {
-    showModalBottomSheet(
+    showAppSheet(
       context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
       builder: (_) => _BroadcastSheet(entries: entries, prov: prov),
     );
   }
 
   void _showForm(BuildContext context, Guarantor? existing, AppProvider prov) {
-    showModalBottomSheet(
+    showAppSheet(
       context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
       builder: (_) => _GuarantorForm(existing: existing, prov: prov),
     );
@@ -646,7 +647,7 @@ class _GuarantorCard extends StatelessWidget {
           orElse: () => Group(id: '', phone: ''));
       if (g.phone.isNotEmpty) groupPhones[m.id] = g.phone;
     }
-    showModalBottomSheet(
+    showAppSheet(
       context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
       builder: (_) => _GuarantorMsgSheet(entry: entry, groupPhones: groupPhones),
     );
@@ -664,7 +665,7 @@ class _GuarantorCard extends StatelessWidget {
     if (await canLaunchUrl(Uri.parse(url))) launchUrl(Uri.parse(url));
   }
 
-  void _showBulkPay(BuildContext context) => showModalBottomSheet(
+  void _showBulkPay(BuildContext context) => showAppSheet(
     context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
     builder: (_) => _BulkPaySheet(phone: entry.phone, name: entry.name, members: entry.members),
   );
@@ -686,7 +687,7 @@ class _GuarantorCard extends StatelessWidget {
 
   void _showLogSheet(BuildContext context) {
     final id = _ensureFormalId();
-    showModalBottomSheet(
+    showAppSheet(
       context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
       builder: (_) => _GuarantorLogSheet(
         guarantorId: id, name: entry.name, members: entry.members, prov: prov),
@@ -812,7 +813,7 @@ class _MemberRow extends StatelessWidget {
     final debtMonths = hasDebt && m.price > 0 ? ((-m.balance) / m.price).ceil() : 0;
 
     return GestureDetector(
-      onTap: () => showModalBottomSheet(
+      onTap: () => showAppSheet(
         context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
         builder: (_) => MemberDrawer(member: m, group: group),
       ),
@@ -852,7 +853,7 @@ class _MemberRow extends StatelessWidget {
           // Per-member pay button
           if (hasDebt)
             GestureDetector(
-              onTap: () => showModalBottomSheet(
+              onTap: () => showAppSheet(
                 context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
                 builder: (_) => _SingleMemberPaySheet(member: m, prov: prov),
               ),

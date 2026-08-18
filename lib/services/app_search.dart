@@ -34,6 +34,35 @@ final _ws = RegExp(r'\s+');
 /// أرقام بس — عشان «0100 123» و«0100-123» يلاقوا «0100123456».
 String digitsOnly(String s) => normalizeArabic(s).replaceAll(_nonDigit, '');
 
+/// مفتاح مقارنة الموبايل: **آخر ٩ أرقام**.
+///
+/// السبب: نفس الخط بيتكتب بألف شكل — `01001234567` و`+201001234567`
+/// و`00201001234567` و`1001234567`. آخر ٩ أرقام هي الجزء اللي مابيتغيّرش
+/// في كل الأشكال دي، فبتوصّلهم كلهم لنفس الخط.
+String phoneKey(String s) {
+  final d = digitsOnly(s);
+  return d.length <= 9 ? d : d.substring(d.length - 9);
+}
+
+final _phoneRun = RegExp(r'\d{10,15}');
+
+/// 📥 بيطلّع أرقام الموبايل من أي كلام (كشف شركة، رسالة، جدول منسوخ).
+///
+/// بيدوّر على تسلسلات أرقام **متلزقة** من ١٠ لـ ١٥ رقم. بيشتغل على النص
+/// بعد تطبيع الأرقام العربية بس — مش على أرقامه ملزوقة، لأن لو لزقنا كل
+/// الأرقام الأول يبقى رقمين ورا بعض رقم واحد طويل غلط.
+///
+/// بيرجّع الأرقام زي ما لقاها، من غير تكرار.
+List<String> extractPhones(String text) {
+  final seen = <String>{};
+  final out = <String>[];
+  for (final m in _phoneRun.allMatches(normalizeArabic(text))) {
+    final raw = m.group(0)!;
+    if (seen.add(phoneKey(raw))) out.add(raw);
+  }
+  return out;
+}
+
 /// بيقسّم كلام البحث لكلمات متطبّعة (فاضي = مفيش بحث).
 List<String> searchTerms(String q) =>
     normalizeArabic(q).split(_ws).where((t) => t.isNotEmpty).toList();

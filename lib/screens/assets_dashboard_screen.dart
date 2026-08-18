@@ -10,6 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/app_search.dart';
 import '../services/view_prefs.dart';
 import '../widgets/app_search_bar.dart';
@@ -305,7 +306,7 @@ class _AssetsDashboardScreenState extends State<AssetsDashboardScreen> {
 
   // ── فتح ملف العميل (درج العميل الكامل) ────────────────────────
   void _openMemberDrawer(Member m, Group g) {
-    showModalBottomSheet(
+    showAppSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,

@@ -28,9 +28,11 @@ class _GroupNotepadSheetState extends State<_GroupNotepadSheet> {
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.85,
-      decoration: const BoxDecoration(
-        color: Color(0xFFFFFDE7),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        // 📒 لون النوتة الصفرا — بيفضل نوتة في الوضعين، بس في الليلي
+        // بيبقى أصفر غامق بدل ما يبقى ورقة بيضا ضارباً في عينك.
+        color: AppColors.dark ? const Color(0xFF2e2a16) : const Color(0xFFFFFDE7),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(children: [
         Container(

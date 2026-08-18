@@ -392,6 +392,84 @@ class ExportService {
     await Share.shareXFiles([XFile(file.path)], text: '🧾 فواتير الخطوط');
   }
 
+  /// 📊 كشف حساب لكل شركة — ورقة لكل شركة، وشهر في كل صف.
+  ///
+  /// ده اللي بتروح بيه للشركة تراجع معاهم. كل ورقة فيها: المتوقع، اللي نزل
+  /// فعلاً، الفرق، والمعترض عليه — بالشهر.
+  static Future<void> exportCompanyStatements(
+      BuildContext context, AppProvider prov) async {
+    final providers = prov.db.activeProviders;
+    if (providers.isEmpty) {
+      _snack(context, 'مفيش شركات متسجّلة على الخطوط');
+      return;
+    }
+    final excel = Excel.createExcel();
+    excel.delete('Sheet1');
+    for (final p in providers) {
+      _buildStatementSheet(excel, prov.db, p);
+    }
+    // ورقة زيادة بكل الشركات مع بعض — للنظرة السريعة
+    _buildStatementSheet(excel, prov.db, null);
+
+    final bytes = excel.save();
+    if (bytes == null) {
+      _snack(context, 'فشل إنشاء الملف');
+      return;
+    }
+    final dir = await getApplicationDocumentsDirectory();
+    final ts = intl.DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
+    final file = File('${dir.path}/telecom_statements_$ts.xlsx');
+    await file.writeAsBytes(bytes);
+    await Share.shareXFiles([XFile(file.path)], text: '📊 كشف حساب الشركات');
+  }
+
+  static const _providerNames = {
+    'vodafone': 'فودافون',
+    'etisalat': 'اتصالات',
+    'orange': 'اورنج',
+    'we': 'وي',
+  };
+
+  static void _buildStatementSheet(Excel excel, AppDB db, String? provider) {
+    final name = provider == null
+        ? 'كل الشركات'
+        : (_providerNames[provider] ?? provider);
+    final sheet = excel[name];
+    const headers = [
+      'الشهر',
+      'عدد الفواتير',
+      'المتوقع',
+      'اللي نزل',
+      'الفرق',
+      'معترض عليه',
+    ];
+    sheet.appendRow(headers.map((h) => TextCellValue(h)).toList());
+
+    final rows = db.companyStatement(provider);
+    for (final r in rows) {
+      sheet.appendRow(<CellValue>[
+        TextCellValue(r.month),
+        IntCellValue(r.bills),
+        DoubleCellValue(r.expected),
+        DoubleCellValue(r.actual),
+        DoubleCellValue(r.diff),
+        DoubleCellValue(r.dispute),
+      ]);
+    }
+
+    // صف الإجمالي — عشان ما تجمعش بإيدك وتغلط
+    if (rows.isNotEmpty) {
+      sheet.appendRow(<CellValue>[
+        TextCellValue('الإجمالي'),
+        IntCellValue(rows.fold<int>(0, (s, r) => s + r.bills)),
+        DoubleCellValue(rows.fold<double>(0, (s, r) => s + r.expected)),
+        DoubleCellValue(rows.fold<double>(0, (s, r) => s + r.actual)),
+        DoubleCellValue(rows.fold<double>(0, (s, r) => s + r.diff)),
+        DoubleCellValue(rows.fold<double>(0, (s, r) => s + r.dispute)),
+      ]);
+    }
+  }
+
   static void _buildInvoicesSheet(Excel excel, AppProvider prov) {
     final sheet = excel['الفواتير'];
     const headers = [
@@ -649,6 +727,54 @@ class ExportService {
         TextCellValue(line.notes ?? '-'),
       ]);
     }
+  }
+
+  /// 🖨 طباعة جدول الدورة — نفس اللي شايفه على الشاشة على ورق.
+  ///
+  /// بيفتح معاينة الطباعة على طول (مش بيحفظ ملف) — لأن اللي بيطبع عايز
+  /// يطبع دلوقتي، مش يدوّر على ملف بعدين.
+  ///
+  /// [rows] أول عمود اسم الحساب وبعده قيمة لكل شهر — نفس ترتيب [months].
+  static Future<void> printCycleGrid(
+    BuildContext context, {
+    required List<String> months,
+    required List<({String name, String owner, List<String> cells})> rows,
+    required String title,
+  }) async {
+    if (rows.isEmpty) {
+      _snack(context, 'مفيش بيانات للطباعة');
+      return;
+    }
+    final font = await PdfGoogleFonts.cairoRegular();
+    final fontBold = await PdfGoogleFonts.cairoBold();
+    final now = intl.DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now());
+    final pdf = pw.Document();
+
+    pdf.addPage(pw.MultiPage(
+      // 🖨 عرضي: الجدول شهور كتير، والطولي بيقصّهم.
+      pageFormat: PdfPageFormat.a4.landscape,
+      textDirection: pw.TextDirection.rtl,
+      build: (ctx) => [
+        _pdfTitle(title, now, fontBold),
+        pw.SizedBox(height: 8),
+        pw.TableHelper.fromTextArray(
+          headers: ['الحساب', 'صاحب الخط', ...months],
+          data: [
+            for (final r in rows) [r.name, r.owner, ...r.cells],
+          ],
+          headerStyle: pw.TextStyle(font: fontBold, fontSize: 8),
+          cellStyle: pw.TextStyle(font: font, fontSize: 7.5),
+          headerDecoration:
+              const pw.BoxDecoration(color: PdfColor.fromInt(0xFFe3f2fd)),
+          cellAlignment: pw.Alignment.center,
+          cellAlignments: {0: pw.Alignment.centerRight},
+          border: pw.TableBorder.all(
+              color: const PdfColor.fromInt(0xFFbbbbbb), width: 0.4),
+        ),
+      ],
+    ));
+
+    await Printing.layoutPdf(onLayout: (_) async => pdf.save());
   }
 
   // ── PDF export ───────────────────────────────────────────────────

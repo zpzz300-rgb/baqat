@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../providers/app_provider.dart';
 import '../models/models.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../widgets/common.dart';
 
 class WaitlistScreen extends StatefulWidget {
@@ -92,7 +93,7 @@ class _WaitlistScreenState extends State<WaitlistScreen> {
           Expanded(
             child: list.isEmpty
                 ? Center(child: Text('لا يوجد عملاء في الانتظار', style: GoogleFonts.cairo(color: AppColors.muted)))
-                : ListView.builder(
+                : ResponsiveCards(
                     padding: const EdgeInsets.all(12),
                     itemCount: list.length,
                     itemBuilder: (_, i) => _buildCard(context, list[i], prov),
@@ -282,7 +283,7 @@ class _WaitlistScreenState extends State<WaitlistScreen> {
   }
 
   void _showAddEdit(BuildContext context, {WaitlistEntry? entry}) {
-    showModalBottomSheet(useRootNavigator: true,
+    showAppSheet(useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,

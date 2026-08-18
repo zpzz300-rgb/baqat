@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
 
@@ -199,7 +200,7 @@ class _DeletedRow extends StatelessWidget {
     final giftCount = m.log.where((l) => (l['desc'] ?? '').toString().contains('هدية')).length;
     final delDate = prov.deletedDateOf(m);
 
-    showModalBottomSheet(useRootNavigator: true,
+    showAppSheet(useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,

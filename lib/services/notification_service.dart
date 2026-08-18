@@ -350,6 +350,55 @@ class NotificationService {
     }
   }
 
+  // ── 7c. تذكير أسبوعي بالفواتير الناقصة ──────────────────────────
+  static const _chMissingBills = 'weekly_missing_bills';
+  static const int _missingBillsId = 7150;
+
+  /// 📅 تذكير **أسبوعي** بعدد الفواتير اللي لسه ما اتسجّلتش الشهر ده.
+  ///
+  /// ليه أسبوعي مش يومي: التذكير اليومي بيتحوّل لخلفية بتتجاهلها بعد
+  /// أسبوع، وساعتها التنبيه المهم بيضيع وسطها. مرة في الأسبوع بتفضل
+  /// حاجة تاخد بالك منها.
+  ///
+  /// بيتظبّط كل ما البيانات تتغيّر، فالرقم اللي في التنبيه هو الرقم وقت
+  /// آخر فتحة للبرنامج — مش رقم قديم من أسبوع فات.
+  static Future<void> scheduleWeeklyMissingBills({
+    required int missingCount,
+    required String monthLabel,
+    int weekday = DateTime.saturday,
+    int hour = 10,
+  }) async {
+    await init();
+    await _cancel(_missingBillsId);
+    // مفيش ناقص = مفيش تذكير. التنبيه اللي بيقول «كله تمام» بيدرّبك
+    // تتجاهل التنبيهات.
+    if (missingCount <= 0) return;
+
+    final now = tz.TZDateTime.now(tz.local);
+    var when = tz.TZDateTime(tz.local, now.year, now.month, now.day, hour);
+    // أقرب يوم جاي بالرقم ده
+    while (when.weekday != weekday || !when.isAfter(now)) {
+      when = when.add(const Duration(days: 1));
+    }
+
+    await _scheduleOnce(
+      id: _missingBillsId,
+      channelId: _chMissingBills,
+      channelName: 'تذكير أسبوعي بالفواتير الناقصة',
+      title: '🧾 فيه فواتير لسه ما اتسجّلتش',
+      body: '$missingCount فاتورة في $monthLabel لسه ما اتسجّلتش — '
+          'افتح قايمة الفواتير وسجّلها',
+      when: when,
+      repeat: DateTimeComponents.dayOfWeekAndTime,
+      critical: false,
+    );
+  }
+
+  static Future<void> cancelWeeklyMissingBills() async {
+    await init();
+    await _cancel(_missingBillsId);
+  }
+
   // ── 8. General Notes (Phase 5) ─────────────────────────────────
   static int _generalNoteIdOf(String noteId) =>
       _generalNoteBase + (noteId.hashCode.abs() % 1000);

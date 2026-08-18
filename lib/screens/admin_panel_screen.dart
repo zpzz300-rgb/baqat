@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/auth_service.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/app_search.dart';
 import '../services/export_service.dart';
 
@@ -854,7 +855,7 @@ class _SubCard extends StatelessWidget {
 
   void _showTimeline(BuildContext context) {
     final history = sub['history'] is List ? List.from(sub['history']) : [];
-    showModalBottomSheet(
+    showAppSheet(
       useRootNavigator: true,
       context: context,
       isScrollControlled: true,
@@ -867,9 +868,9 @@ class _SubCard extends StatelessWidget {
           maxChildSize: 0.9,
           expand: false,
           builder: (_, sc) => Container(
-            decoration: const BoxDecoration(
-              color: Color(0xFFf8fbff),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            decoration: BoxDecoration(
+              color: AppColors.bg,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
             ),
             child: Column(children: [
               const SizedBox(height: 10),

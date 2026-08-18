@@ -6,12 +6,14 @@ import 'package:url_launcher/url_launcher.dart';
 import '../providers/app_provider.dart';
 import '../models/models.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 import '../services/app_search.dart';
 import '../services/view_prefs.dart';
 import '../widgets/app_search_bar.dart';
 import '../utils/print_helper.dart';
 import '../services/export_service.dart';
 import '../widgets/common.dart';
+import '../widgets/money_words.dart';
 
 class BillsScreen extends StatefulWidget {
   const BillsScreen({super.key});
@@ -183,7 +185,7 @@ class _BillsScreenState extends State<BillsScreen> {
       Expanded(
         child: bills.isEmpty
             ? _emptyState()
-            : ListView.builder(
+            : ResponsiveCards(
                 padding: const EdgeInsets.fromLTRB(12, 6, 12, 16),
                 itemCount: bills.length,
                 itemBuilder: (_, i) => _BillCard(
@@ -308,7 +310,7 @@ class _BillsScreenState extends State<BillsScreen> {
                 keyboardType: TextInputType.number,
                 textDirection: TextDirection.ltr,
                 decoration: InputDecoration(
-                  labelText: 'مبلغ الفاتورة الفعلية (ج)',
+                  labelText: MoneyWords.actualBillLabel,
                   labelStyle: GoogleFonts.cairo(fontSize: 13),
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12)),

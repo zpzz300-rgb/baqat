@@ -11,6 +11,7 @@ import 'package:audioplayers/audioplayers.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
+import '../services/responsive.dart';
 
 class ComplaintsSheet extends StatefulWidget {
   final Group group;
@@ -496,7 +497,7 @@ class _ComplaintsSheetState extends State<ComplaintsSheet> {
 
   // ── ADD DIALOG ───────────────────────────────────────────────
   void _showAddDialog(AppProvider prov, Group group) {
-    showModalBottomSheet(useRootNavigator: true,
+    showAppSheet(useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
