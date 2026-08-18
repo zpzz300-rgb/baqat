@@ -326,16 +326,23 @@ class _ProfitScreenState extends State<ProfitScreen>
       Bp.tablet => 5,
       Bp.desktop => 7,
     };
+    // ⚖️ نوازن الصفوف بدل ما نملا الأول ونسيب الأخير شبه فاضي.
+    //
+    // ٧ كروت والسطر بياخد ٥ → لو ملينا بالترتيب يطلع ٥ + ٢، فالصف
+    // التاني يبقى فيه كارتين وفراغ أزرق كبير جنبهم. بنقسمهم ٤ + ٣.
+    final rowCount = (items.length / perRow).ceil();
+    final balanced =
+        rowCount == 0 ? perRow : (items.length / rowCount).ceil();
     final rows = <Widget>[];
-    for (var i = 0; i < items.length; i += perRow) {
-      final slice = items.skip(i).take(perRow).toList();
+    for (var i = 0; i < items.length; i += balanced) {
+      final slice = items.skip(i).take(balanced).toList();
       rows.add(Row(children: [
         for (var j = 0; j < slice.length; j++) ...[
           if (j > 0) const SizedBox(width: 8),
           _topCard(slice[j].$1, slice[j].$2,
               positive: slice[j].$3, forceNeg: slice[j].$4),
         ],
-        for (var k = slice.length; k < perRow; k++) ...[
+        for (var k = slice.length; k < balanced; k++) ...[
           const SizedBox(width: 8),
           const Expanded(child: SizedBox.shrink()),
         ],
