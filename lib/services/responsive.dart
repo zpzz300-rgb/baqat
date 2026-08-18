@@ -312,3 +312,116 @@ class SheetShortcuts extends StatelessWidget {
     );
   }
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// 📐 الهيدر اللي بيتلمّ لما تنزل
+// ══════════════════════════════════════════════════════════════════════════
+
+/// هيدر بيصغّر لوحده أول ما تبدأ تنزل في القايمة اللي تحته، ويرجع كامل
+/// أول ما ترجع فوق.
+///
+/// **المشكلة اللي بيحلّها:** الشاشات دي مصمّمة للموبايل — كل حاجة تحت
+/// التانية. على شاشة ١٠٨٠ الهيدر والفلاتر بياخدوا ٨٢٠ بكسل، فالبيانات
+/// اللي انت فاتح البرنامج عشانها بتاخد ١٨٠ بس. الهيدر مهم وانت داخل
+/// الشاشة، بس أول ما تبدأ تقرا مابقاش لازم ياخد تلت الشاشة.
+///
+/// **ليه `NotificationListener` مش `ScrollController`:** عشان يشتغل مع أي
+/// قايمة جوّاه من غير ما نعدّل القوايم الموجودة ولا نمرّر كنترولر لكل
+/// شاشة. الشاشات دي فيها قوايم متداخلة كتير.
+class CollapsingHeader extends StatefulWidget {
+  const CollapsingHeader({
+    super.key,
+    required this.header,
+    required this.child,
+    this.threshold = 60,
+    this.enabled = true,
+  });
+
+  /// بيتنده مرتين: `collapsed = false` للشكل الكامل، و`true` للمضغوط.
+  final Widget Function(BuildContext context, bool collapsed) header;
+
+  /// المحتوى اللي بيتزحلق (قايمة، جدول، أي حاجة).
+  final Widget child;
+
+  /// بعد كام بكسل نزول يتلمّ.
+  final double threshold;
+
+  /// مطفّي = الهيدر يفضل كامل دايماً (مثلاً على الموبايل).
+  final bool enabled;
+
+  @override
+  State<CollapsingHeader> createState() => _CollapsingHeaderState();
+}
+
+class _CollapsingHeaderState extends State<CollapsingHeader> {
+  bool _collapsed = false;
+
+  bool _onScroll(ScrollNotification n) {
+    if (!widget.enabled) return false;
+    // ⚠️ الشاشات دي فيها صفوف شرايح بتتزحلق **بالعرض**. من غير الفلتر ده،
+    // أول ما تزحلق الفلاتر يمين وشمال الهيدر يتلمّ — وده مالوش أي معنى.
+    if (n.metrics.axis != Axis.vertical) return false;
+    // بنمسك القايمة الرئيسية بس. القوايم اللي جوّه الكروت بتبعت إشعارات
+    // بعمق أكبر، ولو سمعناها الهيدر هيرقص من غير سبب.
+    if (n.depth > 1) return false;
+    final want = n.metrics.pixels > widget.threshold;
+    if (want != _collapsed) setState(() => _collapsed = want);
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final collapsed = widget.enabled && _collapsed;
+    return Column(children: [
+      // AnimatedSize عشان الانتقال ما يبقاش نطة — النطة بتخلّيك تفقد
+      // مكانك في القايمة.
+      AnimatedSize(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        alignment: Alignment.topCenter,
+        child: widget.header(context, collapsed),
+      ),
+      Expanded(
+        child: NotificationListener<ScrollNotification>(
+          onNotification: _onScroll,
+          child: widget.child,
+        ),
+      ),
+    ]);
+  }
+}
+
+/// 📊 صف أرقام مضغوط — بدل ما كل رقم ياخد سطر كامل.
+///
+/// على الشاشة العريضة الأرقام بتتحط جنب بعض؛ على الموبايل بترجع تحت بعض.
+/// السبب إن الشاشة العريضة عندها عرض فاضي وطول مخنوق — بالظبط العكس.
+class CompactStatRow extends StatelessWidget {
+  const CompactStatRow({super.key, required this.children, this.spacing = 8});
+
+  final List<Widget> children;
+  final double spacing;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!context.isWide || children.length < 2) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0) SizedBox(height: spacing),
+            children[i],
+          ],
+        ],
+      );
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < children.length; i++) ...[
+          if (i > 0) SizedBox(width: spacing),
+          Expanded(child: children[i]),
+        ],
+      ],
+    );
+  }
+}

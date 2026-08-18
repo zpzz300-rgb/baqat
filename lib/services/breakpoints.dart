@@ -106,7 +106,7 @@ extension BpContext on BuildContext {
         Bp.phone => 1,
         Bp.phoneWide => 1,
         Bp.tablet => 2,
-        Bp.desktop => 2,
+        Bp.desktop => 3,
       };
 
   /// هل القايمة الجانبية ☰ تفضل مفتوحة على الجنب بدل ما تتفتح وتتقفل؟

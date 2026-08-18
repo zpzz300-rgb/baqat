@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../providers/app_provider.dart';
 import '../services/app_theme.dart';
 import '../services/responsive.dart';
+import '../services/breakpoints.dart';
 import '../services/export_service.dart';
 import '../models/models.dart';
 
@@ -51,110 +52,54 @@ class _ProfitScreenState extends State<ProfitScreen>
     // صافي الربح النهائي = ربح الفواتير + الهدايا + الإيجارات + الضيوف + النقاط التراكمية
     final finalNetProfit = billingProfit + giftProfit + rentalIncome + guestProfit + pointsProfit;
 
-    return Column(
-      children: [
-        // ── Summary strip ─────────────────────────────────────────
-        Container(
-          color: AppColors.blue2,
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-          child: Column(children: [
-            // زرار طي/فرد الملخص العلوي
-            GestureDetector(
-              onTap: () => setState(() => _summaryExpanded = !_summaryExpanded),
+    // 📐 الهيدر بيتلمّ أول ما تبدأ تنزل في القوايم، ويرجع لما ترجع فوق.
+    //
+    // الشاشة طولها ١٠٨٠ والهيدر والفلاتر بياخدوا ٨٢٠ منهم — فالبيانات
+    // اللي انت فاتح الشاشة عشانها بتاخد ١٨٠ بس. الهيدر مهم وانت داخل،
+    // بس أول ما تبدأ تقرا مابقاش لازم ياخد تلت الشاشة.
+    //
+    // على الموبايل مطفّي: الشاشة أصلاً ضيّقة والحركة بتلخبط أكتر ما تفيد.
+    return CollapsingHeader(
+      enabled: context.isWide,
+      header: (context, collapsed) => collapsed
+          // الشكل المضغوط: الرقمين المهمين بس في شريط رفيع
+          ? Container(
+              color: AppColors.blue2,
+              padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
               child: Row(children: [
-                Text('📊 الملخص المالي',
+                Text('⚖️ الرصيد',
                     style: GoogleFonts.cairo(
-                        fontSize: 13, fontWeight: FontWeight.w900, color: Colors.white)),
-                const SizedBox(width: 6),
-                Icon(_summaryExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                    color: Colors.white70, size: 20),
+                        fontSize: 11, color: Colors.white60)),
+                const SizedBox(width: 5),
+                Text('${netBalance.toStringAsFixed(0)} ج',
+                    style: GoogleFonts.cairo(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                        color: netBalance >= 0
+                            ? const Color(0xFF69F0AE)
+                            : const Color(0xFFFF5252))),
+                const SizedBox(width: 16),
+                Text('💎 الربح',
+                    style: GoogleFonts.cairo(
+                        fontSize: 11, color: Colors.white60)),
+                const SizedBox(width: 5),
+                Text('${finalNetProfit.toStringAsFixed(0)} ج',
+                    style: GoogleFonts.cairo(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                        color: finalNetProfit >= 0
+                            ? const Color(0xFF69F0AE)
+                            : const Color(0xFFFF5252))),
                 const Spacer(),
-                Text(_summaryExpanded ? 'اضغط للطي' : 'اضغط للعرض',
-                    style: GoogleFonts.cairo(fontSize: 10, color: Colors.white54)),
-              ]),
-            ),
-            const SizedBox(height: 8),
-            if (_summaryExpanded) ...[
-              Row(children: [
-                _topCard('📥 دخل شهري', monthlyIncome),
-                const SizedBox(width: 8),
-                _topCard('💰 ربح فواتير', billingProfit, positive: billingProfit >= 0),
-                const SizedBox(width: 8),
-                _topCard('🎁 ربح هدايا', giftProfit),
-              ]),
-              const SizedBox(height: 8),
-              Row(children: [
-                _topCard('🏠 إيجارات', rentalIncome),
-                const SizedBox(width: 8),
-                _topCard('🧳 ربح ضيوف', guestProfit),
-                const SizedBox(width: 8),
-                _topCard('🔴 مديونيات', -totalDebt, positive: false, forceNeg: true),
-              ]),
-              const SizedBox(height: 8),
-              Row(children: [
-                _topCard('🪙 نقاط تراكمية', pointsProfit),
-              ]),
-              const SizedBox(height: 8),
-            ],
-            // صافي الرصيد المطلوب للعمل (من العملاء فقط — بدون إيجارات)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('⚖️ صافي الرصيد المطلوب للعمل',
-                      style: GoogleFonts.cairo(fontSize: 12, color: Colors.white70)),
-                  Text(
-                    '${netBalance.toStringAsFixed(0)} ج',
+                Text('ارجع فوق تشوف الباقي',
                     style: GoogleFonts.cairo(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                      color: netBalance >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF5252),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 6),
-            // صافي الربح النهائي (ربح الفواتير + هدايا + إيجارات + ضيوف)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: finalNetProfit >= 0
-                    ? const Color(0xFF1B5E20).withValues(alpha: 0.5)
-                    : const Color(0xFFB71C1C).withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('💎 صافي الربح النهائي',
-                        style: GoogleFonts.cairo(fontSize: 12, color: Colors.white70)),
-                    Text('فواتير + هدايا + إيجارات + ضيوف + نقاط',
-                        style: GoogleFonts.cairo(fontSize: 9, color: Colors.white54)),
-                  ]),
-                  Text(
-                    '${finalNetProfit.toStringAsFixed(0)} ج',
-                    style: GoogleFonts.cairo(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                      color: finalNetProfit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF5252),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-          ]),
-        ),
-
+                        fontSize: 9.5, color: Colors.white38)),
+              ]),
+            )
+          : _fullHeader(context, netBalance, finalNetProfit, monthlyIncome,
+              billingProfit, giftProfit, rentalIncome, guestProfit,
+              totalDebt, pointsProfit),
+      child: Column(children: [
         // ── Tabs ──────────────────────────────────────────────────
         Material(
           color: AppColors.blue2,
@@ -203,7 +148,139 @@ class _ProfitScreenState extends State<ProfitScreen>
             ],
           ),
         ),
-      ],
+      ]),
+    );
+  }
+
+  /// الهيدر الكامل — بيبان وانت فوق الشاشة.
+  ///
+  /// الأرقام كانت في تلات صفوف ثابتة والرقمين الكبار كل واحد في سطر
+  /// كامل. على شاشة عرضها ١٩٢٠ ده معناه إن نص السطر فاضي والطول متاكل.
+  Widget _fullHeader(
+    BuildContext context,
+    double netBalance,
+    double finalNetProfit,
+    double monthlyIncome,
+    double billingProfit,
+    double giftProfit,
+    double rentalIncome,
+    double guestProfit,
+    double totalDebt,
+    double pointsProfit,
+  ) {
+    return Container(
+      color: AppColors.blue2,
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: Column(children: [
+        // زرار طي/فرد الملخص العلوي
+        GestureDetector(
+          onTap: () => setState(() => _summaryExpanded = !_summaryExpanded),
+          child: Row(children: [
+            Text('📊 الملخص المالي',
+                style: GoogleFonts.cairo(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white)),
+            const SizedBox(width: 6),
+            Icon(
+                _summaryExpanded
+                    ? Icons.keyboard_arrow_up
+                    : Icons.keyboard_arrow_down,
+                color: Colors.white70,
+                size: 20),
+            const Spacer(),
+            Text(_summaryExpanded ? 'اضغط للطي' : 'اضغط للعرض',
+                style: GoogleFonts.cairo(fontSize: 10, color: Colors.white54)),
+          ]),
+        ),
+        const SizedBox(height: 8),
+        if (_summaryExpanded) ...[
+          // 📐 الكروت السبعة بيتوزّعوا حسب العرض — سطر واحد على الكمبيوتر
+          // وتلاتة في السطر على الموبايل، بدل تلات صفوف ثابتة دايماً.
+          _topCardsWrap(context, [
+            ('📥 دخل شهري', monthlyIncome, true, false),
+            ('💰 ربح فواتير', billingProfit, billingProfit >= 0, false),
+            ('🎁 ربح هدايا', giftProfit, true, false),
+            ('🏠 إيجارات', rentalIncome, true, false),
+            ('🧳 ربح ضيوف', guestProfit, true, false),
+            ('🔴 مديونيات', -totalDebt, false, true),
+            ('🪙 نقاط تراكمية', pointsProfit, true, false),
+          ]),
+          const SizedBox(height: 8),
+        ],
+        // 📐 الرقمين الكبار جنب بعض على الشاشة العريضة.
+        CompactStatRow(spacing: 8, children: [
+          // صافي الرصيد المطلوب للعمل (من العملاء فقط — بدون إيجارات)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Flexible(
+                  child: Text('⚖️ صافي الرصيد المطلوب للعمل',
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.cairo(
+                          fontSize: 12, color: Colors.white70)),
+                ),
+                const SizedBox(width: 6),
+                Text('${netBalance.toStringAsFixed(0)} ج',
+                    style: GoogleFonts.cairo(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      color: netBalance >= 0
+                          ? const Color(0xFF69F0AE)
+                          : const Color(0xFFFF5252),
+                    )),
+              ],
+            ),
+          ),
+          // صافي الربح النهائي (ربح الفواتير + هدايا + إيجارات + ضيوف)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: finalNetProfit >= 0
+                  ? const Color(0xFF1B5E20).withValues(alpha: 0.5)
+                  : const Color(0xFFB71C1C).withValues(alpha: 0.4),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Flexible(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('💎 صافي الربح النهائي',
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.cairo(
+                                fontSize: 12, color: Colors.white70)),
+                        Text('فواتير + هدايا + إيجارات + ضيوف + نقاط',
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.cairo(
+                                fontSize: 9, color: Colors.white54)),
+                      ]),
+                ),
+                const SizedBox(width: 6),
+                Text('${finalNetProfit.toStringAsFixed(0)} ج',
+                    style: GoogleFonts.cairo(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      color: finalNetProfit >= 0
+                          ? const Color(0xFF69F0AE)
+                          : const Color(0xFFFF5252),
+                    )),
+              ],
+            ),
+          ),
+        ]),
+        const SizedBox(height: 8),
+      ]),
     );
   }
 
@@ -230,6 +307,46 @@ class _ProfitScreenState extends State<ProfitScreen>
         ]),
       ),
     );
+  }
+
+  /// 📐 كروت الملخص في صفوف حسب مقاس الشاشة.
+  ///
+  /// كانت تلات صفوف ثابتة مهما كان العرض. على ١٩٢٠ ده بياكل ١٥٠ بكسل من
+  /// الطول من غير داعي — والطول ده هو اللي البيانات محتاجاه.
+  ///
+  /// الصف الناقص بيتكمّل بفراغات عشان عرض الكروت يفضل واحد في كل الصفوف؛
+  /// من غير كده الصف الأخير بيطلع كروته عريضة والشكل يبوظ.
+  Widget _topCardsWrap(
+    BuildContext context,
+    List<(String, double, bool, bool)> items,
+  ) {
+    final perRow = switch (context.bp) {
+      Bp.phone => 3,
+      Bp.phoneWide => 4,
+      Bp.tablet => 5,
+      Bp.desktop => 7,
+    };
+    final rows = <Widget>[];
+    for (var i = 0; i < items.length; i += perRow) {
+      final slice = items.skip(i).take(perRow).toList();
+      rows.add(Row(children: [
+        for (var j = 0; j < slice.length; j++) ...[
+          if (j > 0) const SizedBox(width: 8),
+          _topCard(slice[j].$1, slice[j].$2,
+              positive: slice[j].$3, forceNeg: slice[j].$4),
+        ],
+        for (var k = slice.length; k < perRow; k++) ...[
+          const SizedBox(width: 8),
+          const Expanded(child: SizedBox.shrink()),
+        ],
+      ]));
+    }
+    return Column(children: [
+      for (var i = 0; i < rows.length; i++) ...[
+        if (i > 0) const SizedBox(height: 8),
+        rows[i],
+      ],
+    ]);
   }
 }
 
