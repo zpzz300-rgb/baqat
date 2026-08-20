@@ -1010,8 +1010,9 @@ class _BulkPaySheet extends StatefulWidget {
 class _BulkPaySheetState extends State<_BulkPaySheet> {
   final _amtCtrl  = TextEditingController();
   final _noteCtrl = TextEditingController();
-  String _mode = 'debt';
+  String _mode = 'proportional';
   Map<String, double>? _preview;
+  double _leftover = 0;
 
   @override
   void dispose() { _amtCtrl.dispose(); _noteCtrl.dispose(); super.dispose(); }
@@ -1040,15 +1041,15 @@ class _BulkPaySheetState extends State<_BulkPaySheet> {
         Wrap(spacing: 8, runSpacing: 8, children: [
           _quickBtn('شهر للكل\n${monthlyTotal.toStringAsFixed(0)} ج', () {
             _amtCtrl.text = monthlyTotal.toStringAsFixed(0);
-            setState(() { _mode = 'price'; _preview = null; });
+            setState(() { _mode = 'proportional'; _preview = null; });
           }),
           _quickBtn('سداد كامل\n${totalDebt.toStringAsFixed(0)} ج', () {
             _amtCtrl.text = totalDebt.toStringAsFixed(0);
-            setState(() { _mode = 'full'; _preview = null; });
+            setState(() { _mode = 'proportional'; _preview = null; });
           }),
           _quickBtn('نصف الديون\n${(totalDebt / 2).toStringAsFixed(0)} ج', () {
             _amtCtrl.text = (totalDebt / 2).toStringAsFixed(0);
-            setState(() { _mode = 'debt'; _preview = null; });
+            setState(() { _mode = 'proportional'; _preview = null; });
           }),
         ]),
         const SizedBox(height: 12),
@@ -1067,10 +1068,9 @@ class _BulkPaySheetState extends State<_BulkPaySheet> {
         DropdownButtonFormField<String>(
           initialValue: _mode, decoration: const InputDecoration(),
           items: [
-            DropdownMenuItem(value: 'equal', child: Text('توزيع متساوٍ على الكل', style: GoogleFonts.cairo(fontSize: 13))),
-            DropdownMenuItem(value: 'debt',  child: Text('حسب المديونية (المدينين فقط)', style: GoogleFonts.cairo(fontSize: 13))),
-            DropdownMenuItem(value: 'price', child: Text('حسب سعر الاشتراك', style: GoogleFonts.cairo(fontSize: 13))),
-            DropdownMenuItem(value: 'full',  child: Text('سداد كامل لكل المدينين', style: GoogleFonts.cairo(fontSize: 13))),
+            DropdownMenuItem(value: 'proportional', child: Text('بالتناسب مع الدين — كلهم ينزلوا بنفس النسبة', style: GoogleFonts.cairo(fontSize: 13))),
+            DropdownMenuItem(value: 'oldestFirst', child: Text('واحد واحد — يخلّص الأكبر ديناً الأول', style: GoogleFonts.cairo(fontSize: 13))),
+            DropdownMenuItem(value: 'guarantorOnly', child: Text('على الكفيل بس — من غير ما تتوزّع', style: GoogleFonts.cairo(fontSize: 13))),
           ],
           onChanged: (v) => setState(() { _mode = v!; _preview = null; }),
         ),
@@ -1104,6 +1104,26 @@ class _BulkPaySheetState extends State<_BulkPaySheet> {
                   ]),
                 );
               }),
+              // ⚠️ الزيادة لازم تبان: لو دفعت أكتر من الدين، الفرق ده
+              // بيفضل ليك عند الكفيل — مش بيتحط رصيد لناس ماعليهاش حاجة
+              // زي ما كان بيحصل قبل كده.
+              if (_leftover > 0) ...[
+                const Divider(height: 14),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Text('زيادة تفضل عند الكفيل',
+                      style: GoogleFonts.cairo(
+                          fontSize: 12, fontWeight: FontWeight.w700)),
+                  Text('${_leftover.toStringAsFixed(0)} ج',
+                      style: GoogleFonts.cairo(
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.blue3,
+                          fontSize: 13)),
+                ]),
+              ],
+              if (_preview!.isEmpty && _leftover == 0)
+                Text('مفيش حد عليه دين تحت الكفيل ده',
+                    style: GoogleFonts.cairo(
+                        fontSize: 12, color: AppColors.muted)),
             ]),
           ),
         ],
@@ -1123,10 +1143,15 @@ class _BulkPaySheetState extends State<_BulkPaySheet> {
             onPressed: () {
               final amt = double.tryParse(_amtCtrl.text.trim()) ?? 0;
               if (amt <= 0) return;
-              prov.guarantorBulkPay(widget.phone, amt, _mode, _noteCtrl.text.trim());
+              final n = prov.payGuarantor(widget.phone, amt,
+                  mode: _mode, note: _noteCtrl.text.trim());
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text('✅ تم توزيع ${amt.toStringAsFixed(0)} ج', style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+                content: Text(
+                    n == 0
+                        ? '✅ اتسجّلت ${amt.toStringAsFixed(0)} ج على الكفيل'
+                        : '✅ اتوزّعت ${amt.toStringAsFixed(0)} ج على $n عميل',
+                    style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
                 backgroundColor: const Color(0xFF0d1b2e),
                 behavior: SnackBarBehavior.floating,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -1150,33 +1175,19 @@ class _BulkPaySheetState extends State<_BulkPaySheet> {
     ),
   );
 
+  /// المعاينة بتستخدم **نفس** الحساب اللي بيتنفّذ.
+  ///
+  /// قبل كده كان في نسختين من منطق التوزيع — واحدة للمعاينة وواحدة
+  /// للتنفيذ. يعني ممكن تشوف معاينة وتأكّد ويطلع غير اللي شفته.
   void _buildPreview() {
     final amt = double.tryParse(_amtCtrl.text.trim()) ?? 0;
     if (amt <= 0) return;
-    final Map<String, double> dist = {};
-    final debtors = widget.members.where((m) => m.balance < 0).toList();
-    if (_mode == 'equal') {
-      final share = amt / widget.members.length;
-      for (final m in widget.members) {
-        dist[m.id] = share;
-      }
-    } else if (_mode == 'debt') {
-      if (debtors.isEmpty) return;
-      final share = amt / debtors.length;
-      for (final m in debtors) {
-        dist[m.id] = share;
-      }
-    } else if (_mode == 'price') {
-      final total = widget.members.fold(0.0, (s, m) => s + m.price);
-      for (final m in widget.members) {
-        dist[m.id] = total > 0 ? (m.price / total) * amt : 0;
-      }
-    } else {
-      for (final m in debtors) {
-        dist[m.id] = -m.balance;
-      }
-    }
-    setState(() => _preview = dist);
+    final prov = context.read<AppProvider>();
+    final r = prov.db.splitGuarantorPayment(widget.phone, amt, mode: _mode);
+    setState(() {
+      _preview = r.shares;
+      _leftover = r.leftover;
+    });
   }
 }
 

@@ -1850,6 +1850,88 @@ class AppDB {
   double get totalDebt =>
       members.fold(0, (s, m) => s + (m.balance < 0 ? -m.balance : 0));
 
+  // ═══════════════════════════════════════════════════════════════════
+  // 🤝 توزيع دفعة الكفيل
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// 🤝 يوزّع دفعة الكفيل على العملاء اللي تحته.
+  ///
+  /// **المشكلة اللي بيحلّها:** التوزيع القديم كان بيقسم المبلغ **بالتساوي**
+  /// على كل الأعضاء — حتى اللي ماعليهوش حاجة. فلو تلاتة تحت الكفيل، واحد
+  /// منهم مسدّد، ودفعت ١٦٥٠: الـ٥٥٠ بتاعته بتتحوّل **رصيد ليه** بدل ما
+  /// تروح لدين حد تاني. يعني تدفع ٣٣٠٠ والدين ينزل ١٥٩٠ بس، والباقي
+  /// يتحوّل أرصدة لناس ماعليهاش حاجة. ده اللي كان بيلخبط الحسابات.
+  ///
+  /// دلوقتي:
+  ///   • **اللي ماعليهوش دين مابياخدش حاجة** — أول قاعدة.
+  ///   • كل مدين بياخد **بنسبة دينه** من المبلغ.
+  ///   • **محدش بياخد أكتر من اللي عليه** — الزيادة بترجع للباقي.
+  ///   • لو فضلت زيادة بعد ما الكل خلص، بترجع في `leftover` عشان تفضل
+  ///     عند الكفيل بدل ما تتحط رصيد لحد.
+  ///
+  /// [mode]:
+  ///   `proportional` — بالتناسب مع الدين (الافتراضي)
+  ///   `oldestFirst`  — يخلّص واحد واحد بالترتيب
+  ///
+  /// بيرجّع التوزيع لكل عميل + الزيادة. **مابيغيّرش أي حاجة** — الحساب بس،
+  /// عشان تقدر تعرضه معاينة قبل ما تأكّد.
+  ({Map<String, double> shares, double leftover}) splitGuarantorPayment(
+    String guarantorPhone,
+    double amount, {
+    String mode = 'proportional',
+  }) {
+    if (amount <= 0) return (shares: <String, double>{}, leftover: 0);
+
+    // المدينين بس — ترتيبهم بالأكبر ديناً عشان `oldestFirst` يبقى ثابت
+    final debtors = members
+        .where((m) => m.guarantorPhone == guarantorPhone && m.balance < 0)
+        .toList()
+      ..sort((a, b) => a.balance.compareTo(b.balance));
+
+    if (debtors.isEmpty) {
+      return (shares: <String, double>{}, leftover: amount);
+    }
+
+    final debts = {for (final m in debtors) m.id: -m.balance};
+    final totalDebt = debts.values.fold<double>(0, (s, v) => s + v);
+
+    // المبلغ أكبر من الدين كله؟ كل واحد ياخد دينه والباقي يفضل عند الكفيل
+    if (amount >= totalDebt) {
+      return (shares: debts, leftover: amount - totalDebt);
+    }
+
+    final shares = <String, double>{};
+
+    if (mode == 'oldestFirst') {
+      var rest = amount;
+      for (final m in debtors) {
+        if (rest <= 0) break;
+        final take = rest >= debts[m.id]! ? debts[m.id]! : rest;
+        shares[m.id] = take;
+        rest -= take;
+      }
+      return (shares: shares, leftover: 0);
+    }
+
+    // بالتناسب: كل واحد ياخد نسبة دينه من الإجمالي.
+    //
+    // ⚠️ آخر واحد بياخد **الباقي** بدل حصته المحسوبة. السبب: القسمة
+    // بتسيب كسور (٣٣.٣٣٣...)، ولو جمعنا الحصص المقرّبة الناتج بيطلع
+    // ناقص أو زايد قرش أو اتنين عن المبلغ اللي دفعته فعلاً — والفرق ده
+    // بيفضل يتراكم مع كل دفعة لحد ما الأرقام تبقى مش مطابقة لأي حاجة.
+    var assigned = 0.0;
+    for (var i = 0; i < debtors.length; i++) {
+      final m = debtors[i];
+      final isLast = i == debtors.length - 1;
+      final share = isLast
+          ? amount - assigned
+          : (debts[m.id]! / totalDebt) * amount;
+      shares[m.id] = share;
+      assigned += share;
+    }
+    return (shares: shares, leftover: 0);
+  }
+
   /// إجمالي المديونية لشركات الاتصالات:
   /// النظام الجديد: مجموع المتبقي من CompanyBills
   /// + الميراث: مجموعات بدون CompanyBills تستخدم billDebt

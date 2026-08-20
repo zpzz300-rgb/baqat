@@ -3258,6 +3258,146 @@ class AppProvider extends ChangeNotifier {
   }
 
   // ─── GUARANTOR BULK PAY ──────────────────────────────────────
+  /// 🤝 دفعة كفيل — بتتوزّع على العملاء **و** بتتسجّل في سجل الكفيل.
+  ///
+  /// **الغلطة القديمة:** كان في دالتين منفصلتين — واحدة بتوزّع على العملاء
+  /// من غير ما تكتب في السجل، وواحدة بتكتب في السجل. فتدفع من كارت الكفيل
+  /// وتفتح السجل تلاقيه فاضي، وتفتكر إن الدفعة ضاعت.
+  ///
+  /// دلوقتي دالة واحدة بتعمل الاتنين، وبتحط **رقم دفعة** (`batchId`) على
+  /// قيد الكفيل وعلى كل قيد عميل — عشان التراجع يعرف يرجّع بالظبط اللي
+  /// اتخصم، ولا جنيه غيره.
+  ///
+  /// [mode]: `proportional` (الافتراضي) · `oldestFirst` · `guarantorOnly`
+  /// (تتسجّل على الكفيل بس من غير ما تلمس العملاء).
+  ///
+  /// بيرجّع كام عميل اتأثّر.
+  int payGuarantor(
+    String guarantorPhone,
+    double amount, {
+    String mode = 'proportional',
+    String note = '',
+  }) {
+    if (amount <= 0) return 0;
+    final gi = db.guarantors.indexWhere((g) => g.phone == guarantorPhone);
+    if (gi < 0) return 0;
+
+    final batchId = 'gp${DateTime.now().microsecondsSinceEpoch}';
+    var shares = <String, double>{};
+    var leftover = amount;
+
+    if (mode != 'guarantorOnly') {
+      final r = db.splitGuarantorPayment(guarantorPhone, amount, mode: mode);
+      shares = r.shares;
+      leftover = r.leftover;
+    }
+
+    final lines = <String>[];
+    for (final e in shares.entries) {
+      if (e.value <= 0) continue;
+      final mi = db.members.indexWhere((m) => m.id == e.key);
+      if (mi < 0) continue;
+      db.members[mi].balance += e.value;
+      db.members[mi].log.insert(0, {
+        'date': _today(),
+        'desc': '🤝 سداد عن طريق الكفيل ${db.guarantors[gi].name}'
+            '${note.isNotEmpty ? ' · $note' : ''}',
+        'amount': e.value,
+        'type': 'guarantor_pay',
+        'batchId': batchId,
+      });
+      lines.add('${db.members[mi].name}: ${e.value.toStringAsFixed(0)}');
+    }
+
+    // قيد واحد في سجل الكفيل بالمبلغ الكامل + التفصيل.
+    // المبلغ الكامل مش المتوزّع بس: انت دفعت ده فعلاً، والزيادة لو فيه
+    // بتفضل ليك عنده — لو سجّلنا المتوزّع بس تبقى الزيادة اختفت.
+    db.guarantors[gi].log.insert(0, {
+      'date': _today(),
+      'ts': DateTime.now().toIso8601String(),
+      'desc': '💰 دفعة ${amount.toStringAsFixed(0)} ج'
+          '${note.isNotEmpty ? ' · $note' : ''}'
+          '${lines.isEmpty ? ' · مسجّلة على الكفيل' : ' · ${lines.join(' · ')}'}'
+          '${leftover > 0 ? ' · زيادة ${leftover.toStringAsFixed(0)} ج عند الكفيل' : ''}',
+      'amount': amount,
+      'type': 'payment',
+      'batchId': batchId,
+      'mode': mode,
+      'leftover': leftover,
+      'shares': shares.map((k, v) => MapEntry(k, v)),
+    });
+
+    _addLog(null, 'pay',
+        'دفعة كفيل ${amount.toStringAsFixed(0)} ج - ${db.guarantors[gi].name}'
+        ' (${shares.length} عميل)',
+        targetId: db.guarantors[gi].id, targetType: 'guarantor');
+    save();
+    notifyListeners();
+    return shares.length;
+  }
+
+  /// ↩️ يرجّع دفعة كفيل زي ما كانت — الفلوس ترجع دين على العملاء تاني.
+  ///
+  /// **الغلطة القديمة:** المسح كان بيشيل سطر السجل بس، والفلوس تفضل
+  /// متخصومة من العملاء. يعني السطر يختفي من قدامك وانت فاكر إنك رجّعت،
+  /// والأرصدة تفضل غلط للأبد.
+  ///
+  /// بيرجّع عدد العملاء اللي رجعوا، أو -1 لو القيد مش دفعة قابلة للتراجع.
+  int undoGuarantorPayment(String guarantorId, int index) {
+    final gi = db.guarantors.indexWhere((g) => g.id == guarantorId);
+    if (gi < 0 || index < 0 || index >= db.guarantors[gi].log.length) return -1;
+    final entry = db.guarantors[gi].log[index];
+    final batchId = entry['batchId'] as String?;
+
+    var n = 0;
+    if (batchId != null) {
+      // بنمشي على العملاء ونشيل القيد اللي عليه نفس الرقم — ونرجّع
+      // مبلغه بالظبط. مابنعتمدش على الحصص المتسجّلة في قيد الكفيل عشان
+      // لو العميل اتمسح أو اتعدّل، القيد بتاعه هو المصدر الأصح.
+      for (final m in db.members) {
+        final k = m.log.indexWhere((l) => l['batchId'] == batchId);
+        if (k < 0) continue;
+        final amt = (m.log[k]['amount'] as num?)?.toDouble() ?? 0;
+        m.balance -= amt;
+        m.log.removeAt(k);
+        n++;
+      }
+    }
+
+    db.guarantors[gi].log.removeAt(index);
+    _addLog(null, 'delete',
+        'تراجع عن دفعة كفيل ${db.guarantors[gi].name} — رجع $n عميل',
+        targetId: guarantorId, targetType: 'guarantor');
+    save();
+    notifyListeners();
+    return n;
+  }
+
+  /// 🔎 دفعات الكفيل القديمة اللي اتعملت بالنظام الغلط.
+  ///
+  /// دي القيود اللي مالهاش `batchId` — يعني اتعملت قبل ما نربط الدفعة
+  /// بقيود العملاء، فمفيش طريقة نرجّعها أوتوماتيك. بنوريها للمستخدم
+  /// عشان يشوفها ويقرر.
+  List<({String guarantorId, String guarantorName, int index, double amount, String date})>
+      legacyGuarantorPayments() {
+    final out = <({String guarantorId, String guarantorName, int index, double amount, String date})>[];
+    for (final g in db.guarantors) {
+      for (var i = 0; i < g.log.length; i++) {
+        final e = g.log[i];
+        if (e['type'] != 'payment') continue;
+        if (e['batchId'] != null) continue;
+        out.add((
+          guarantorId: g.id,
+          guarantorName: g.name,
+          index: i,
+          amount: (e['amount'] as num?)?.toDouble() ?? 0,
+          date: (e['date'] ?? '').toString(),
+        ));
+      }
+    }
+    return out;
+  }
+
   void guarantorBulkPay(String guarantorPhone, double totalAmount, String mode, String note) {
     final members = db.members.where((m) => m.guarantorPhone == guarantorPhone).toList();
     if (members.isEmpty) return;
